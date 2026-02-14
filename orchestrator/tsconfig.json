@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": "src",
+    "paths": {
+      "@core/*": ["core/*"],
+      "@agents/*": ["agents/*"],
+      "@mesh/*": ["mesh/*"],
+      "@swarm/*": ["swarm/*"],
+      "@floating/*": ["floating/*"],
+      "@floating-chat/*": ["floating_chat/*"],
+      "@ml/*": ["ml/*"],
+      "@bridge/*": ["bridge/*"],
+      "@handlers/*": ["handlers/*"],
+      "@security/*": ["security/*"],
+      "@utils/*": ["utils/*"],
+      "@contracts/*": ["contracts/*"],
+      "@config/*": ["config/*"],
+      "@services/*": ["services/*"],
+      "@github/*": ["github/*"],
+      "@context/*": ["context/*"],
+      "@federation/*": ["federation/*"],
+      "@stream/*": ["stream/*"],
+      "@types/*": ["types/*"],
+      "@server": ["server/index"]
+    },
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

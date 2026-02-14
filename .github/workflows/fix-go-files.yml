@@ -1,0 +1,33 @@
+name: Normalize Go Imports
+
+on:
+  workflow_dispatch:   # allows manual trigger
+  push:                # runs when you push code
+    branches:
+      - main
+
+jobs:
+  fix-go-files:
+    runs-on: windows-latest   # use Windows runner for PowerShell
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell replacement
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter *.go |
+          ForEach-Object {
+              (Get-Content $_.FullName) `
+                  -replace 'NeuroEdge/', 'neuroedge/' `
+                  -replace 'neurondge/', 'neuroedge/' |
+              Set-Content $_.FullName
+          }
+
+      - name: Commit changes back
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add .
+          git commit -m "Normalize Go import paths"
+          git push

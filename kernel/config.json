@@ -1,0 +1,7 @@
+{
+  "mesh_enabled": true,
+  "wdc_enabled": true,
+  "idverse_enabled": true,
+  "log_level": "DEBUG",
+  "max_concurrent": 10
+}

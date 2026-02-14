@@ -1,0 +1,30 @@
+{
+  "name": "neuroedge-orchestrator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon -r tsconfig-paths/register src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "express": "^4.19.2",
+    "uuid": "^9.0.1",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.9.3",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "nodemon": "^3.1.11"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

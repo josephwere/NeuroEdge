@@ -1,0 +1,25 @@
+name: Run PowerShell Script
+
+on:
+  workflow_dispatch:   # allows manual trigger
+  push:                # runs when you push code
+    branches:
+      - main
+
+jobs:
+  run-script:
+    runs-on: windows-latest   # use Windows runner for PowerShell
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell script
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter *.go |
+          ForEach-Object {
+            (Get-Content $_.FullName) `
+              -replace 'NeuroEdge/', 'neuroedge/' `
+              -replace 'neurondge/', 'neuroedge/' |
+            Set-Content $_.FullName
+          }

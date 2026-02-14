@@ -1,0 +1,49 @@
+#neuroedge-boot {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at top, #1e1e2f, #0b0b14);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  font-family: system-ui, sans-serif;
+}
+
+.boot-container {
+  width: 320px;
+  text-align: center;
+}
+
+.boot-logo {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.boot-status {
+  font-size: 0.9rem;
+  opacity: 0.85;
+  margin-bottom: 1rem;
+}
+
+.boot-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.boot-progress {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3a3aff, #6be4ff);
+  transition: width 0.25s ease;
+}
+
+.boot-percent {
+  margin-top: 0.6rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}

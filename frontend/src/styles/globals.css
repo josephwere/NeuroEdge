@@ -1,0 +1,16 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f5f6fa;
+  color: #111827;
+}
+
+button {
+  font-family: inherit;
+}
