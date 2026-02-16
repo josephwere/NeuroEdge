@@ -3,7 +3,7 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 try:
@@ -61,6 +61,40 @@ def _extract_text(req: InferRequest) -> str:
     return str(payload) if payload else ""
 
 
+def _coerce_infer_request(raw: Any) -> InferRequest:
+    if isinstance(raw, InferRequest):
+        return raw
+
+    if raw is None:
+        return InferRequest()
+
+    if isinstance(raw, str):
+        return InferRequest(text=raw)
+
+    if isinstance(raw, dict):
+        text = raw.get("text") if isinstance(raw.get("text"), str) else ""
+        payload = raw.get("payload")
+        context = raw.get("context")
+
+        if not isinstance(payload, dict):
+            payload = {}
+        if not isinstance(context, dict):
+            context = {}
+
+        if not text:
+            for key in ("input", "message", "command"):
+                if isinstance(raw.get(key), str):
+                    text = raw[key]
+                    break
+
+        if not payload:
+            payload = {k: v for k, v in raw.items() if k not in ("text", "payload", "context")}
+
+        return InferRequest(text=text, payload=payload, context=context)
+
+    return InferRequest(text=str(raw))
+
+
 def _fallback_action(text: str) -> str:
     lower = text.lower()
     if any(k in lower for k in ["error", "fail", "exception", "traceback"]):
@@ -95,8 +129,9 @@ def ready() -> Dict[str, Any]:
 
 
 @app.post("/infer")
-def infer(req: InferRequest) -> Dict[str, Any]:
-    text = _extract_text(req).strip()
+def infer(req: Any = Body(default=None)) -> Dict[str, Any]:
+    parsed_req = _coerce_infer_request(req)
+    text = _extract_text(parsed_req).strip()
     if not text:
         text = "empty_input"
 

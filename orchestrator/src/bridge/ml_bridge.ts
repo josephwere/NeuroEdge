@@ -63,9 +63,32 @@ export class MLBridge {
     });
   }
 
+  private normalizePayload(payload: any): Record<string, any> {
+    if (typeof payload === "string") {
+      return { text: payload, payload: {}, context: {} };
+    }
+    if (payload && typeof payload === "object") {
+      const text =
+        typeof payload.text === "string"
+          ? payload.text
+          : typeof payload.input === "string"
+            ? payload.input
+            : typeof payload.message === "string"
+              ? payload.message
+              : "";
+      return {
+        text,
+        payload,
+        context: payload.context && typeof payload.context === "object" ? payload.context : {},
+      };
+    }
+    return { text: String(payload ?? ""), payload: {}, context: {} };
+  }
+
   async forwardToML(payload: any) {
+    const body = this.normalizePayload(payload);
     try {
-      const res = await axios.post(`${this.baseUrl}/infer`, payload);
+      const res = await axios.post(`${this.baseUrl}/infer`, body);
       this.eventBus.emit("ml:response", res.data);
     } catch {
       this.logger.warn("ML_BRIDGE", "ML request failed");
