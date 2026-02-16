@@ -22,6 +22,12 @@ func withRequestLogging(next http.HandlerFunc) http.HandlerFunc {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next(rec, r)
+
+		// Avoid noisy routine health polling logs unless there is an error.
+		if shouldSkipRequestLog(r.URL.Path) && rec.status < http.StatusBadRequest {
+			return
+		}
+
 		log.Printf(
 			"method=%s path=%s status=%d duration=%s ip=%s request_id=%s",
 			r.Method,
@@ -31,5 +37,14 @@ func withRequestLogging(next http.HandlerFunc) http.HandlerFunc {
 			clientIP(r),
 			rec.Header().Get("X-Request-ID"),
 		)
+	}
+}
+
+func shouldSkipRequestLog(path string) bool {
+	switch path {
+	case "/health", "/healthz", "/readyz":
+		return true
+	default:
+		return false
 	}
 }
