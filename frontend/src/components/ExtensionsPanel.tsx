@@ -116,8 +116,8 @@ const pageStyle: React.CSSProperties = {
   padding: "1.5rem",
   height: "100%",
   overflowY: "auto",
-  color: "var(--ne-text)",
-  background: "linear-gradient(180deg, rgba(37, 99, 235, 0.08) 0%, var(--ne-bg) 60%)",
+  color: "#e2e8f0",
+  background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
   fontFamily: "'Space Grotesk', system-ui, sans-serif",
 };
 
@@ -134,7 +134,7 @@ const eyebrowStyle: React.CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: "0.2em",
   fontSize: "0.65rem",
-  color: "var(--ne-muted)",
+  color: "#94a3b8",
 };
 
 const titleStyle: React.CSSProperties = {
@@ -144,7 +144,7 @@ const titleStyle: React.CSSProperties = {
 
 const subtitleStyle: React.CSSProperties = {
   margin: 0,
-  color: "var(--ne-muted)",
+  color: "#94a3b8",
 };
 
 const primaryActionStyle: React.CSSProperties = {
@@ -165,9 +165,9 @@ const listStyle: React.CSSProperties = {
 const cardStyle = (active: boolean): React.CSSProperties => ({
   padding: "1rem",
   borderRadius: 16,
-  border: "1px solid rgba(148, 163, 184, 0.25)",
-  background: active ? "rgba(37, 99, 235, 0.12)" : "var(--ne-surface)",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.15)",
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  background: active ? "rgba(37, 99, 235, 0.18)" : "rgba(15, 23, 42, 0.7)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
@@ -181,19 +181,19 @@ const cardTitleStyle: React.CSSProperties = {
 
 const cardSubtitleStyle: React.CSSProperties = {
   fontSize: "0.85rem",
-  color: "var(--ne-muted)",
+  color: "#94a3b8",
 };
 
 const cardMetaStyle: React.CSSProperties = {
   fontSize: "0.75rem",
-  color: "var(--ne-muted)",
+  color: "#94a3b8",
 };
 
 const statusPillStyle = (active: boolean): React.CSSProperties => ({
   padding: "0.2rem 0.6rem",
   borderRadius: 999,
   background: active ? "rgba(16, 185, 129, 0.2)" : "rgba(148, 163, 184, 0.2)",
-  color: active ? "#10b981" : "var(--ne-muted)",
+  color: active ? "#10b981" : "#94a3b8",
   fontSize: "0.7rem",
   letterSpacing: "0.08em",
   textTransform: "uppercase",
