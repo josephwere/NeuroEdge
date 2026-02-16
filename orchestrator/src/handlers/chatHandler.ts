@@ -2,6 +2,7 @@
 import { Request, Response } from "express";
 import { globalKernelManager } from "@services/kernelManager";
 import { KernelCommand } from "@services/kernelComm";
+import { appendEvent } from "@storage/hybrid_db";
 
 /**
  * Handles user chat commands
@@ -22,7 +23,17 @@ export async function handleChat(req: Request, res: Response) {
   };
 
   try {
+    appendEvent({
+      type: "chat.request",
+      timestamp: Date.now(),
+      payload: { kernelId, message },
+    });
     const result = await globalKernelManager.sendCommand(kernelId, cmd);
+    appendEvent({
+      type: "chat.response",
+      timestamp: Date.now(),
+      payload: { kernelId, result },
+    });
     res.json(result);
   } catch (err) {
     console.error("[chatHandler] Error sending chat command:", err);

@@ -8,6 +8,7 @@ import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
+import { useChatHistory } from "@/services/chatHistoryStore";
 
 interface Message {
   id: string;
@@ -28,6 +29,7 @@ interface MainChatProps {
 const PAGE_SIZE = 30;
 
 const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
+  const { addMessage: addHistoryMessage } = useChatHistory();
   const [messages, setMessages] = useState<Message[]>([]);
   const [displayed, setDisplayed] = useState<Message[]>([]);
   const [page, setPage] = useState(0);
@@ -145,6 +147,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setMessages(m => [...m, userMsg]);
     setDisplayed(d => [...d, userMsg]);
     chatContext.add({ role: "user", content: input });
+    addHistoryMessage({ id, role: "user", text: input, type: "info" });
 
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
 
@@ -166,7 +169,13 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             addMessage("⚠️ ML temporarily unavailable. Using local fallback.", "warn");
             return;
           }
-          addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
+          const stdout = String(r?.stdout || "");
+          if (r.success && stdout.includes("kernel accepted")) {
+            const normalized = stdout.replace("kernel accepted execute:", "NeuroEdge received:");
+            addMessage(normalized, "info");
+            return;
+          }
+          addMessage(r.success ? stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
         });
       }
     } catch (err: any) {
@@ -181,6 +190,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setMessages(m => [...m, msg]);
     setDisplayed(d => [...d, msg]);
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "assistant", text, type, codeLanguage, isCode } });
+    addHistoryMessage({ id, role: "assistant", text, type, isCode, codeLanguage });
   };
 
   const speak = (text: string) => {

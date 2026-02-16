@@ -1,6 +1,7 @@
 // frontend/src/components/Topbar.tsx
 
 import React, { useEffect, useState } from "react";
+import { useUI } from "@/services/uiStore";
 
 interface TopbarProps {
   onSearch?: (query: string) => void;
@@ -17,13 +18,11 @@ const Topbar: React.FC<TopbarProps> = ({
   onNavigate,
   onNewChat,
 }) => {
+  const { theme, toggleTheme, themePreference, setThemePreference } = useUI();
   const [search, setSearch] = useState("");
   const [showCommands, setShowCommands] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [theme, setTheme] = useState<"light" | "dark">(
-    ((localStorage.getItem("neuroedge_theme") as "light" | "dark") || "light")
-  );
 
   /* -------------------- */
   /* Network status */
@@ -41,28 +40,9 @@ const Topbar: React.FC<TopbarProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("neuroedge_theme", theme);
-  }, [theme]);
-
   const runCommand = (cmd: string) => {
-    const normalized = cmd.trim().toLowerCase();
-    if (normalized === "new chat") {
-      onNewChat?.();
-    } else if (normalized === "open settings") {
-      onNavigate?.("settings");
-    } else if (normalized === "toggle theme") {
-      setTheme((t) => (t === "light" ? "dark" : "light"));
-    } else if (normalized === "clear history") {
-      localStorage.removeItem("chat_history");
-      localStorage.removeItem("neuroedge_chat_context");
-      localStorage.removeItem("neuroedge_cache");
-      onNewChat?.();
-    } else if (normalized === "neuroedge diagnostics") {
-      onNavigate?.("dashboard");
-    }
     onCommand(cmd);
+    setShowCommands(false);
   };
 
   return (
@@ -70,7 +50,7 @@ const Topbar: React.FC<TopbarProps> = ({
       style={{
         height: "56px",
         width: "100%",
-        background: "#ffffff",
+        background: "var(--ne-surface)",
         borderBottom: "1px solid #e5e7eb",
         display: "flex",
         alignItems: "center",
@@ -84,15 +64,19 @@ const Topbar: React.FC<TopbarProps> = ({
       <button title="Toggle sidebar" style={iconButton} onClick={onToggleSidebar}>
         ☰
       </button>
-      <div
+      <button
+        onClick={() => onNavigate?.("chat")}
         style={{
           fontWeight: 600,
           fontSize: "0.95rem",
-          color: "#1f2937",
+          color: "var(--ne-text)",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
         }}
       >
         NeuroEdge
-      </div>
+      </button>
 
       {/* Offline indicator */}
       {isOffline && (
@@ -151,7 +135,7 @@ const Topbar: React.FC<TopbarProps> = ({
       <button
         title="Toggle theme"
         style={iconButton}
-        onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+        onClick={() => toggleTheme()}
       >
         {theme === "light" ? "🌙" : "☀️"}
       </button>
@@ -174,6 +158,15 @@ const Topbar: React.FC<TopbarProps> = ({
 
       {showUserMenu && (
         <div style={userMenuStyle}>
+          <button
+            style={userMenuItemStyle}
+            onClick={() => {
+              setThemePreference("system");
+              setShowUserMenu(false);
+            }}
+          >
+            Theme: System
+          </button>
           <button style={userMenuItemStyle} onClick={() => { onNavigate?.("settings"); setShowUserMenu(false); }}>
             Profile Settings
           </button>

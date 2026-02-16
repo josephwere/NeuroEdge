@@ -17,7 +17,7 @@ export const exportChatJSON = (messages: ChatMessage[]) => {
  */
 export const exportChatTXT = (messages: ChatMessage[]) => {
   const content = messages
-    .map(msg => `[${msg.timestamp.toLocaleString()}] ${msg.sender.toUpperCase()}: ${msg.content}`)
+    .map(msg => `[${new Date(msg.timestamp).toLocaleString()}] ${msg.role.toUpperCase()}: ${msg.text}`)
     .join("\n\n");
 
   const blob = new Blob([content], { type: "text/plain" });
@@ -34,8 +34,15 @@ export const importChatJSON = async (file: File): Promise<ChatMessage[]> => {
   // Validate minimal structure
   if (!Array.isArray(data)) throw new Error("Invalid chat log");
   return data.map(msg => ({
-    sender: msg.sender,
-    content: msg.content,
-    timestamp: new Date(msg.timestamp),
+    id: String(msg.id || Math.random()),
+    role: (msg.role as ChatMessage["role"]) || "assistant",
+    text: String(msg.text || ""),
+    timestamp: typeof msg.timestamp === "number" ? msg.timestamp : Date.now(),
+    type: msg.type,
+    isCode: msg.isCode,
+    codeLanguage: msg.codeLanguage,
+    collapsible: msg.collapsible,
+    collapsibleOpen: msg.collapsibleOpen,
+    tags: msg.tags,
   }));
 };

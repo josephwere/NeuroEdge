@@ -14,6 +14,9 @@ import FounderAssistant from "@/components/FounderAssistant"; // Founder voice &
 import TutorialGuide from "@/components/TutorialGuide";
 
 import { OrchestratorClient } from "@/services/orchestrator_client";
+import { useChatHistory } from "@/services/chatHistoryStore";
+import { exportChatJSON, exportChatTXT } from "@/services/chatExport";
+import { useUI } from "@/services/uiStore";
 
 import { loadExtension } from "@/extensions/extensionLoader";
 import codeLinter from "@/extensions/examples/codeLinter";
@@ -66,6 +69,8 @@ interface Props {
 }
 
 const HomePage: React.FC<Props> = ({ orchestrator }) => {
+  const { allMessages, resetHistory } = useChatHistory();
+  const { toggleTheme } = useUI();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeView, setActiveView] = useState<
     "chat" | "dashboard" | "settings" | "history" | "extensions"
@@ -93,6 +98,20 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
     loadExtension(codeLinter, extCtx);
   }, [orchestrator]);
 
+  useEffect(() => {
+    const handler = (evt: Event) => {
+      const view = (evt as CustomEvent).detail as
+        | "chat"
+        | "dashboard"
+        | "settings"
+        | "history"
+        | "extensions";
+      if (view) setActiveView(view);
+    };
+    window.addEventListener("neuroedge:navigate", handler as EventListener);
+    return () => window.removeEventListener("neuroedge:navigate", handler as EventListener);
+  }, []);
+
   const startNewChat = () => {
     setActiveView("chat");
     window.dispatchEvent(new CustomEvent("neuroedge:newChat"));
@@ -112,6 +131,24 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       setActiveView("dashboard");
       return;
     }
+    if (normalized === "export chat") {
+      const url = exportChatJSON(allMessages);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `neuroedge_chat_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (normalized === "clear history") {
+      resetHistory();
+      startNewChat();
+      return;
+    }
+    if (normalized === "toggle theme") {
+      toggleTheme();
+      return;
+    }
   };
 
   return (
@@ -122,7 +159,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           height: "100vh",
           width: "100%",
           overflow: "hidden",
-          backgroundColor: "#f5f6fa",
+          backgroundColor: "var(--ne-bg)",
         }}
       >
         {/* ---------------- Sidebar ---------------- */}

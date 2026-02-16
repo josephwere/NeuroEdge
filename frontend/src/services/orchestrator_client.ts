@@ -134,7 +134,7 @@ export class OrchestratorClient {
       reasoning: finalReasoning,
       intent: aiResp?.intent,
       risk: aiResp?.risk || "low",
-      logs: finalStdout ? [String(finalStdout)] : [],
+      logs: [],
       results: [
         {
           id: fallbackChatResp?.id || execResp?.id,

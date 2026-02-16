@@ -1,6 +1,7 @@
 // orchestrator/src/handlers/aiHandler.ts
 import { Request, Response } from "express";
 import axios from "axios";
+import { appendEvent } from "@storage/hybrid_db";
 
 /**
  * Handles AI inference requests via ML service.
@@ -24,6 +25,11 @@ export async function handleAIInference(req: Request, res: Response) {
         : "gather_context";
 
   try {
+    appendEvent({
+      type: "ml.infer.request",
+      timestamp: Date.now(),
+      payload: { input, payload },
+    });
     const mlResp = await axios.post(`${mlUrl}/infer`, {
       text: input,
       payload,
@@ -31,6 +37,11 @@ export async function handleAIInference(req: Request, res: Response) {
     });
 
     const mlData = mlResp.data || {};
+    appendEvent({
+      type: "ml.infer.response",
+      timestamp: Date.now(),
+      payload: mlData,
+    });
     res.json({
       success: true,
       reasoning: `ML inferred action '${mlData.action || "unknown"}'`,

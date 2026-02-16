@@ -22,6 +22,7 @@
       "@contracts/*": ["contracts/*"],
       "@config/*": ["config/*"],
       "@services/*": ["services/*"],
+      "@storage/*": ["storage/*"],
       "@github/*": ["github/*"],
       "@context/*": ["context/*"],
       "@federation/*": ["federation/*"],

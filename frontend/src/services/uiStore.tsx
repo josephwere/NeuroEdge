@@ -1,6 +1,6 @@
 // frontend/src/services/uiStore.ts
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 /* -------------------- */
 /* Types */
@@ -28,7 +28,9 @@ interface UIState {
 
   /* Theme */
   theme: "light" | "dark";
+  themePreference: "system" | "light" | "dark";
   toggleTheme: () => void;
+  setThemePreference: (pref: "system" | "light" | "dark") => void;
 
   /* Preferences */
   aiResponseVerbosity: "short" | "medium" | "long";
@@ -60,8 +62,39 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   /* Theme */
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const toggleTheme = () => setTheme(t => (t === "light" ? "dark" : "light"));
+  const systemPrefersDark = () =>
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+  const [themePreference, setThemePreference] = useState<"system" | "light" | "dark">(() => {
+    const saved = localStorage.getItem("neuroedge_theme_pref") as "system" | "light" | "dark" | null;
+    return saved || "system";
+  });
+
+  const theme = useMemo<"light" | "dark">(() => {
+    if (themePreference === "system") {
+      return systemPrefersDark() ? "dark" : "light";
+    }
+    return themePreference;
+  }, [themePreference]);
+
+  const toggleTheme = () => {
+    setThemePreference((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
+  useEffect(() => {
+    localStorage.setItem("neuroedge_theme_pref", themePreference);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [themePreference, theme]);
+
+  useEffect(() => {
+    if (themePreference !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => document.documentElement.setAttribute("data-theme", media.matches ? "dark" : "light");
+    media.addEventListener("change", handler);
+    return () => media.removeEventListener("change", handler);
+  }, [themePreference]);
 
   /* AI Preferences */
   const [aiResponseVerbosity, setAiResponseVerbosity] = useState<"short" | "medium" | "long">("medium");
@@ -80,7 +113,9 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setUser,
         logout,
         theme,
+        themePreference,
         toggleTheme,
+        setThemePreference,
         aiResponseVerbosity,
         setAiResponseVerbosity,
       }}

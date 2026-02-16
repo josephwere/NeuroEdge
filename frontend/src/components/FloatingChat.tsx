@@ -6,6 +6,7 @@ import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
+import { useChatHistory } from "@/services/chatHistoryStore";
 
 interface ExecutionResult {
   id: string;
@@ -49,6 +50,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   onClose,
   embedded = false,
 }) => {
+  const { addMessage: addHistoryMessage } = useChatHistory();
   const [messages, setMessages] = useState<LogLine[]>([]);
   const [displayed, setDisplayed] = useState<LogLine[]>([]);
   const [page, setPage] = useState(0);
@@ -184,6 +186,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     const commandId = Date.now().toString();
 
     addMessage(`💻 ${input}`, "info");
+    addHistoryMessage({ id: commandId, role: "user", text: input, type: "info" });
     saveToCache({ id: commandId, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
 
     const userInput = input;
@@ -205,7 +208,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             addMessage("⚠️ ML temporarily unavailable. Using local fallback.", "warn");
             return;
           }
-          addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
+          const stdout = String(r?.stdout || "");
+          if (r.success && stdout.includes("kernel accepted")) {
+            const normalized = stdout.replace("kernel accepted execute:", "NeuroEdge received:");
+            addMessage(normalized, "info");
+            return;
+          }
+          addMessage(r.success ? stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
         });
       }
       if (res.approvals) res.approvals.forEach(addApproval);
@@ -222,6 +231,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     setMessages(m => [...m, msg]);
     setDisplayed(d => [...d, msg]);
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { text, type, codeLanguage, isCode } });
+    addHistoryMessage({ id, role: "assistant", text, type, isCode, codeLanguage });
   };
 
   const addApproval = (app: ApprovalRequest) => {
@@ -258,7 +268,27 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       }}
     >
       <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong>NeuroEdge Floating Chat</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <strong>NeuroEdge Floating Chat</strong>
+          {!embedded && (
+            <>
+              <button
+                title="New Chat"
+                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:newChat"))}
+                style={miniActionStyle}
+              >
+                New Chat
+              </button>
+              <button
+                title="History"
+                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "history" }))}
+                style={miniActionStyle}
+              >
+                History
+              </button>
+            </>
+          )}
+        </div>
         <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
           {!embedded && (
             <>
@@ -328,3 +358,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 };
 
 export default FloatingChat;
+
+const miniActionStyle: React.CSSProperties = {
+  border: "1px solid #394152",
+  background: "#1e1e2f",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.2rem 0.45rem",
+  fontSize: "0.7rem",
+  cursor: "pointer",
+};

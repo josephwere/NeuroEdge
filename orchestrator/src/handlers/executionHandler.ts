@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { globalKernelManager } from "@services/kernelManager";
 import { KernelCommand } from "@services/kernelComm";
+import { appendEvent } from "@storage/hybrid_db";
 
 /**
  * Handles code/command execution requests
@@ -20,7 +21,17 @@ export async function handleExecution(req: Request, res: Response) {
   };
 
   try {
+    appendEvent({
+      type: "execute.request",
+      timestamp: Date.now(),
+      payload: { kernelId, code },
+    });
     const result = await globalKernelManager.sendCommand(kernelId, cmd);
+    appendEvent({
+      type: "execute.response",
+      timestamp: Date.now(),
+      payload: { kernelId, result },
+    });
     res.json(result);
   } catch (err) {
     console.error("[executionHandler] Error executing code:", err);

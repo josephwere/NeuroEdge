@@ -7,13 +7,22 @@ html, body, #root {
   padding: 0;
   height: 100%;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f5f6fa;
-  color: #111827;
+  background: var(--ne-bg);
+  color: var(--ne-text);
+}
+
+html {
+  --ne-bg: #f5f6fa;
+  --ne-surface: #ffffff;
+  --ne-text: #111827;
+  --ne-muted: #64748b;
 }
 
 html[data-theme="dark"], html[data-theme="dark"] body {
-  background: #0f172a;
-  color: #e5e7eb;
+  --ne-bg: #0f172a;
+  --ne-surface: #111827;
+  --ne-text: #e5e7eb;
+  --ne-muted: #94a3b8;
 }
 
 button {

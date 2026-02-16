@@ -68,7 +68,8 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   // Execute command via orchestrator
   const replayCommand = useCallback(
     (cmd: string) => {
-      orchestrator.execute({ command: cmd, context: history });
+      const normalized = (cmd || "").replace(/^💻\\s*/, "");
+      orchestrator.execute({ command: normalized, context: history });
       onClose();
     },
     [orchestrator, history, onClose]

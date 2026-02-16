@@ -15,6 +15,7 @@ import { KernelCommand } from "@services/kernelComm";
 import { handleChat } from "@handlers/chatHandler";
 import { handleExecution } from "@handlers/executionHandler";
 import { handleAIInference } from "@handlers/aiHandler";
+import { appendEvent, listEvents, readState, writeState } from "@storage/hybrid_db";
 
 export function startServer(
   restPort: number,
@@ -55,6 +56,22 @@ export function startServer(
   app.post("/chat", handleChat);
   app.post("/execute", handleExecution);
   app.post("/ai", handleAIInference);
+
+  app.get("/storage/state", (_req: Request, res: Response) => {
+    res.json(readState());
+  });
+  app.post("/storage/state", (req: Request, res: Response) => {
+    const next = req.body || {};
+    res.json(writeState(next));
+  });
+  app.get("/storage/events", (req: Request, res: Response) => {
+    const limit = Number(req.query.limit) || 200;
+    res.json(listEvents(limit));
+  });
+  app.post("/storage/event", (req: Request, res: Response) => {
+    const evt = req.body || {};
+    res.json(appendEvent(evt));
+  });
   const kernelsHandler = async (_req: Request, res: Response) => {
     const snapshot = await globalKernelManager.getAllHealth();
     res.json(snapshot);
