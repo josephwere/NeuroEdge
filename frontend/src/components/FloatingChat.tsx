@@ -36,6 +36,7 @@ interface FloatingChatProps {
   orchestrator: OrchestratorClient;
   initialPosition?: { x: number; y: number };
   onPositionChange?: (pos: { x: number; y: number }) => void;
+  onClose?: () => void;
 }
 
 const PAGE_SIZE = 20;
@@ -43,13 +44,15 @@ const PAGE_SIZE = 20;
 const FloatingChat: React.FC<FloatingChatProps> = ({
   orchestrator,
   initialPosition,
-  onPositionChange
+  onPositionChange,
+  onClose,
 }) => {
   const [messages, setMessages] = useState<LogLine[]>([]);
   const [displayed, setDisplayed] = useState<LogLine[]>([]);
   const [page, setPage] = useState(0);
   const [input, setInput] = useState("");
   const [minimized, setMinimized] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(initialPosition || { x: 20, y: 20 });
@@ -57,7 +60,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   // --- Drag & Move ---
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || maximized) return;
 
     let mx = 0, my = 0;
     let x = position.x, y = position.y;
@@ -80,7 +83,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
     el.querySelector(".header")?.addEventListener("mousedown", down);
     return () => el.querySelector(".header")?.removeEventListener("mousedown", down);
-  }, [position.x, position.y, onPositionChange]);
+  }, [position.x, position.y, onPositionChange, maximized]);
 
   // --- Load cache ---
   useEffect(() => {
@@ -208,10 +211,12 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       ref={containerRef}
       style={{
         position: "fixed",
-        left: position.x,
-        top: position.y,
-        width: "450px",
-        height: minimized ? "48px" : "560px",
+        left: maximized ? 24 : position.x,
+        top: maximized ? 24 : position.y,
+        width: maximized ? "calc(100vw - 48px)" : "450px",
+        height: minimized ? "48px" : maximized ? "calc(100vh - 48px)" : "560px",
+        maxWidth: "100vw",
+        maxHeight: "100vh",
         background: "#1e1e2f",
         color: "#fff",
         borderRadius: "12px",
@@ -221,9 +226,34 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         flexDirection: "column"
       }}
     >
-      <div className="header" style={{ padding: "10px", cursor: "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between" }}>
+      <div className="header" style={{ padding: "10px", cursor: maximized ? "default" : "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong>NeuroEdge Floating Chat</strong>
-        <button onClick={() => setMinimized(!minimized)}>{minimized ? "⬆️" : "⬇️"}</button>
+        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+          <button
+            title="Minimize"
+            onClick={() => setMinimized((v) => !v)}
+            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+          >
+            {minimized ? "▢" : "—"}
+          </button>
+          <button
+            title={maximized ? "Restore" : "Maximize"}
+            onClick={() => {
+              setMinimized(false);
+              setMaximized((v) => !v);
+            }}
+            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+          >
+            {maximized ? "❐" : "□"}
+          </button>
+          <button
+            title="Close"
+            onClick={() => onClose?.()}
+            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer", background: "#ef4444", color: "#fff" }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {!minimized && (

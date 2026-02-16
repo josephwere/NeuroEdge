@@ -111,6 +111,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
             orchestrator={orchestrator}
             initialPosition={floatingPosition}
             onPositionChange={setFloatingPosition}
+            onClose={() => setFloatingOpen(false)}
           />
         )}
 
