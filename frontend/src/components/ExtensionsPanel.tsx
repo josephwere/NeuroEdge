@@ -69,9 +69,9 @@ const ExtensionsPanel: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: "1.5rem", height: "100%", overflowY: "auto" }}>
+    <div style={{ padding: "1.5rem", height: "100%", overflowY: "auto", color: "var(--ne-text)" }}>
       <h2>🧩 Extensions / Plugins</h2>
-      <p style={{ color: "#555", marginBottom: "1rem" }}>
+      <p style={{ color: "var(--ne-muted)", marginBottom: "1rem" }}>
         Manage mini-modules safely: activate, deactivate, or load new ones.
       </p>
 
@@ -80,7 +80,7 @@ const ExtensionsPanel: React.FC = () => {
         style={{
           padding: "0.5rem 1rem",
           marginBottom: "1rem",
-          background: "#3a3aff",
+          background: "#2563eb",
           color: "#fff",
           border: "none",
           borderRadius: "6px",
@@ -97,8 +97,8 @@ const ExtensionsPanel: React.FC = () => {
             style={{
               padding: "1rem",
               borderRadius: "8px",
-              border: "1px solid #ccc",
-              background: ext.active ? "#f0f4ff" : "#f9f9f9",
+              border: "1px solid var(--ne-muted)",
+              background: ext.active ? "rgba(37, 99, 235, 0.12)" : "var(--ne-surface)",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -107,11 +107,11 @@ const ExtensionsPanel: React.FC = () => {
             <div>
               <div style={{ fontWeight: 600 }}>{ext.name}</div>
               {ext.description && (
-                <div style={{ fontSize: "0.85rem", opacity: 0.7 }}>
+                <div style={{ fontSize: "0.85rem", color: "var(--ne-muted)" }}>
                   {ext.description} {ext.version && `v${ext.version}`}
                 </div>
               )}
-              <div style={{ fontSize: "0.75rem", opacity: 0.6 }}>
+              <div style={{ fontSize: "0.75rem", color: "var(--ne-muted)" }}>
                 Permissions: {ext.permissions.join(", ") || "None"}
               </div>
             </div>
@@ -123,7 +123,7 @@ const ExtensionsPanel: React.FC = () => {
                 borderRadius: "6px",
                 border: "none",
                 cursor: "pointer",
-                background: ext.active ? "#ff4d4f" : "#3a3aff",
+                background: ext.active ? "#ef4444" : "#2563eb",
                 color: "#fff",
               }}
             >
