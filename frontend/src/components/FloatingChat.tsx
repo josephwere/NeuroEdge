@@ -37,6 +37,7 @@ interface FloatingChatProps {
   initialPosition?: { x: number; y: number };
   onPositionChange?: (pos: { x: number; y: number }) => void;
   onClose?: () => void;
+  embedded?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -46,6 +47,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   initialPosition,
   onPositionChange,
   onClose,
+  embedded = false,
 }) => {
   const [messages, setMessages] = useState<LogLine[]>([]);
   const [displayed, setDisplayed] = useState<LogLine[]>([]);
@@ -60,7 +62,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   // --- Drag & Move ---
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || maximized) return;
+    if (!el || maximized || embedded) return;
 
     let mx = 0, my = 0;
     let x = position.x, y = position.y;
@@ -83,7 +85,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
     el.querySelector(".header")?.addEventListener("mousedown", down);
     return () => el.querySelector(".header")?.removeEventListener("mousedown", down);
-  }, [position.x, position.y, onPositionChange, maximized]);
+  }, [position.x, position.y, onPositionChange, maximized, embedded]);
 
   // --- Load cache ---
   useEffect(() => {
@@ -210,42 +212,47 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     <div
       ref={containerRef}
       style={{
-        position: "fixed",
-        left: maximized ? 24 : position.x,
-        top: maximized ? 24 : position.y,
-        width: maximized ? "calc(100vw - 48px)" : "450px",
-        height: minimized ? "48px" : maximized ? "calc(100vh - 48px)" : "560px",
+        position: embedded ? "relative" : "fixed",
+        left: embedded ? 0 : maximized ? 24 : position.x,
+        top: embedded ? 0 : maximized ? 24 : position.y,
+        width: embedded ? "100%" : maximized ? "calc(100vw - 48px)" : "450px",
+        height: embedded ? "100%" : minimized ? "48px" : maximized ? "calc(100vh - 48px)" : "560px",
         maxWidth: "100vw",
         maxHeight: "100vh",
         background: "#1e1e2f",
         color: "#fff",
-        borderRadius: "12px",
-        boxShadow: "0 0 30px rgba(0,0,0,0.6)",
-        zIndex: 9999,
+        borderRadius: embedded ? "0" : "12px",
+        boxShadow: embedded ? "none" : "0 0 30px rgba(0,0,0,0.6)",
+        zIndex: embedded ? 1 : 9999,
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        overflow: "hidden",
       }}
     >
-      <div className="header" style={{ padding: "10px", cursor: maximized ? "default" : "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong>NeuroEdge Floating Chat</strong>
         <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-          <button
-            title="Minimize"
-            onClick={() => setMinimized((v) => !v)}
-            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
-          >
-            {minimized ? "▢" : "—"}
-          </button>
-          <button
-            title={maximized ? "Restore" : "Maximize"}
-            onClick={() => {
-              setMinimized(false);
-              setMaximized((v) => !v);
-            }}
-            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
-          >
-            {maximized ? "❐" : "□"}
-          </button>
+          {!embedded && (
+            <>
+              <button
+                title="Minimize"
+                onClick={() => setMinimized((v) => !v)}
+                style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+              >
+                {minimized ? "▢" : "—"}
+              </button>
+              <button
+                title={maximized ? "Restore" : "Maximize"}
+                onClick={() => {
+                  setMinimized(false);
+                  setMaximized((v) => !v);
+                }}
+                style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+              >
+                {maximized ? "❐" : "□"}
+              </button>
+            </>
+          )}
           <button
             title="Close"
             onClick={() => onClose?.()}
@@ -256,7 +263,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         </div>
       </div>
 
-      {!minimized && (
+      {(!minimized || embedded) && (
         <>
           <div id="floatingChatScroll" style={{ flex: 1, overflowY: "auto", padding: "10px", fontFamily: "monospace" }}>
             <InfiniteScroll

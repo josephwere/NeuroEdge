@@ -30,7 +30,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
 
   /* AI Suggestions state (overlay-ready) */
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [floatingOpen, setFloatingOpen] = useState(false);
+  const [floatingOpen, setFloatingOpen] = useState(true);
 
   /**
    * Accept a suggestion (top-ranked)
@@ -108,51 +108,39 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
           fontFamily: "Arial, sans-serif",
         }}
       >
-        {/* Main Chat */}
-        <div style={{ flex: 1, position: "relative", zIndex: 1 }}>
-          <MainChat
-            orchestrator={orchestrator}
-          />
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "grid",
+            gridTemplateColumns: floatingOpen ? "minmax(0, 1fr) 420px" : "minmax(0, 1fr)",
+          }}
+        >
+          {/* Main Chat */}
+          <div style={{ minWidth: 0, minHeight: 0, position: "relative", zIndex: 1 }}>
+            <MainChat orchestrator={orchestrator} />
+          </div>
+
+          {/* Embedded Floating Chat Panel */}
+          {floatingOpen && (
+            <div
+              style={{
+                minWidth: 0,
+                minHeight: 0,
+                borderLeft: "1px solid #d1d5db",
+                background: "#111827",
+              }}
+            >
+              <FloatingChat
+                orchestrator={orchestrator}
+                initialPosition={floatingPosition}
+                onPositionChange={setFloatingPosition}
+                onClose={() => setFloatingOpen(false)}
+                embedded
+              />
+            </div>
+          )}
         </div>
-
-        {/* Floating Chat */}
-        {floatingOpen && (
-          <FloatingChat
-            orchestrator={orchestrator}
-            initialPosition={floatingPosition}
-            onPositionChange={setFloatingPosition}
-            onClose={() => setFloatingOpen(false)}
-          />
-        )}
-
-        {/* Meta-AI style launcher */}
-        {!floatingOpen && (
-          <button
-            onClick={() => setFloatingOpen(true)}
-            style={{
-              position: "fixed",
-              right: 18,
-              bottom: 18,
-              zIndex: 10002,
-              display: "flex",
-              alignItems: "center",
-              gap: "0.45rem",
-              border: "none",
-              borderRadius: 999,
-              padding: "0.58rem 0.9rem",
-              background: "linear-gradient(135deg, #0ea5e9 0%, #2563eb 60%, #1d4ed8 100%)",
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "0.83rem",
-              cursor: "pointer",
-              boxShadow: "0 10px 24px rgba(37, 99, 235, 0.35)",
-            }}
-            title="Open Floating AI Chat"
-          >
-            <span style={{ fontSize: "1rem", lineHeight: 1 }}>✦</span>
-            <span>Ask NeuroEdge AI</span>
-          </button>
-        )}
 
         {/* 
           AI Suggestions Overlay will plug here later
