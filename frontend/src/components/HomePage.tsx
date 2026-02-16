@@ -5,7 +5,6 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import UnifiedChat from "@/components/UnifiedChat";
 import ChatSearchBar from "@/components/ChatSearchBar";
-import AISuggestionsOverlay from "@/components/AISuggestionsOverlay";
 import Dashboard from "@/components/Dashboard";
 import CommandPalette from "@/components/CommandPalette";
 import ChatHistoryPanel from "@/components/ChatHistoryPanel";
@@ -49,11 +48,6 @@ const HomeContent: React.FC<{ orchestrator: OrchestratorClient }> = ({ orchestra
 
       {/* Unified Chat */}
       <UnifiedChat orchestrator={orchestrator} />
-
-      {/* AI Suggestions Overlay */}
-      <AISuggestionsOverlay
-        onSelect={(suggestion) => console.log("AI Suggestion selected:", suggestion)}
-      />
 
       {/* Command Palette */}
       <CommandPalette

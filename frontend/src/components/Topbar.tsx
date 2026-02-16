@@ -3,11 +3,16 @@
 import React, { useEffect, useState } from "react";
 
 interface TopbarProps {
-  onSearch: (query: string) => void;
-  onCommand: (command: string) => void;
+  onSearch?: (query: string) => void;
+  onCommand?: (command: string) => void;
+  onToggleSidebar?: () => void;
 }
 
-const Topbar: React.FC<TopbarProps> = ({ onSearch, onCommand }) => {
+const Topbar: React.FC<TopbarProps> = ({
+  onSearch = () => {},
+  onCommand = () => {},
+  onToggleSidebar,
+}) => {
   const [search, setSearch] = useState("");
   const [showCommands, setShowCommands] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -43,6 +48,9 @@ const Topbar: React.FC<TopbarProps> = ({ onSearch, onCommand }) => {
       }}
     >
       {/* NeuroEdge Identity */}
+      <button title="Toggle sidebar" style={iconButton} onClick={onToggleSidebar}>
+        ☰
+      </button>
       <div
         style={{
           fontWeight: 600,

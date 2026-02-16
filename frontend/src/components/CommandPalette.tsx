@@ -23,7 +23,8 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   visible,
   onClose,
 }) => {
-  const { history } = useChatHistory();
+  const { allMessages } = useChatHistory();
+  const history = allMessages || [];
   const [query, setQuery] = useState("");
   const [filtered, setFiltered] = useState(history);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -38,7 +39,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   useEffect(() => {
     const q = query.toLowerCase();
     setFiltered(
-      history.filter(h => h.text.toLowerCase().includes(q) && h.text.startsWith("💻"))
+      history.filter(h => (h.text || "").toLowerCase().includes(q) && (h.text || "").startsWith("💻"))
     );
     setSelectedIndex(0);
   }, [query, history]);
