@@ -97,6 +97,20 @@ const Dashboard: React.FC = () => {
       }
 
       try {
+        const sysRes = await fetch(`${orchestratorUrl}/system/status`);
+        if (sysRes.ok) {
+          const sysJson = await sysRes.json();
+          if (Array.isArray(sysJson?.services)) {
+            sysJson.services.forEach((s: ServiceStatus) => results.push(s));
+            setServices(results);
+            return;
+          }
+        }
+      } catch {
+        // fall back to direct checks
+      }
+
+      try {
         const res = await fetch(kernelUrl);
         results.push({
           name: "Kernel",

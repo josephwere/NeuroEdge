@@ -1,5 +1,6 @@
 // orchestrator/src/server/index.ts
 import express, { Request, Response } from "express";
+import axios from "axios";
 import { WebSocketServer } from "ws";
 
 import { DevExecutionAgent } from "@agents/dev_execution_agent";
@@ -50,6 +51,42 @@ export function startServer(
       status: "ok",
       service: "orchestrator",
       time: new Date().toISOString(),
+    });
+  });
+
+  app.get("/system/status", async (_req: Request, res: Response) => {
+    const kernelBase = process.env.KERNEL_URL || "http://localhost:8080";
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+
+    const results = await Promise.allSettled([
+      axios.get(`${kernelBase.replace(/\/$/, "")}/health`),
+      axios.get(`${mlBase.replace(/\/$/, "")}/ready`),
+    ]);
+
+    const services = [
+      {
+        name: "Kernel",
+        status: results[0].status === "fulfilled" ? "online" : "offline",
+        detail:
+          results[0].status === "fulfilled"
+            ? "Kernel responding"
+            : "Not reachable",
+      },
+      {
+        name: "ML",
+        status: results[1].status === "fulfilled" ? "online" : "offline",
+        detail:
+          results[1].status === "fulfilled"
+            ? "Model loaded: yes"
+            : "Not reachable",
+      },
+    ];
+
+    res.json({
+      status: "ok",
+      service: "orchestrator",
+      time: new Date().toISOString(),
+      services,
     });
   });
 
