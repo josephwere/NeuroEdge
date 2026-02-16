@@ -11,6 +11,7 @@ import ChatHistoryPanel from "@/components/ChatHistoryPanel";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import ExtensionsPanel from "@/components/ExtensionsPanel";
 import FounderAssistant from "@/components/FounderAssistant"; // Founder voice & alerts
+import TutorialGuide from "@/components/TutorialGuide";
 
 import { ChatHistoryProvider } from "@/services/chatHistoryStore";
 import { OrchestratorClient } from "@/services/orchestrator_client";
@@ -71,6 +72,12 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
   const [activeView, setActiveView] = useState<
     "chat" | "dashboard" | "settings" | "history" | "extensions"
   >("chat");
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    const seen = localStorage.getItem("neuroedge_tutorial_seen") === "1";
+    if (!seen) setShowTutorial(true);
+  }, []);
 
   /* ---------------- Extensions Loader ---------------- */
   useEffect(() => {
@@ -142,6 +149,17 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
             </div>
           </div>
         </div>
+        <TutorialGuide
+          open={showTutorial}
+          onSkip={() => {
+            localStorage.setItem("neuroedge_tutorial_seen", "1");
+            setShowTutorial(false);
+          }}
+          onFinish={() => {
+            localStorage.setItem("neuroedge_tutorial_seen", "1");
+            setShowTutorial(false);
+          }}
+        />
       </ChatHistoryProvider>
     </NotificationProvider>
   );
