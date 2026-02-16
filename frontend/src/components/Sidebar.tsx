@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
 
 /* -------------------- */
@@ -34,41 +34,32 @@ const Sidebar: React.FC<SidebarProps> = ({
   pendingApprovals = 0,
   user = { name: "Guest User", mode: "local" },
 }) => {
-  const { notifications, addNotification, removeNotification } = useNotifications();
+  const { notifications, removeNotification } = useNotifications();
   const [showNotifications, setShowNotifications] = useState(false);
-
-  /* Seed demo notifications ONCE */
-  useEffect(() => {
-    if (notifications.length === 0) {
-      addNotification({ message: "New AI suggestion available", type: "ai" });
-      addNotification({ message: "Error executing command", type: "error" });
-      addNotification({ message: "Chat synced successfully", type: "success" });
-    }
-  }, [addNotification, notifications.length]);
 
   return (
     <div style={sidebarStyle(collapsed)}>
+      {!collapsed && (
+        <>
       {/* ---------- Header ---------- */}
       <div style={headerStyle(collapsed)}>
-        {!collapsed && <strong style={{ fontSize: "1.1rem" }}>🧠 NeuroEdge</strong>}
+        <strong style={{ fontSize: "1.1rem" }}>🧠 NeuroEdge</strong>
         <button onClick={onToggle} style={iconButton}>
-          {collapsed ? "➡️" : "⬅️"}
+          ⬅️
         </button>
       </div>
 
       {/* ---------- Profile ---------- */}
       <div style={profileStyle}>
         <Avatar letter={user.name[0]} />
-        {!collapsed && (
-          <div>
-            <div style={{ fontSize: "0.9rem" }}>{user.name}</div>
-            <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
-              {user.mode === "guest" && "Guest mode"}
-              {user.mode === "local" && "Local session"}
-              {user.mode === "account" && "Signed in"}
-            </div>
+        <div>
+          <div style={{ fontSize: "0.9rem" }}>{user.name}</div>
+          <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+            {user.mode === "guest" && "Guest mode"}
+            {user.mode === "local" && "Local session"}
+            {user.mode === "account" && "Signed in"}
           </div>
-        )}
+        </div>
       </div>
 
       {/* ---------- Navigation ---------- */}
@@ -84,7 +75,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <NavItem
             icon="🔔"
             label="Notifications"
-            collapsed={collapsed}
+            collapsed={false}
             badge={notifications.length}
             onClick={() => setShowNotifications(v => !v)}
           />
@@ -108,14 +99,16 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <NavItem icon="✅" label="Approvals" collapsed={collapsed} badge={pendingApprovals} disabled />
+        <NavItem icon="✅" label="Approvals" collapsed={false} badge={pendingApprovals} disabled />
       </div>
 
       {/* ---------- Quick Actions ---------- */}
       <div style={quickActions}>
-        <button style={primaryAction}>➕ {!collapsed && "New Chat"}</button>
-        <button style={secondaryAction}>🔐 {!collapsed && "Login / Get Started"}</button>
+        <button style={primaryAction}>➕ New Chat</button>
+        <button style={secondaryAction}>🔐 Login / Get Started</button>
       </div>
+        </>
+      )}
     </div>
   );
 };
@@ -154,8 +147,8 @@ const Avatar: React.FC<{ letter: string }> = ({ letter }) => (
 /* ================= STYLES ================= */
 
 const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
-  width: collapsed ? "64px" : "240px",
-  minWidth: collapsed ? "64px" : "240px",
+  width: collapsed ? "0px" : "260px",
+  minWidth: collapsed ? "0px" : "260px",
   flexShrink: 0,
   background: "#1e1e2f",
   color: "#fff",
@@ -164,6 +157,7 @@ const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
   flexDirection: "column",
   overflowY: "auto",
   transition: "width 0.25s ease",
+  borderRight: collapsed ? "none" : "1px solid #2b2b3c",
 });
 
 const headerStyle = (collapsed: boolean): React.CSSProperties => ({

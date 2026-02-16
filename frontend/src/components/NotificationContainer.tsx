@@ -20,24 +20,26 @@ const NotificationContainer: React.FC<NotificationContainerProps> = ({
   <div
     style={{
       position: "fixed",
-      top: "20px",
+      bottom: "16px",
       right: "20px",
       display: "flex",
       flexDirection: "column",
-      gap: "10px",
-      zIndex: 9999,
+      gap: "8px",
+      zIndex: 1000,
+      maxWidth: "360px",
     }}
   >
     {notifications.map((n) => (
       <div
         key={n.id}
         style={{
-          minWidth: "250px",
-          padding: "10px 14px",
-          borderRadius: "8px",
-          color: "#fff",
-          background: getColor(n.type),
-          boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+          minWidth: "280px",
+          padding: "10px 12px",
+          borderRadius: "10px",
+          color: "#e5e7eb",
+          background: "#202123",
+          border: `1px solid ${getColor(n.type)}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -72,15 +74,15 @@ const NotificationContainer: React.FC<NotificationContainerProps> = ({
 const getColor = (type?: NotificationType) => {
   switch (type) {
     case "success":
-      return "#36c36c";
+      return "#2b8a3e";
     case "warn":
-      return "#faad14";
+      return "#a06600";
     case "error":
-      return "#ff4d4f";
+      return "#b42318";
     case "ai":
-      return "#40a9ff";
+      return "#1f6feb";
     default:
-      return "#1e1e2f";
+      return "#3f3f46";
   }
 };
 

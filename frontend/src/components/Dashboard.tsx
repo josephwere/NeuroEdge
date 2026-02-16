@@ -1,7 +1,6 @@
 // frontend/src/components/Dashboard.tsx
 import React, { useEffect, useState } from "react";
 import { chatContext } from "@/services/chatContext";
-import { useNotifications } from "@/services/notificationStore";
 
 /**
  * NeuroEdge Dashboard
@@ -26,17 +25,12 @@ interface AISuggestion {
 }
 
 const Dashboard: React.FC = () => {
-  const { addNotification } = useNotifications();
   const [messages, setMessages] = useState<MessageStats>({ total: 0, errors: 0, warnings: 0 });
   const [approvals, setApprovals] = useState<ApprovalStats>({ pending: 0, approved: 0, rejected: 0 });
   const [aiSuggestions, setAISuggestions] = useState<AISuggestion[]>([]);
 
   /* ---------------- Fetch Stats ---------------- */
   useEffect(() => {
-    addNotification({ message: "New AI suggestion available", type: "ai" });
-    addNotification({ message: "Error executing command", type: "error" });
-    addNotification({ message: "Chat synced successfully", type: "success" });
-
     const allMessages = chatContext.getAll();
 
     // Messages / Commands
@@ -57,7 +51,7 @@ const Dashboard: React.FC = () => {
       .map((m, idx) => ({ id: idx.toString(), suggestion: m.content }));
     setAISuggestions(suggestions);
 
-  }, [addNotification]);
+  }, []);
 
   return (
     <div style={{ padding: "1rem", overflowY: "auto", height: "100%", background: "#f5f6fa" }}>

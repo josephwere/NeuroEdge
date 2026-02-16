@@ -67,7 +67,7 @@ interface Props {
 }
 
 const HomePage: React.FC<Props> = ({ orchestrator }) => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeView, setActiveView] = useState<
     "chat" | "dashboard" | "settings" | "history" | "extensions"
   >("chat");
