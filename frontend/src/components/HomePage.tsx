@@ -108,6 +108,10 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       setActiveView("settings");
       return;
     }
+    if (normalized === "neuroedge diagnostics") {
+      setActiveView("dashboard");
+      return;
+    }
   };
 
   return (
@@ -127,6 +131,9 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onNavigate={setActiveView}
           onNewChat={startNewChat}
+          onLogin={() => setActiveView("settings")}
+          onOpenNotifications={() => setActiveView("history")}
+          onOpenProfile={() => setActiveView("settings")}
         />
 
         {/* ---------------- Main Area ---------------- */}
@@ -143,6 +150,8 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           <Topbar
             onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
             onCommand={handleTopbarCommand}
+            onNavigate={setActiveView}
+            onNewChat={startNewChat}
           />
 
           {/* Founder Assistant (voice + alerts) */}

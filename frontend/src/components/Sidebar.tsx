@@ -16,6 +16,9 @@ interface SidebarProps {
   onToggle: () => void;
   onNavigate: (view: ViewType) => void;
   onNewChat?: () => void;
+  onLogin?: () => void;
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
   unreadChats?: number;
   pendingApprovals?: number;
   user?: {
@@ -32,6 +35,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggle,
   onNavigate,
   onNewChat,
+  onLogin,
+  onOpenNotifications,
+  onOpenProfile,
   unreadChats = 0,
   pendingApprovals = 0,
   user = { name: "Guest User", mode: "local" },
@@ -52,7 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* ---------- Profile ---------- */}
-      <div style={profileStyle}>
+      <div style={{ ...profileStyle, cursor: "pointer" }} onClick={onOpenProfile}>
         <Avatar letter={user.name[0]} />
         <div>
           <div style={{ fontSize: "0.9rem" }}>{user.name}</div>
@@ -69,8 +75,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         <NavItem icon="💬" label="Chat" collapsed={collapsed} badge={unreadChats} onClick={() => onNavigate("chat")} />
         <NavItem icon="📊" label="Dashboard" collapsed={collapsed} onClick={() => onNavigate("dashboard")} />
         <NavItem icon="⚙️" label="Settings" collapsed={collapsed} onClick={() => onNavigate("settings")} />
-        <NavItem icon="🕘" label="History" collapsed={collapsed} disabled />
-        <NavItem icon="🧩" label="Extensions" collapsed={collapsed} disabled />
+        <NavItem icon="🕘" label="History" collapsed={collapsed} onClick={() => onNavigate("history")} />
+        <NavItem icon="🧩" label="Extensions" collapsed={collapsed} onClick={() => onNavigate("extensions")} />
 
         {/* ---------- Notifications ---------- */}
         <div style={{ position: "relative" }}>
@@ -79,7 +85,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             label="Notifications"
             collapsed={false}
             badge={notifications.length}
-            onClick={() => setShowNotifications(v => !v)}
+            onClick={() => {
+              setShowNotifications(v => !v);
+              onOpenNotifications?.();
+            }}
           />
 
           <div style={notificationDropdownStyle(showNotifications, collapsed)}>
@@ -101,13 +110,13 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <NavItem icon="✅" label="Approvals" collapsed={false} badge={pendingApprovals} disabled />
+        <NavItem icon="✅" label="Approvals" collapsed={false} badge={pendingApprovals} onClick={() => onNavigate("history")} />
       </div>
 
       {/* ---------- Quick Actions ---------- */}
       <div style={quickActions}>
         <button style={primaryAction} onClick={onNewChat}>➕ New Chat</button>
-        <button style={secondaryAction}>🔐 Login / Get Started</button>
+        <button style={secondaryAction} onClick={onLogin}>🔐 Login / Get Started</button>
       </div>
         </>
       )}

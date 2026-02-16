@@ -6,16 +6,24 @@ interface TopbarProps {
   onSearch?: (query: string) => void;
   onCommand?: (command: string) => void;
   onToggleSidebar?: () => void;
+  onNavigate?: (view: "chat" | "dashboard" | "settings" | "history" | "extensions") => void;
+  onNewChat?: () => void;
 }
 
 const Topbar: React.FC<TopbarProps> = ({
   onSearch = () => {},
   onCommand = () => {},
   onToggleSidebar,
+  onNavigate,
+  onNewChat,
 }) => {
   const [search, setSearch] = useState("");
   const [showCommands, setShowCommands] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [theme, setTheme] = useState<"light" | "dark">(
+    ((localStorage.getItem("neuroedge_theme") as "light" | "dark") || "light")
+  );
 
   /* -------------------- */
   /* Network status */
@@ -33,6 +41,30 @@ const Topbar: React.FC<TopbarProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("neuroedge_theme", theme);
+  }, [theme]);
+
+  const runCommand = (cmd: string) => {
+    const normalized = cmd.trim().toLowerCase();
+    if (normalized === "new chat") {
+      onNewChat?.();
+    } else if (normalized === "open settings") {
+      onNavigate?.("settings");
+    } else if (normalized === "toggle theme") {
+      setTheme((t) => (t === "light" ? "dark" : "light"));
+    } else if (normalized === "clear history") {
+      localStorage.removeItem("chat_history");
+      localStorage.removeItem("neuroedge_chat_context");
+      localStorage.removeItem("neuroedge_cache");
+      onNewChat?.();
+    } else if (normalized === "neuroedge diagnostics") {
+      onNavigate?.("dashboard");
+    }
+    onCommand(cmd);
+  };
+
   return (
     <div
       style={{
@@ -45,6 +77,7 @@ const Topbar: React.FC<TopbarProps> = ({
         padding: "0 1rem",
         gap: "1rem",
         zIndex: 10,
+        position: "relative",
       }}
     >
       {/* NeuroEdge Identity */}
@@ -106,13 +139,21 @@ const Topbar: React.FC<TopbarProps> = ({
       </button>
 
       {/* Notifications */}
-      <button title="Notifications" style={iconButton}>
+      <button
+        title="Notifications"
+        style={iconButton}
+        onClick={() => onNavigate?.("history")}
+      >
         🔔
       </button>
 
       {/* Theme Toggle */}
-      <button title="Toggle theme" style={iconButton}>
-        🌗
+      <button
+        title="Toggle theme"
+        style={iconButton}
+        onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+      >
+        {theme === "light" ? "🌙" : "☀️"}
       </button>
 
       {/* Floating Chat Toggle */}
@@ -127,15 +168,32 @@ const Topbar: React.FC<TopbarProps> = ({
       </button>
 
       {/* User Menu */}
-      <button title="User menu" style={iconButton}>
+      <button title="User menu" style={iconButton} onClick={() => setShowUserMenu((v) => !v)}>
         👤
       </button>
+
+      {showUserMenu && (
+        <div style={userMenuStyle}>
+          <button style={userMenuItemStyle} onClick={() => { onNavigate?.("settings"); setShowUserMenu(false); }}>
+            Profile Settings
+          </button>
+          <button style={userMenuItemStyle} onClick={() => { onNavigate?.("history"); setShowUserMenu(false); }}>
+            Notifications & History
+          </button>
+          <button style={userMenuItemStyle} onClick={() => { onNavigate?.("extensions"); setShowUserMenu(false); }}>
+            Extensions
+          </button>
+          <button style={userMenuItemStyle} onClick={() => { onNewChat?.(); setShowUserMenu(false); }}>
+            New Chat
+          </button>
+        </div>
+      )}
 
       {/* Command Palette Overlay */}
       {showCommands && (
         <CommandPalette
           onClose={() => setShowCommands(false)}
-          onSelect={onCommand}
+          onSelect={runCommand}
         />
       )}
     </div>
@@ -225,4 +283,31 @@ const iconButton: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   fontSize: "1.1rem",
+};
+
+const userMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 12,
+  top: 54,
+  zIndex: 50,
+  minWidth: 180,
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+  padding: 6,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const userMenuItemStyle: React.CSSProperties = {
+  textAlign: "left",
+  border: "none",
+  background: "#fff",
+  color: "#111827",
+  borderRadius: 8,
+  padding: "0.45rem 0.55rem",
+  cursor: "pointer",
+  fontSize: "0.82rem",
 };
