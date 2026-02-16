@@ -36,6 +36,7 @@ const SettingsPanel: React.FC = () => {
 
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
   const [ttsAvailable, setTtsAvailable] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
 
   /* -------------------- Lifecycle -------------------- */
 
@@ -101,143 +102,261 @@ const SettingsPanel: React.FC = () => {
     window.speechSynthesis.speak(utterance);
   };
 
+  const kernelStatusColor = (status: KernelHealthStatus) => {
+    if (status === "ready") return "#16a34a";
+    if (status === "degraded") return "#ca8a04";
+    return "#dc2626";
+  };
+
   /* -------------------- UI -------------------- */
 
   return (
-    <div className="settings-panel p-4 text-sm text-gray-200 space-y-6">
-      {/* ================= Header ================= */}
-      <div>
-        <h2 className="text-lg font-semibold">⚙️ NeuroEdge Settings</h2>
-        <p className="opacity-70">
-          Founder system configuration & runtime awareness
-        </p>
-      </div>
-
-      {/* ================= Founder Mode ================= */}
-      <section>
-        <h3 className="font-medium mb-2">Founder Mode</h3>
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            checked={settings.founderMode}
-            onChange={(e) =>
-              setSettings({ ...settings, founderMode: e.target.checked })
-            }
-          />
-          <span>
-            {settings.founderMode ? (
-              <span className="text-green-400">Enabled</span>
-            ) : (
-              <span className="text-red-400">Disabled</span>
-            )}
-          </span>
-        </div>
-        <p className="opacity-60 mt-1">
-          Enables founder-aware alerts, commands, and system summaries.
-        </p>
-      </section>
-
-      {/* ================= Voice / TTS ================= */}
-      <section>
-        <h3 className="font-medium mb-2">Voice Alerts (TTS)</h3>
-
-        <div className="flex items-center gap-3 mb-2">
-          <input
-            type="checkbox"
-            checked={settings.voiceAlertsEnabled}
-            disabled={!ttsAvailable}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                voiceAlertsEnabled: e.target.checked,
-              })
-            }
-          />
-          <span>
-            {ttsAvailable ? (
-              settings.voiceAlertsEnabled ? (
-                <span className="text-green-400">Enabled</span>
-              ) : (
-                <span className="text-yellow-400">Disabled</span>
-              )
-            ) : (
-              <span className="text-red-400">Not supported</span>
-            )}
-          </span>
-        </div>
-
-        <button
-          onClick={speakTestMessage}
-          disabled={!ttsAvailable || !settings.voiceAlertsEnabled}
-          className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40"
+    <div
+      style={{
+        height: "100%",
+        overflowY: "auto",
+        padding: "1.25rem",
+        background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+        color: "#0f172a",
+      }}
+    >
+      <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div
+          style={{
+            padding: "1rem 1.1rem",
+            borderRadius: 14,
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+          }}
         >
-          🔊 Test Voice
-        </button>
-
-        <p className="opacity-60 mt-1">
-          Used for kernel alerts, failures, and founder summaries.
-        </p>
-      </section>
-
-      {/* ================= Kernel Management ================= */}
-      <section>
-        <h3 className="font-medium mb-2">Kernel Orchestration</h3>
-
-        <div className="mb-2">
-          <label className="block opacity-70 mb-1">
-            Auto Load Balancing
-          </label>
-          <input
-            type="checkbox"
-            checked={settings.kernelAutoBalance}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                kernelAutoBalance: e.target.checked,
-              })
-            }
-          />
+          <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Settings</h2>
+          <p style={{ margin: "0.35rem 0 0", color: "#475569", fontSize: "0.9rem" }}>
+            Founder system configuration and runtime awareness
+          </p>
         </div>
 
-        <div className="space-y-2">
-          {kernels.map((k) => (
-            <div
-              key={k.id}
-              className="flex justify-between border border-gray-700 p-2 rounded"
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: "1rem",
+          }}
+        >
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Founder Mode</h3>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.founderMode}
+                onChange={(e) =>
+                  setSettings({ ...settings, founderMode: e.target.checked })
+                }
+              />
+              <span style={{ color: settings.founderMode ? "#15803d" : "#b91c1c", fontWeight: 600 }}>
+                {settings.founderMode ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+            <p style={mutedStyle}>
+              Enables founder-aware alerts, commands, and system summaries.
+            </p>
+          </section>
+
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Voice Alerts (TTS)</h3>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.voiceAlertsEnabled}
+                disabled={!ttsAvailable}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    voiceAlertsEnabled: e.target.checked,
+                  })
+                }
+              />
+              <span
+                style={{
+                  color: !ttsAvailable
+                    ? "#b91c1c"
+                    : settings.voiceAlertsEnabled
+                      ? "#15803d"
+                      : "#a16207",
+                  fontWeight: 600,
+                }}
+              >
+                {!ttsAvailable
+                  ? "Not supported"
+                  : settings.voiceAlertsEnabled
+                    ? "Enabled"
+                    : "Disabled"}
+              </span>
+            </label>
+            <button
+              onClick={speakTestMessage}
+              disabled={!ttsAvailable || !settings.voiceAlertsEnabled}
+              style={{
+                marginTop: "0.5rem",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                borderRadius: 10,
+                padding: "0.45rem 0.8rem",
+                cursor: !ttsAvailable || !settings.voiceAlertsEnabled ? "not-allowed" : "pointer",
+                opacity: !ttsAvailable || !settings.voiceAlertsEnabled ? 0.5 : 1,
+                fontWeight: 600,
+              }}
             >
-              <div>
-                <div className="font-mono">{k.id}</div>
-                <div className="text-xs opacity-60">
-                  {k.capabilities.join(", ")}
+              Test Voice
+            </button>
+            <p style={{ ...mutedStyle, marginTop: "0.6rem" }}>
+              Used for kernel alerts, failures, and founder summaries.
+            </p>
+          </section>
+        </div>
+
+        <section style={cardStyle}>
+          <h3 style={titleStyle}>Kernel Orchestration</h3>
+          <label style={{ ...rowStyle, marginBottom: "0.6rem" }}>
+            <input
+              type="checkbox"
+              checked={settings.kernelAutoBalance}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  kernelAutoBalance: e.target.checked,
+                })
+              }
+            />
+            <span style={{ fontWeight: 600 }}>Auto Load Balancing</span>
+          </label>
+
+          <div style={{ display: "grid", gap: "0.55rem" }}>
+            {kernels.length === 0 && (
+              <div style={{ ...mutedStyle, background: "#f8fafc", borderRadius: 10, padding: "0.7rem" }}>
+                No kernel snapshot yet.
+              </div>
+            )}
+            {kernels.map((k) => (
+              <div
+                key={k.id}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 12,
+                  background: "#f8fafc",
+                  padding: "0.75rem",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "0.75rem",
+                }}
+              >
+                <div>
+                  <div style={{ fontFamily: "monospace", fontWeight: 700 }}>{k.id}</div>
+                  <div style={{ color: "#64748b", fontSize: "0.8rem" }}>
+                    v{k.version} • {(k.capabilities || []).join(", ") || "none"}
+                  </div>
+                </div>
+                <div style={{ color: kernelStatusColor(k.status), fontWeight: 700 }}>
+                  {k.status}
                 </div>
               </div>
+            ))}
+          </div>
 
-              <div
-                className={
-                  k.status === "ready"
-                    ? "text-green-400"
-                    : k.status === "degraded"
-                    ? "text-yellow-400"
-                    : "text-red-400"
-                }
-              >
-                {k.status}
-              </div>
+          <p style={{ ...mutedStyle, marginTop: "0.6rem" }}>
+            Managed by orchestrator kernelManager (multi-kernel aware).
+          </p>
+        </section>
+
+        <section style={cardStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
+            <div>
+              <h3 style={titleStyle}>Founder</h3>
+              <p style={{ ...mutedStyle, marginTop: "0.2rem" }}>
+                Joseph Were, Founder and Engineer of Goldege Labs
+              </p>
             </div>
-          ))}
-        </div>
+            <button
+              onClick={() => setContactOpen((v) => !v)}
+              style={{
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                borderRadius: 10,
+                padding: "0.45rem 0.8rem",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              {contactOpen ? "Hide Contact" : "Contact Goldege Labs"}
+            </button>
+          </div>
 
-        <p className="opacity-60 mt-2">
-          Managed by orchestrator kernelManager (multi-kernel aware).
-        </p>
-      </section>
+          {contactOpen && (
+            <div
+              style={{
+                marginTop: "0.85rem",
+                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                background: "#f8fafc",
+                padding: "0.85rem",
+                display: "grid",
+                gap: "0.45rem",
+              }}
+            >
+              <a href="mailto:contact@goldegelabs.com" style={linkStyle}>
+                Email: contact@goldegelabs.com
+              </a>
+              <a href="https://goldegelabs.com" target="_blank" rel="noreferrer" style={linkStyle}>
+                Website: goldegelabs.com
+              </a>
+              <a href="https://github.com/josephwere" target="_blank" rel="noreferrer" style={linkStyle}>
+                GitHub: github.com/josephwere
+              </a>
+            </div>
+          )}
+        </section>
 
-      {/* ================= Footer ================= */}
-      <footer className="opacity-50 text-xs">
-        NeuroEdge © Founder Runtime • Safe-first • Observable • Replaceable
-      </footer>
+        <footer style={{ color: "#64748b", fontSize: "0.78rem", paddingBottom: "0.5rem" }}>
+          NeuroEdge © Founder Runtime • Safe-first • Observable • Replaceable
+        </footer>
+      </div>
     </div>
   );
+};
+
+const cardStyle: React.CSSProperties = {
+  padding: "1rem 1.1rem",
+  borderRadius: 14,
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+};
+
+const titleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "0.98rem",
+  color: "#0f172a",
+};
+
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.6rem",
+  marginTop: "0.6rem",
+};
+
+const mutedStyle: React.CSSProperties = {
+  margin: "0.45rem 0 0",
+  color: "#64748b",
+  fontSize: "0.82rem",
+};
+
+const linkStyle: React.CSSProperties = {
+  color: "#0f172a",
+  textDecoration: "none",
+  fontWeight: 600,
 };
 
 export default SettingsPanel;
