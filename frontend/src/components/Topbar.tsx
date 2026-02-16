@@ -115,6 +115,17 @@ const Topbar: React.FC<TopbarProps> = ({
         🌗
       </button>
 
+      {/* Floating Chat Toggle */}
+      <button
+        title="Toggle floating chat"
+        style={iconButton}
+        onClick={() =>
+          window.dispatchEvent(new CustomEvent("neuroedge:toggleFloating"))
+        }
+      >
+        🪟
+      </button>
+
       {/* User Menu */}
       <button title="User menu" style={iconButton}>
         👤

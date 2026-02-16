@@ -79,6 +79,16 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    const toggleFloating = () => setFloatingOpen((v) => !v);
+    window.addEventListener("neuroedge:toggleFloating", toggleFloating as EventListener);
+    return () =>
+      window.removeEventListener(
+        "neuroedge:toggleFloating",
+        toggleFloating as EventListener
+      );
+  }, []);
+
   return (
     <EventBusProvider>
       <div
@@ -115,26 +125,34 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
           />
         )}
 
-        <button
-          onClick={() => setFloatingOpen((v) => !v)}
-          style={{
-            position: "fixed",
-            right: 16,
-            bottom: 16,
-            zIndex: 10001,
-            border: "1px solid #cbd5e1",
-            background: floatingOpen ? "#0f172a" : "#ffffff",
-            color: floatingOpen ? "#ffffff" : "#0f172a",
-            borderRadius: 999,
-            padding: "0.52rem 0.85rem",
-            fontSize: "0.82rem",
-            fontWeight: 700,
-            cursor: "pointer",
-            boxShadow: "0 8px 20px rgba(15, 23, 42, 0.2)",
-          }}
-        >
-          {floatingOpen ? "Hide Floating" : "Floating"}
-        </button>
+        {/* Meta-AI style launcher */}
+        {!floatingOpen && (
+          <button
+            onClick={() => setFloatingOpen(true)}
+            style={{
+              position: "fixed",
+              right: 18,
+              bottom: 18,
+              zIndex: 10002,
+              display: "flex",
+              alignItems: "center",
+              gap: "0.45rem",
+              border: "none",
+              borderRadius: 999,
+              padding: "0.58rem 0.9rem",
+              background: "linear-gradient(135deg, #0ea5e9 0%, #2563eb 60%, #1d4ed8 100%)",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: "0.83rem",
+              cursor: "pointer",
+              boxShadow: "0 10px 24px rgba(37, 99, 235, 0.35)",
+            }}
+            title="Open Floating AI Chat"
+          >
+            <span style={{ fontSize: "1rem", lineHeight: 1 }}>✦</span>
+            <span>Ask NeuroEdge AI</span>
+          </button>
+        )}
 
         {/* 
           AI Suggestions Overlay will plug here later
