@@ -218,15 +218,23 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
 
   // --- Render ---
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%" }}>
-      <div id="chatScroll" style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", color: "#e2e8f0" }}>
+      <div
+        id="chatScroll"
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "1rem",
+          background: "transparent",
+        }}
+      >
         <InfiniteScroll
           dataLength={displayed.length}
           next={fetchMore}
           hasMore={displayed.length < messages.length}
           inverse
           scrollableTarget="chatScroll"
-          loader={<div style={{ textAlign: "center" }}>Loading…</div>}
+          loader={<div style={{ textAlign: "center", color: "#94a3b8" }}>Loading…</div>}
         >
           {displayed.map(renderMessage)}
         </InfiniteScroll>
@@ -234,7 +242,15 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       </div>
 
       {/* Input + AI Suggestions */}
-      <div style={{ position: "relative", display: "flex", padding: "0.5rem", background: "#e0e0e0" }}>
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          padding: "0.6rem",
+          background: "rgba(15, 23, 42, 0.9)",
+          borderTop: "1px solid rgba(148, 163, 184, 0.2)",
+        }}
+      >
         <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
         <input
           value={input}
@@ -245,9 +261,30 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             if (e.key === "Escape") setSuggestions([]);
           }}
           placeholder="Ask, debug, code, research…"
-          style={{ flex: 1, padding: "0.5rem" }}
+          style={{
+            flex: 1,
+            padding: "0.6rem 0.75rem",
+            background: "rgba(15, 23, 42, 0.6)",
+            color: "#e2e8f0",
+            border: "1px solid rgba(148, 163, 184, 0.3)",
+            borderRadius: 8,
+            outline: "none",
+          }}
         />
-        <button onClick={handleSend} style={{ marginLeft: "0.5rem", padding: "0.5rem 1rem", background: "#3a3aff", color: "#fff", border: "none" }}>Send</button>
+        <button
+          onClick={handleSend}
+          style={{
+            marginLeft: "0.5rem",
+            padding: "0.55rem 1rem",
+            background: "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+          }}
+        >
+          Send
+        </button>
       </div>
     </div>
   );

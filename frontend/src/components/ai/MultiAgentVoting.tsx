@@ -22,14 +22,15 @@ const MultiAgentVoting: React.FC<Props> = ({ suggestions, onVote }) => {
             display: "flex",
             alignItems: "center",
             gap: "0.5rem",
-            padding: "0.5rem",
-            border: "1px solid #ccc",
-            borderRadius: "6px",
-            background: "#f9f9f9",
+            padding: "0.6rem",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+            borderRadius: "10px",
+            background: "rgba(15, 23, 42, 0.7)",
+            color: "#e2e8f0",
             transition: "background 0.2s",
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = "#f0f0ff")}
-          onMouseLeave={e => (e.currentTarget.style.background = "#f9f9f9")}
+          onMouseEnter={e => (e.currentTarget.style.background = "rgba(37, 99, 235, 0.18)")}
+          onMouseLeave={e => (e.currentTarget.style.background = "rgba(15, 23, 42, 0.7)")}
         >
           <strong style={{ width: "60px" }}>{s.agent}</strong>
           <div style={{ flex: 1 }}>{s.text}</div>
@@ -37,7 +38,7 @@ const MultiAgentVoting: React.FC<Props> = ({ suggestions, onVote }) => {
             style={{
               width: "100px",
               height: "8px",
-              background: "#e5e7eb",
+              background: "rgba(148, 163, 184, 0.25)",
               borderRadius: "4px",
               overflow: "hidden",
               flexShrink: 0,
@@ -47,7 +48,7 @@ const MultiAgentVoting: React.FC<Props> = ({ suggestions, onVote }) => {
               style={{
                 width: `${s.confidence}%`,
                 height: "100%",
-                background: "#3a3aff",
+                background: "#2563eb",
                 transition: "width 0.3s",
               }}
             />
@@ -59,12 +60,12 @@ const MultiAgentVoting: React.FC<Props> = ({ suggestions, onVote }) => {
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
-              background: "#3a3aff",
+              background: "#2563eb",
               color: "#fff",
               transition: "background 0.2s",
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = "#1a1aff")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#3a3aff")}
+            onMouseEnter={e => (e.currentTarget.style.background = "#1d4ed8")}
+            onMouseLeave={e => (e.currentTarget.style.background = "#2563eb")}
             onClick={() => onVote?.(s.agent)}
           >
             Vote

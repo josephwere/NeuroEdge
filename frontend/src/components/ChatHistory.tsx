@@ -32,11 +32,11 @@ const ChatHistory: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: "1rem", height: "100%", overflowY: "auto" }}>
+    <div style={{ padding: "1rem", height: "100%", overflowY: "auto", background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)", color: "#e2e8f0" }}>
       <ChatSearchBar onSearch={handleSearch} />
 
       {filtered.length === 0 && (
-        <div style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+        <div style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
           No memory found.
         </div>
       )}

@@ -231,16 +231,22 @@ const Toggle: React.FC<{
 const container: React.CSSProperties = {
   padding: "2rem",
   maxWidth: "720px",
+  color: "#e2e8f0",
+  background: "rgba(15, 23, 42, 0.7)",
+  borderRadius: 16,
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
 };
 
 const title: React.CSSProperties = {
   marginBottom: "1.5rem",
+  color: "#f8fafc",
 };
 
 const section: React.CSSProperties = {
   marginBottom: "2rem",
   paddingBottom: "1rem",
-  borderBottom: "1px solid #ddd",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
 };
 
 const sectionTitle: React.CSSProperties = {
@@ -261,11 +267,15 @@ const labelStyle: React.CSSProperties = {
 const input: React.CSSProperties = {
   padding: "0.4rem",
   minWidth: "200px",
+  background: "rgba(15, 23, 42, 0.7)",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  color: "#e2e8f0",
+  borderRadius: 6,
 };
 
 const badge: React.CSSProperties = {
   padding: "4px 8px",
-  background: "#3a3aff",
+  background: "#2563eb",
   color: "#fff",
   borderRadius: "6px",
   fontSize: "0.75rem",
@@ -273,7 +283,7 @@ const badge: React.CSSProperties = {
 
 const dangerButton: React.CSSProperties = {
   marginTop: "0.75rem",
-  background: "#ff4d4f",
+  background: "#ef4444",
   color: "#fff",
   border: "none",
   padding: "0.5rem 0.75rem",
@@ -284,5 +294,5 @@ const dangerButton: React.CSSProperties = {
 const warning: React.CSSProperties = {
   marginTop: "0.5rem",
   fontSize: "0.75rem",
-  opacity: 0.7,
+  color: "#94a3b8",
 };

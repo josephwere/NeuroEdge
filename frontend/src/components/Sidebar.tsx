@@ -140,7 +140,7 @@ const NavItem: React.FC<any> = ({ icon, label, collapsed, onClick, disabled, bad
       opacity: disabled ? 0.4 : 1,
       transition: "all 0.2s ease",
     }}
-    onMouseEnter={e => !disabled && (e.currentTarget.style.background = "#3a3aff22")}
+    onMouseEnter={e => !disabled && (e.currentTarget.style.background = "rgba(37, 99, 235, 0.2)")}
     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
   >
     <span>{icon}</span>
@@ -161,14 +161,14 @@ const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
   width: collapsed ? "0px" : "260px",
   minWidth: collapsed ? "0px" : "260px",
   flexShrink: 0,
-  background: "#1e1e2f",
-  color: "#fff",
+  background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+  color: "#e2e8f0",
   height: "100vh",
   display: "flex",
   flexDirection: "column",
   overflowY: "auto",
   transition: "width 0.25s ease",
-  borderRight: collapsed ? "none" : "1px solid #2b2b3c",
+  borderRight: collapsed ? "none" : "1px solid rgba(148, 163, 184, 0.2)",
 });
 
 const headerStyle = (collapsed: boolean): React.CSSProperties => ({
@@ -176,21 +176,21 @@ const headerStyle = (collapsed: boolean): React.CSSProperties => ({
   display: "flex",
   justifyContent: collapsed ? "center" : "space-between",
   alignItems: "center",
-  borderBottom: "1px solid #2b2b3c",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
 });
 
 const profileStyle: React.CSSProperties = {
   padding: "1rem",
   display: "flex",
   gap: "0.75rem",
-  borderBottom: "1px solid #2b2b3c",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
 };
 
 const avatarStyle: React.CSSProperties = {
   width: 36,
   height: 36,
   borderRadius: "50%",
-  background: "#3a3aff",
+  background: "#2563eb",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -204,7 +204,7 @@ const notificationDropdownStyle = (open: boolean, collapsed: boolean): React.CSS
   width: collapsed ? 0 : 240,
   maxHeight: open ? 280 : 0,
   overflow: "hidden",
-  background: "#2b2b3c",
+  background: "rgba(15, 23, 42, 0.8)",
   borderRadius: 8,
   transition: "all 0.3s ease",
   boxShadow: open ? "0 8px 30px rgba(0,0,0,0.45)" : "none",
@@ -220,9 +220,9 @@ const notificationItemStyle = (type?: string): React.CSSProperties => ({
   borderRadius: 6,
   fontSize: "0.8rem",
   background:
-    type === "error" ? "#ff4d4f22" :
-    type === "success" ? "#52c41a22" :
-    "#3a3aff22",
+    type === "error" ? "rgba(239, 68, 68, 0.2)" :
+    type === "success" ? "rgba(34, 197, 94, 0.2)" :
+    "rgba(37, 99, 235, 0.2)",
 });
 
 const closeBtn: React.CSSProperties = {
@@ -234,7 +234,7 @@ const closeBtn: React.CSSProperties = {
 
 const badgeStyle: React.CSSProperties = {
   marginLeft: "auto",
-  background: "#ff4d4f",
+  background: "#f87171",
   borderRadius: 12,
   padding: "0 6px",
   fontSize: "0.7rem",
@@ -242,7 +242,7 @@ const badgeStyle: React.CSSProperties = {
 
 const quickActions: React.CSSProperties = {
   padding: "1rem",
-  borderTop: "1px solid #2b2b3c",
+  borderTop: "1px solid rgba(148, 163, 184, 0.2)",
 };
 
 const iconButton: React.CSSProperties = {

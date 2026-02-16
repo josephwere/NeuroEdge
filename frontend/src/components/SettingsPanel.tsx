@@ -23,7 +23,7 @@ const SettingsPanel: React.FC = () => {
 
   /* -------------------- Render -------------------- */
   return (
-    <div style={{ padding: "1rem", maxWidth: "600px" }}>
+    <div style={{ padding: "1rem", maxWidth: "600px", color: "#e2e8f0" }}>
       <h1>⚙️ Settings</h1>
 
       {/* -------------------- Theme -------------------- */}
@@ -116,7 +116,7 @@ const SettingsPanel: React.FC = () => {
         <button onClick={clearMemory} style={buttonStyle}>
           Clear Chat Memory / Local Preferences
         </button>
-        <p style={{ fontSize: "0.8rem", color: "#555" }}>
+        <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
           This will remove all local chat history and preferences. Online data
           may remain if synced.
         </p>
@@ -125,7 +125,7 @@ const SettingsPanel: React.FC = () => {
       {/* -------------------- Extensions Placeholder -------------------- */}
       <section style={sectionStyle}>
         <h2>🧩 Extensions & Plugins</h2>
-        <p style={{ color: "#555", fontSize: "0.85rem" }}>
+        <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
           Install mini-modules or custom commands (future-ready).
         </p>
       </section>
@@ -140,8 +140,8 @@ const sectionStyle: React.CSSProperties = {
   marginTop: "1.5rem",
   padding: "1rem",
   borderRadius: "8px",
-  border: "1px solid #e5e7eb",
-  background: "#fafafa",
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  background: "rgba(15, 23, 42, 0.7)",
 };
 
 const labelStyle: React.CSSProperties = {
@@ -159,12 +159,14 @@ const selectStyle: React.CSSProperties = {
   width: "100%",
   padding: "0.5rem",
   borderRadius: "6px",
-  border: "1px solid #d1d5db",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.7)",
+  color: "#e2e8f0",
 };
 
 const buttonStyle: React.CSSProperties = {
   padding: "0.5rem 0.75rem",
-  background: "#3a3aff",
+  background: "#2563eb",
   color: "#fff",
   border: "none",
   borderRadius: "6px",

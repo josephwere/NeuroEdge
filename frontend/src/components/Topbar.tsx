@@ -50,8 +50,8 @@ const Topbar: React.FC<TopbarProps> = ({
       style={{
         height: "56px",
         width: "100%",
-        background: "var(--ne-surface)",
-        borderBottom: "1px solid #e5e7eb",
+        background: "rgba(15, 23, 42, 0.9)",
+        borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
         display: "flex",
         alignItems: "center",
         padding: "0 1rem",
@@ -69,7 +69,7 @@ const Topbar: React.FC<TopbarProps> = ({
         style={{
           fontWeight: 600,
           fontSize: "0.95rem",
-          color: "var(--ne-text)",
+          color: "#e2e8f0",
           background: "transparent",
           border: "none",
           cursor: "pointer",
@@ -106,11 +106,11 @@ const Topbar: React.FC<TopbarProps> = ({
             width: "100%",
             padding: "0.5rem 0.75rem",
             borderRadius: "8px",
-            border: "1px solid #d1d5db",
+            border: "1px solid rgba(148, 163, 184, 0.3)",
             outline: "none",
             fontSize: "0.85rem",
-            background: "var(--ne-surface)",
-            color: "var(--ne-text)",
+            background: "rgba(15, 23, 42, 0.7)",
+            color: "#e2e8f0",
           }}
         />
       </div>
@@ -236,11 +236,12 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "420px",
-          background: "var(--ne-surface)",
+          background: "rgba(15, 23, 42, 0.95)",
           borderRadius: "12px",
           padding: "0.5rem",
-          boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
-          color: "var(--ne-text)",
+          boxShadow: "0 20px 40px rgba(0,0,0,0.35)",
+          color: "#e2e8f0",
+          border: "1px solid rgba(148, 163, 184, 0.2)",
         }}
       >
         {commands.map((cmd) => (
@@ -279,6 +280,7 @@ const iconButton: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   fontSize: "1.1rem",
+  color: "#e2e8f0",
 };
 
 const userMenuStyle: React.CSSProperties = {
@@ -287,8 +289,8 @@ const userMenuStyle: React.CSSProperties = {
   top: 54,
   zIndex: 50,
   minWidth: 180,
-  background: "var(--ne-surface)",
-  border: "1px solid #e5e7eb",
+  background: "rgba(15, 23, 42, 0.95)",
+  border: "1px solid rgba(148, 163, 184, 0.25)",
   borderRadius: 10,
   boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
   padding: 6,
@@ -300,8 +302,8 @@ const userMenuStyle: React.CSSProperties = {
 const userMenuItemStyle: React.CSSProperties = {
   textAlign: "left",
   border: "none",
-  background: "var(--ne-surface)",
-  color: "var(--ne-text)",
+  background: "rgba(15, 23, 42, 0.7)",
+  color: "#e2e8f0",
   borderRadius: 8,
   padding: "0.45rem 0.55rem",
   cursor: "pointer",

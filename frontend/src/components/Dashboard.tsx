@@ -173,8 +173,8 @@ const Dashboard: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: "1.5rem", overflowY: "auto", height: "100%", background: "var(--ne-bg)", color: "var(--ne-text)" }}>
-      <h2>NeuroEdge Dashboard</h2>
+    <div style={pageStyle}>
+      <h2 style={{ marginTop: 0 }}>NeuroEdge Dashboard</h2>
 
       {/* System Status */}
       <div style={widgetStyle}>
@@ -184,7 +184,7 @@ const Dashboard: React.FC = () => {
             <div key={s.name} style={statusRowStyle}>
               <strong>{s.name}</strong>
               <span style={statusPillStyle(s.status)}>{s.status}</span>
-              <span style={{ color: "#64748b", fontSize: "0.85rem" }}>{s.detail}</span>
+              <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>{s.detail}</span>
             </div>
           ))}
         </div>
@@ -217,7 +217,7 @@ const Dashboard: React.FC = () => {
                 <span style={statusPillStyle(k.status === "ready" ? "online" : "degraded")}>
                   {k.status}
                 </span>
-                <span style={{ color: "#64748b", fontSize: "0.85rem" }}>v{k.version}</span>
+                <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>v{k.version}</span>
               </div>
             ))}
           </div>
@@ -228,16 +228,16 @@ const Dashboard: React.FC = () => {
       <div style={widgetStyle}>
         <h3>Messages / Commands</h3>
         <p>Total Messages: {messages.total}</p>
-        <p style={{ color: "#ff4d4f" }}>Errors: {messages.errors}</p>
-        <p style={{ color: "#faad14" }}>Warnings: {messages.warnings}</p>
+        <p style={{ color: "#f87171" }}>Errors: {messages.errors}</p>
+        <p style={{ color: "#facc15" }}>Warnings: {messages.warnings}</p>
       </div>
 
       {/* Approvals */}
       <div style={widgetStyle}>
         <h3>Approvals</h3>
         <p>Pending: {approvals.pending}</p>
-        <p style={{ color: "#36cfc9" }}>Approved: {approvals.approved}</p>
-        <p style={{ color: "#ff4d4f" }}>Rejected: {approvals.rejected}</p>
+        <p style={{ color: "#34d399" }}>Approved: {approvals.approved}</p>
+        <p style={{ color: "#f87171" }}>Rejected: {approvals.rejected}</p>
       </div>
 
       {/* AI Suggestions */}
@@ -253,7 +253,7 @@ const Dashboard: React.FC = () => {
                 style={{
                   padding: "0.5rem 1rem",
                   borderRadius: "6px",
-                  background: "#2b2b3c",
+                  background: "rgba(15, 23, 42, 0.8)",
                   color: "#fff",
                   border: "none",
                   cursor: "pointer",
@@ -274,12 +274,22 @@ const Dashboard: React.FC = () => {
 /* -------------------- */
 /* Widget Styles */
 /* -------------------- */
+const pageStyle: React.CSSProperties = {
+  padding: "1.5rem",
+  overflowY: "auto",
+  height: "100%",
+  background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+  color: "#e2e8f0",
+  fontFamily: "'Space Grotesk', system-ui, sans-serif",
+};
+
 const widgetStyle: React.CSSProperties = {
   marginBottom: "1rem",
   padding: "1rem",
-  borderRadius: "8px",
-  background: "var(--ne-surface)",
-  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+  borderRadius: 16,
+  background: "rgba(15, 23, 42, 0.7)",
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
 };
 
 const statusRowStyle: React.CSSProperties = {
@@ -289,12 +299,22 @@ const statusRowStyle: React.CSSProperties = {
 };
 
 const statusPillStyle = (status: ServiceStatus["status"]): React.CSSProperties => ({
-  padding: "0.15rem 0.6rem",
+  padding: "0.2rem 0.6rem",
   borderRadius: 999,
   fontSize: "0.7rem",
   textTransform: "uppercase",
-  background: status === "online" ? "#dcfce7" : status === "degraded" ? "#fef9c3" : "#fee2e2",
-  color: status === "online" ? "#166534" : status === "degraded" ? "#854d0e" : "#991b1b",
+  background:
+    status === "online"
+      ? "rgba(34, 197, 94, 0.18)"
+      : status === "degraded"
+        ? "rgba(234, 179, 8, 0.18)"
+        : "rgba(239, 68, 68, 0.18)",
+  color:
+    status === "online"
+      ? "#86efac"
+      : status === "degraded"
+        ? "#facc15"
+        : "#f87171",
 });
 
 export default Dashboard;

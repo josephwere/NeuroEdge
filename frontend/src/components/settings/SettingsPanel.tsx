@@ -118,8 +118,8 @@ const SettingsPanel: React.FC = () => {
         height: "100%",
         overflowY: "auto",
         padding: "1.25rem",
-        background: "var(--ne-bg)",
-        color: "var(--ne-text)",
+        background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+        color: "#e2e8f0",
       }}
     >
       <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -127,13 +127,13 @@ const SettingsPanel: React.FC = () => {
           style={{
             padding: "1rem 1.1rem",
             borderRadius: 14,
-            background: "var(--ne-surface)",
-            border: "1px solid #e2e8f0",
-            boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+            background: "rgba(15, 23, 42, 0.7)",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+            boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
           }}
         >
           <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Settings</h2>
-          <p style={{ margin: "0.35rem 0 0", color: "#475569", fontSize: "0.9rem" }}>
+          <p style={{ margin: "0.35rem 0 0", color: "#94a3b8", fontSize: "0.9rem" }}>
             Founder system configuration and runtime awareness
           </p>
         </div>
@@ -149,7 +149,7 @@ const SettingsPanel: React.FC = () => {
             <h3 style={titleStyle}>Runtime Mode</h3>
             <div style={{ ...rowStyle, marginBottom: "0.45rem" }}>
               <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{runtimeMode}</span>
-              <span style={{ color: "#15803d", fontWeight: 600 }}>Local-only</span>
+              <span style={{ color: "#34d399", fontWeight: 600 }}>Local-only</span>
             </div>
             <p style={mutedStyle}>
               NeuroEdge runs as an independent local system. Core chat routing does not require external AI providers.
@@ -166,7 +166,7 @@ const SettingsPanel: React.FC = () => {
                   setSettings({ ...settings, founderMode: e.target.checked })
                 }
               />
-              <span style={{ color: settings.founderMode ? "#15803d" : "#b91c1c", fontWeight: 600 }}>
+              <span style={{ color: settings.founderMode ? "#34d399" : "#f87171", fontWeight: 600 }}>
                 {settings.founderMode ? "Enabled" : "Disabled"}
               </span>
             </label>
@@ -192,10 +192,10 @@ const SettingsPanel: React.FC = () => {
               <span
                 style={{
                   color: !ttsAvailable
-                    ? "#b91c1c"
+                    ? "#f87171"
                     : settings.voiceAlertsEnabled
-                      ? "#15803d"
-                      : "#a16207",
+                      ? "#34d399"
+                      : "#facc15",
                   fontWeight: 600,
                 }}
               >
@@ -211,9 +211,9 @@ const SettingsPanel: React.FC = () => {
               disabled={!ttsAvailable || !settings.voiceAlertsEnabled}
               style={{
                 marginTop: "0.5rem",
-                border: "1px solid #cbd5e1",
-                background: "var(--ne-surface)",
-                color: "var(--ne-text)",
+                border: "1px solid rgba(148, 163, 184, 0.3)",
+                background: "rgba(15, 23, 42, 0.7)",
+                color: "#e2e8f0",
                 borderRadius: 10,
                 padding: "0.45rem 0.8rem",
                 cursor: !ttsAvailable || !settings.voiceAlertsEnabled ? "not-allowed" : "pointer",
@@ -247,7 +247,7 @@ const SettingsPanel: React.FC = () => {
 
           <div style={{ display: "grid", gap: "0.55rem" }}>
             {kernels.length === 0 && (
-              <div style={{ ...mutedStyle, background: "var(--ne-surface)", borderRadius: 10, padding: "0.7rem" }}>
+              <div style={{ ...mutedStyle, background: "rgba(15, 23, 42, 0.7)", borderRadius: 10, padding: "0.7rem" }}>
                 No kernel snapshot yet.
               </div>
             )}
@@ -255,9 +255,9 @@ const SettingsPanel: React.FC = () => {
               <div
                 key={k.id}
                 style={{
-                  border: "1px solid #e2e8f0",
+                  border: "1px solid rgba(148, 163, 184, 0.2)",
                   borderRadius: 12,
-                  background: "var(--ne-surface)",
+                  background: "rgba(15, 23, 42, 0.7)",
                   padding: "0.75rem",
                   display: "flex",
                   justifyContent: "space-between",
@@ -266,7 +266,7 @@ const SettingsPanel: React.FC = () => {
               >
                 <div>
                   <div style={{ fontFamily: "monospace", fontWeight: 700 }}>{k.id}</div>
-                  <div style={{ color: "#64748b", fontSize: "0.8rem" }}>
+                  <div style={{ color: "#94a3b8", fontSize: "0.8rem" }}>
                     v{k.version} • {(k.capabilities || []).join(", ") || "none"}
                   </div>
                 </div>
@@ -293,9 +293,9 @@ const SettingsPanel: React.FC = () => {
             <button
               onClick={() => setContactOpen((v) => !v)}
               style={{
-                border: "1px solid #cbd5e1",
-                background: "var(--ne-surface)",
-                color: "var(--ne-text)",
+                border: "1px solid rgba(148, 163, 184, 0.3)",
+                background: "rgba(15, 23, 42, 0.7)",
+                color: "#e2e8f0",
                 borderRadius: 10,
                 padding: "0.45rem 0.8rem",
                 cursor: "pointer",
@@ -310,9 +310,9 @@ const SettingsPanel: React.FC = () => {
             <div
               style={{
                 marginTop: "0.85rem",
-                border: "1px solid #e2e8f0",
+                border: "1px solid rgba(148, 163, 184, 0.2)",
                 borderRadius: 12,
-                background: "var(--ne-surface)",
+                background: "rgba(15, 23, 42, 0.7)",
                 padding: "0.85rem",
                 display: "grid",
                 gap: "0.45rem",
@@ -331,7 +331,7 @@ const SettingsPanel: React.FC = () => {
           )}
         </section>
 
-        <footer style={{ color: "#64748b", fontSize: "0.78rem", paddingBottom: "0.5rem" }}>
+        <footer style={{ color: "#94a3b8", fontSize: "0.78rem", paddingBottom: "0.5rem" }}>
           NeuroEdge © Founder Runtime • Safe-first • Observable • Replaceable
         </footer>
       </div>
@@ -342,15 +342,15 @@ const SettingsPanel: React.FC = () => {
 const cardStyle: React.CSSProperties = {
   padding: "1rem 1.1rem",
   borderRadius: 14,
-  background: "var(--ne-surface)",
-  border: "1px solid #e2e8f0",
-  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+  background: "rgba(15, 23, 42, 0.7)",
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
 };
 
 const titleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: "0.98rem",
-  color: "var(--ne-text)",
+  color: "#e2e8f0",
 };
 
 const rowStyle: React.CSSProperties = {
@@ -362,12 +362,12 @@ const rowStyle: React.CSSProperties = {
 
 const mutedStyle: React.CSSProperties = {
   margin: "0.45rem 0 0",
-  color: "var(--ne-muted)",
+  color: "#94a3b8",
   fontSize: "0.82rem",
 };
 
 const linkStyle: React.CSSProperties = {
-  color: "var(--ne-text)",
+  color: "#e2e8f0",
   textDecoration: "none",
   fontWeight: 600,
 };

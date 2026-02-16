@@ -50,7 +50,7 @@ const Home: React.FC = () => {
   const orchestrator = new OrchestratorClient();
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--ne-bg)" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)" }}>
       {/* Sidebar */}
       <Sidebar
         collapsed={sidebarCollapsed}
@@ -62,7 +62,7 @@ const Home: React.FC = () => {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative" }}>
         {/* Dashboard View */}
         {activeView === "dashboard" && (
-          <div style={{ padding: "1rem", flex: 1, background: "var(--ne-bg)", overflowY: "auto" }}>
+          <div style={{ padding: "1rem", flex: 1, background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)", overflowY: "auto" }}>
             <Dashboard />
           </div>
         )}

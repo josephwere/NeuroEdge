@@ -28,16 +28,18 @@ const LiveDiff: React.FC<LiveDiffProps> = ({ hunks, onApplyChange }) => {
           key={idx}
           style={{
             display: "flex",
-            border: "1px solid #ccc",
-            borderRadius: "6px",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+            borderRadius: "10px",
             overflow: "hidden",
+            background: "rgba(15, 23, 42, 0.7)",
           }}
         >
           {/* Original */}
           <pre
             style={{
               flex: 1,
-              background: "#ffecec",
+              background: "rgba(239, 68, 68, 0.15)",
+              color: "#fecaca",
               margin: 0,
               padding: "0.5rem",
               whiteSpace: "pre-wrap",
@@ -51,7 +53,8 @@ const LiveDiff: React.FC<LiveDiffProps> = ({ hunks, onApplyChange }) => {
           <pre
             style={{
               flex: 1,
-              background: "#e6ffed",
+              background: "rgba(34, 197, 94, 0.15)",
+              color: "#bbf7d0",
               margin: 0,
               padding: "0.5rem",
               whiteSpace: "pre-wrap",
@@ -70,8 +73,8 @@ const LiveDiff: React.FC<LiveDiffProps> = ({ hunks, onApplyChange }) => {
               borderRadius: "4px",
               border: "none",
               cursor: "pointer",
-              background: applied[idx] ? "#3a3aff" : "#d1d5db",
-              color: "#fff",
+              background: applied[idx] ? "#2563eb" : "rgba(148, 163, 184, 0.35)",
+              color: applied[idx] ? "#fff" : "#e2e8f0",
               transition: "background 0.2s",
             }}
           >

@@ -74,15 +74,17 @@ const containerStyle: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   height: "100vh",
-  background: "var(--ne-bg)",
-  fontFamily: "Arial, sans-serif",
+  background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+  fontFamily: "'Space Grotesk', system-ui, sans-serif",
+  color: "#e2e8f0",
 };
 
 const cardStyle: React.CSSProperties = {
-  background: "var(--ne-surface)",
+  background: "rgba(15, 23, 42, 0.7)",
   padding: "2rem",
-  borderRadius: "12px",
-  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+  borderRadius: "16px",
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
   width: "320px",
   display: "flex",
   flexDirection: "column",
@@ -92,16 +94,16 @@ const inputStyle: React.CSSProperties = {
   padding: "0.75rem",
   marginBottom: "0.75rem",
   borderRadius: "6px",
-  border: "1px solid #ccc",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
   outline: "none",
-  background: "var(--ne-surface)",
-  color: "var(--ne-text)",
+  background: "rgba(15, 23, 42, 0.7)",
+  color: "#e2e8f0",
 };
 
 const loginBtnStyle: React.CSSProperties = {
   padding: "0.75rem",
   borderRadius: "6px",
-  background: "#3a3aff",
+  background: "#2563eb",
   color: "#fff",
   border: "none",
   cursor: "pointer",
@@ -110,7 +112,7 @@ const loginBtnStyle: React.CSSProperties = {
 const guestBtnStyle: React.CSSProperties = {
   padding: "0.75rem",
   borderRadius: "6px",
-  background: "#2b2b3c",
+  background: "rgba(15, 23, 42, 0.9)",
   color: "#fff",
   border: "none",
   cursor: "pointer",

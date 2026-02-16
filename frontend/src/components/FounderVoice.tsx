@@ -123,7 +123,7 @@ const FounderVoice: React.FC<Props> = ({ orchestrator }) => {
         {listening ? "Listening..." : "Activate Founder Voice"}
       </button>
       {transcript && (
-        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#111" }}>
+        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#94a3b8" }}>
           "{transcript}"
         </div>
       )}
