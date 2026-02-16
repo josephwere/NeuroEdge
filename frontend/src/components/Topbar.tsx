@@ -73,8 +73,12 @@ const Topbar: React.FC<TopbarProps> = ({
           background: "transparent",
           border: "none",
           cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
         }}
       >
+        <img src="/icon.png" alt="NeuroEdge" style={{ width: 18, height: 18, borderRadius: 4 }} />
         NeuroEdge
       </button>
 

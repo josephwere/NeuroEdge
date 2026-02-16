@@ -195,12 +195,15 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
               width: 36,
               height: 36,
               borderRadius: 999,
-              border: "1px solid rgba(148, 163, 184, 0.3)",
-              background: "rgba(15, 23, 42, 0.8)",
-              color: "#e2e8f0",
-              fontSize: "1rem",
+              border: "1px solid rgba(148, 163, 184, 0.35)",
+              background: "rgba(15, 23, 42, 0.9)",
+              color: "transparent",
               cursor: "move",
-              boxShadow: "0 6px 16px rgba(15, 23, 42, 0.18)",
+              boxShadow: "0 8px 20px rgba(15, 23, 42, 0.35)",
+              backgroundImage: "url('/icon.png')",
+              backgroundSize: "70% 70%",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
             }}
           >
             ✦

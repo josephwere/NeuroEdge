@@ -257,18 +257,19 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         height: embedded ? "100%" : minimized ? "48px" : maximized ? "calc(100vh - 48px)" : "560px",
         maxWidth: "100vw",
         maxHeight: "100vh",
-        background: "#1e1e2f",
-        color: "#fff",
+        background: "rgba(15, 23, 42, 0.9)",
+        color: "#e2e8f0",
         borderRadius: embedded ? "0" : "12px",
-        boxShadow: embedded ? "none" : "0 0 30px rgba(0,0,0,0.6)",
+        boxShadow: embedded ? "none" : "0 12px 30px rgba(15, 23, 42, 0.55)",
         zIndex: embedded ? 1 : 9999,
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
       }}
     >
-      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: "#2b2b3c", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: "rgba(15, 23, 42, 0.95)", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(148, 163, 184, 0.2)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <img src="/logo.png" alt="NeuroEdge" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
           <strong>NeuroEdge Floating Chat</strong>
           {!embedded && (
             <>
@@ -302,7 +303,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               <button
                 title="Minimize"
                 onClick={() => setMinimized((v) => !v)}
-                style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+                style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid rgba(148, 163, 184, 0.3)", cursor: "pointer", background: "rgba(15, 23, 42, 0.8)", color: "#e2e8f0" }}
               >
                 {minimized ? "▢" : "—"}
               </button>
@@ -312,7 +313,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                   setMinimized(false);
                   setMaximized((v) => !v);
                 }}
-                style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer" }}
+                style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid rgba(148, 163, 184, 0.3)", cursor: "pointer", background: "rgba(15, 23, 42, 0.8)", color: "#e2e8f0" }}
               >
                 {maximized ? "❐" : "□"}
               </button>
@@ -330,14 +331,14 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
       {(!minimized || embedded) && (
         <>
-          <div id="floatingChatScroll" style={{ flex: 1, overflowY: "auto", padding: "10px", fontFamily: "monospace" }}>
+          <div id="floatingChatScroll" style={{ flex: 1, overflowY: "auto", padding: "10px", fontFamily: "monospace", color: "#e2e8f0" }}>
             <InfiniteScroll
               dataLength={displayed.length}
               next={fetchMore}
               hasMore={displayed.length < messages.length}
               inverse
               scrollableTarget="floatingChatScroll"
-              loader={<div style={{ textAlign: "center" }}>Loading…</div>}
+              loader={<div style={{ textAlign: "center", color: "#94a3b8" }}>Loading…</div>}
             >
               {displayed.map(m => <div key={m.id} style={{ marginBottom: "4px" }}>{m.text}</div>)}
             </InfiniteScroll>
@@ -354,9 +355,9 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                 if (e.key === "Escape") setSuggestions([]);
               }}
               placeholder="execute • debug • fix • analyze"
-              style={{ flex: 1, padding: "10px", background: "#2b2b3c", border: "none", color: "#fff" }}
+              style={{ flex: 1, padding: "10px", background: "rgba(15, 23, 42, 0.8)", border: "1px solid rgba(148, 163, 184, 0.3)", color: "#e2e8f0", borderRadius: 8, outline: "none" }}
             />
-            <button onClick={send} style={{ padding: "10px", background: "#3a3aff", border: "none", color: "#fff" }}>▶</button>
+            <button onClick={send} style={{ padding: "10px", background: "#2563eb", border: "none", color: "#fff", borderRadius: 8, marginLeft: 6 }}>▶</button>
           </div>
         </>
       )}
@@ -367,8 +368,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 export default FloatingChat;
 
 const miniActionStyle: React.CSSProperties = {
-  border: "1px solid #394152",
-  background: "#1e1e2f",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.8)",
   color: "#e2e8f0",
   borderRadius: 8,
   padding: "0.2rem 0.45rem",

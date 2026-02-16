@@ -51,7 +51,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         <>
       {/* ---------- Header ---------- */}
       <div style={headerStyle(collapsed)}>
-        <strong style={{ fontSize: "1.1rem" }}>🧠 NeuroEdge</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <img src="/logo.png" alt="NeuroEdge" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
+          <strong style={{ fontSize: "1.1rem" }}>NeuroEdge</strong>
+        </div>
         <button onClick={onToggle} style={iconButton}>
           ⬅️
         </button>
