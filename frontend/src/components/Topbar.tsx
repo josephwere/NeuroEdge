@@ -109,6 +109,8 @@ const Topbar: React.FC<TopbarProps> = ({
             border: "1px solid #d1d5db",
             outline: "none",
             fontSize: "0.85rem",
+            background: "var(--ne-surface)",
+            color: "var(--ne-text)",
           }}
         />
       </div>
@@ -234,10 +236,11 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "420px",
-          background: "#ffffff",
+          background: "var(--ne-surface)",
           borderRadius: "12px",
           padding: "0.5rem",
           boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+          color: "var(--ne-text)",
         }}
       >
         {commands.map((cmd) => (
@@ -253,7 +256,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
               borderRadius: "8px",
             }}
             onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "#f3f4f6")
+              (e.currentTarget.style.background = "rgba(148,163,184,0.18)")
             }
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "transparent")
@@ -284,7 +287,7 @@ const userMenuStyle: React.CSSProperties = {
   top: 54,
   zIndex: 50,
   minWidth: 180,
-  background: "#fff",
+  background: "var(--ne-surface)",
   border: "1px solid #e5e7eb",
   borderRadius: 10,
   boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
@@ -297,8 +300,8 @@ const userMenuStyle: React.CSSProperties = {
 const userMenuItemStyle: React.CSSProperties = {
   textAlign: "left",
   border: "none",
-  background: "#fff",
-  color: "#111827",
+  background: "var(--ne-surface)",
+  color: "var(--ne-text)",
   borderRadius: 8,
   padding: "0.45rem 0.55rem",
   cursor: "pointer",

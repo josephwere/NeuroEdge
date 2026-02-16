@@ -74,12 +74,12 @@ const containerStyle: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   height: "100vh",
-  background: "#f5f6fa",
+  background: "var(--ne-bg)",
   fontFamily: "Arial, sans-serif",
 };
 
 const cardStyle: React.CSSProperties = {
-  background: "#fff",
+  background: "var(--ne-surface)",
   padding: "2rem",
   borderRadius: "12px",
   boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
@@ -94,6 +94,8 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "6px",
   border: "1px solid #ccc",
   outline: "none",
+  background: "var(--ne-surface)",
+  color: "var(--ne-text)",
 };
 
 const loginBtnStyle: React.CSSProperties = {

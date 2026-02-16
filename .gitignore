@@ -30,3 +30,7 @@ pnpm-debug.log*
 # Misc temp
 *.tmp
 *.swp
+
+# Local data
+orchestrator/data/
+database/.env

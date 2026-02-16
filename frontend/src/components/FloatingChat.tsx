@@ -286,6 +286,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               >
                 History
               </button>
+              <button
+                title="Diagnostics"
+                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "dashboard" }))}
+                style={miniActionStyle}
+              >
+                Diagnostics
+              </button>
             </>
           )}
         </div>

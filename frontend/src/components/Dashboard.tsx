@@ -173,7 +173,7 @@ const Dashboard: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: "1.5rem", overflowY: "auto", height: "100%", background: "#f5f6fa" }}>
+    <div style={{ padding: "1.5rem", overflowY: "auto", height: "100%", background: "var(--ne-bg)", color: "var(--ne-text)" }}>
       <h2>NeuroEdge Dashboard</h2>
 
       {/* System Status */}
@@ -278,7 +278,7 @@ const widgetStyle: React.CSSProperties = {
   marginBottom: "1rem",
   padding: "1rem",
   borderRadius: "8px",
-  background: "#fff",
+  background: "var(--ne-surface)",
   boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
 };
 

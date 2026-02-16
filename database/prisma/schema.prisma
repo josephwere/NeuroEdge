@@ -1,0 +1,70 @@
+// NeuroEdge Prisma schema (PostgreSQL + pgvector)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  hashedPassword String
+  role         String   @default("user")
+  createdAt    DateTime @default(now())
+  projects     Project[]
+  chats        Chat[]
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  path      String
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Chat {
+  id           String   @id @default(uuid())
+  userId       String
+  chatText     String
+  responseText String
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Agent {
+  id           String   @id @default(uuid())
+  type         String
+  status       String
+  lastActivity DateTime @default(now())
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model Upgrade {
+  version   String @id
+  status    String
+  details   String
+  createdAt DateTime @default(now())
+}
+
+model Doctrine {
+  id        String   @id @default(uuid())
+  rules     String
+  version   String
+  status    String
+  createdAt DateTime @default(now())
+}

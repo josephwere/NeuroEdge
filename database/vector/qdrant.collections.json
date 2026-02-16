@@ -1,0 +1,12 @@
+{
+  "collections": [
+    {
+      "name": "embeddings",
+      "vectors": { "size": 1536, "distance": "Cosine" }
+    },
+    {
+      "name": "knowledge_graph",
+      "vectors": { "size": 1536, "distance": "Cosine" }
+    }
+  ]
+}
