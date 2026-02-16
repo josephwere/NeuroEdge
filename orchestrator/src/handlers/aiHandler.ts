@@ -14,6 +14,14 @@ export async function handleAIInference(req: Request, res: Response) {
   }
 
   const mlUrl = process.env.ML_URL || "http://localhost:8090";
+  const text = String(input || "").toLowerCase();
+  const fallbackIntent = text.includes("error") || text.includes("fail")
+    ? "analyze_logs"
+    : text.includes("build") || text.includes("compile")
+      ? "run_build_checks"
+      : text.includes("test")
+        ? "run_tests"
+        : "gather_context";
 
   try {
     const mlResp = await axios.post(`${mlUrl}/infer`, {
@@ -32,7 +40,17 @@ export async function handleAIInference(req: Request, res: Response) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("[aiHandler] Error during AI inference:", err);
-    res.status(500).json({ error: "ML inference failed" });
+    console.warn("[aiHandler] ML unavailable, returning fallback intent");
+    res.json({
+      success: true,
+      reasoning: `Fallback inferred action '${fallbackIntent}'`,
+      intent: fallbackIntent,
+      risk: "low",
+      ml: {
+        status: "fallback",
+        action: fallbackIntent,
+      },
+      timestamp: new Date().toISOString(),
+    });
   }
 }

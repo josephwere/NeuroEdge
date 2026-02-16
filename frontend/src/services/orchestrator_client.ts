@@ -73,7 +73,7 @@ export class OrchestratorClient {
       throw new Error("Command is required");
     }
 
-    const [aiResp, execResp] = await Promise.all([
+    const [aiResult, execResult] = await Promise.allSettled([
       this.postJson("/ai", {
         kernelId,
         input: command,
@@ -85,18 +85,27 @@ export class OrchestratorClient {
       }),
     ]);
 
+    const aiResp = aiResult.status === "fulfilled" ? aiResult.value : null;
+    const execResp = execResult.status === "fulfilled" ? execResult.value : null;
+    const executeError =
+      execResult.status === "rejected"
+        ? execResult.reason instanceof Error
+          ? execResult.reason.message
+          : "Execution failed"
+        : "";
+
     return {
-      success: Boolean(execResp?.success ?? aiResp?.success ?? true),
-      reasoning: aiResp?.reasoning,
+      success: Boolean(execResp?.success ?? aiResp?.success ?? false),
+      reasoning: aiResp?.reasoning || (executeError ? "Execution failed before AI reasoning" : undefined),
       intent: aiResp?.intent,
-      risk: aiResp?.risk,
+      risk: aiResp?.risk || "low",
       logs: execResp?.stdout ? [String(execResp.stdout)] : [],
       results: [
         {
           id: execResp?.id,
-          success: Boolean(execResp?.success),
+          success: Boolean(execResp?.success && !executeError),
           stdout: execResp?.stdout,
-          stderr: execResp?.stderr,
+          stderr: execResp?.stderr || executeError,
         },
       ],
       approvals: Array.isArray(execResp?.approvals) ? execResp.approvals : [],

@@ -30,6 +30,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
 
   /* AI Suggestions state (overlay-ready) */
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [floatingOpen, setFloatingOpen] = useState(false);
 
   /**
    * Accept a suggestion (top-ranked)
@@ -105,11 +106,34 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
         </div>
 
         {/* Floating Chat */}
-        <FloatingChat
-          orchestrator={orchestrator}
-          initialPosition={floatingPosition}
-          onPositionChange={setFloatingPosition}
-        />
+        {floatingOpen && (
+          <FloatingChat
+            orchestrator={orchestrator}
+            initialPosition={floatingPosition}
+            onPositionChange={setFloatingPosition}
+          />
+        )}
+
+        <button
+          onClick={() => setFloatingOpen((v) => !v)}
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            zIndex: 10001,
+            border: "1px solid #cbd5e1",
+            background: floatingOpen ? "#0f172a" : "#ffffff",
+            color: floatingOpen ? "#ffffff" : "#0f172a",
+            borderRadius: 999,
+            padding: "0.52rem 0.85rem",
+            fontSize: "0.82rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(15, 23, 42, 0.2)",
+          }}
+        >
+          {floatingOpen ? "Hide Floating" : "Floating"}
+        </button>
 
         {/* 
           AI Suggestions Overlay will plug here later
