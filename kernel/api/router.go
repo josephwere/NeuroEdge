@@ -20,6 +20,7 @@ func chain(next http.HandlerFunc, mws ...func(http.HandlerFunc) http.HandlerFunc
 func secureHandler(next http.HandlerFunc) http.HandlerFunc {
 	return chain(
 		next,
+		withCORS,
 		withPanicRecovery,
 		withRequestID,
 		withSecurityHeaders,
@@ -30,7 +31,7 @@ func secureHandler(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func publicHandler(next http.HandlerFunc) http.HandlerFunc {
-	return chain(next, withPanicRecovery, withRequestID, withSecurityHeaders, withRequestLogging)
+	return chain(next, withCORS, withPanicRecovery, withRequestID, withSecurityHeaders, withRequestLogging)
 }
 
 func NewRouter() *mux.Router {
