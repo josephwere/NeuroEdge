@@ -35,7 +35,7 @@
       "active": true,
       "dialog": true,
       "endpoints": [
-        "https://releases.goldegelabs.com/neuroedge/{{target}}/{{current_version}}"
+        "https://github.com/josephwere/NeuroEdge/releases/latest/download/latest.json"
       ],
       "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
     },
