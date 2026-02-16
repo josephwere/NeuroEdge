@@ -69,66 +69,40 @@ const ExtensionsPanel: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: "1.5rem", height: "100%", overflowY: "auto", color: "var(--ne-text)" }}>
-      <h2>🧩 Extensions / Plugins</h2>
-      <p style={{ color: "var(--ne-muted)", marginBottom: "1rem" }}>
-        Manage mini-modules safely: activate, deactivate, or load new ones.
-      </p>
+    <div style={pageStyle}>
+      <div style={headerStyle}>
+        <div>
+          <div style={eyebrowStyle}>Runtime Governance</div>
+          <h2 style={titleStyle}>🧩 Extensions / Plugins</h2>
+          <p style={subtitleStyle}>
+            Manage mini-modules safely: activate, deactivate, or load new ones.
+          </p>
+        </div>
+        <button onClick={handleLoadNew} style={primaryActionStyle}>
+          ➕ Load New Extension
+        </button>
+      </div>
 
-      <button
-        onClick={handleLoadNew}
-        style={{
-          padding: "0.5rem 1rem",
-          marginBottom: "1rem",
-          background: "#2563eb",
-          color: "#fff",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer",
-        }}
-      >
-        ➕ Load New Extension
-      </button>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={listStyle}>
         {extensions.map(ext => (
-          <div
-            key={ext.id}
-            style={{
-              padding: "1rem",
-              borderRadius: "8px",
-              border: "1px solid var(--ne-muted)",
-              background: ext.active ? "rgba(37, 99, 235, 0.12)" : "var(--ne-surface)",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
+          <div key={ext.id} style={cardStyle(ext.active)}>
             <div>
-              <div style={{ fontWeight: 600 }}>{ext.name}</div>
+              <div style={cardTitleStyle}>{ext.name}</div>
               {ext.description && (
-                <div style={{ fontSize: "0.85rem", color: "var(--ne-muted)" }}>
+                <div style={cardSubtitleStyle}>
                   {ext.description} {ext.version && `v${ext.version}`}
                 </div>
               )}
-              <div style={{ fontSize: "0.75rem", color: "var(--ne-muted)" }}>
+              <div style={cardMetaStyle}>
                 Permissions: {ext.permissions.join(", ") || "None"}
               </div>
             </div>
-
-            <button
-              onClick={() => toggleExtension(ext.id)}
-              style={{
-                padding: "0.3rem 0.6rem",
-                borderRadius: "6px",
-                border: "none",
-                cursor: "pointer",
-                background: ext.active ? "#ef4444" : "#2563eb",
-                color: "#fff",
-              }}
-            >
-              {ext.active ? "Deactivate" : "Activate"}
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", alignItems: "flex-end" }}>
+              <span style={statusPillStyle(ext.active)}>{ext.active ? "Active" : "Inactive"}</span>
+              <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)}>
+                {ext.active ? "Deactivate" : "Activate"}
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -137,3 +111,100 @@ const ExtensionsPanel: React.FC = () => {
 };
 
 export default ExtensionsPanel;
+
+const pageStyle: React.CSSProperties = {
+  padding: "1.5rem",
+  height: "100%",
+  overflowY: "auto",
+  color: "var(--ne-text)",
+  background: "linear-gradient(180deg, rgba(37, 99, 235, 0.08) 0%, var(--ne-bg) 60%)",
+  fontFamily: "'Space Grotesk', system-ui, sans-serif",
+};
+
+const headerStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "1.5rem",
+  marginBottom: "1.5rem",
+  flexWrap: "wrap",
+};
+
+const eyebrowStyle: React.CSSProperties = {
+  textTransform: "uppercase",
+  letterSpacing: "0.2em",
+  fontSize: "0.65rem",
+  color: "var(--ne-muted)",
+};
+
+const titleStyle: React.CSSProperties = {
+  margin: "0.35rem 0 0.35rem",
+  fontSize: "1.4rem",
+};
+
+const subtitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "var(--ne-muted)",
+};
+
+const primaryActionStyle: React.CSSProperties = {
+  padding: "0.55rem 1rem",
+  background: "#2563eb",
+  border: "none",
+  color: "#fff",
+  cursor: "pointer",
+  borderRadius: 10,
+  fontSize: "0.85rem",
+};
+
+const listStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "1rem",
+};
+
+const cardStyle = (active: boolean): React.CSSProperties => ({
+  padding: "1rem",
+  borderRadius: 16,
+  border: "1px solid rgba(148, 163, 184, 0.25)",
+  background: active ? "rgba(37, 99, 235, 0.12)" : "var(--ne-surface)",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.15)",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "1rem",
+});
+
+const cardTitleStyle: React.CSSProperties = {
+  fontWeight: 600,
+  fontSize: "1rem",
+};
+
+const cardSubtitleStyle: React.CSSProperties = {
+  fontSize: "0.85rem",
+  color: "var(--ne-muted)",
+};
+
+const cardMetaStyle: React.CSSProperties = {
+  fontSize: "0.75rem",
+  color: "var(--ne-muted)",
+};
+
+const statusPillStyle = (active: boolean): React.CSSProperties => ({
+  padding: "0.2rem 0.6rem",
+  borderRadius: 999,
+  background: active ? "rgba(16, 185, 129, 0.2)" : "rgba(148, 163, 184, 0.2)",
+  color: active ? "#10b981" : "var(--ne-muted)",
+  fontSize: "0.7rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+});
+
+const actionButtonStyle = (active: boolean): React.CSSProperties => ({
+  padding: "0.4rem 0.75rem",
+  borderRadius: 8,
+  border: "none",
+  cursor: "pointer",
+  background: active ? "#ef4444" : "#2563eb",
+  color: "#fff",
+  fontSize: "0.8rem",
+});
