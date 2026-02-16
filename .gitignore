@@ -6,6 +6,8 @@ Thumbs.db
 
 # Dependencies
 **/node_modules/
+frontend/src-tauri/target/
+frontend/src-tauri/icons/.idea/
 
 # Build artifacts
 **/dist/

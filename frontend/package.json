@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -26,6 +28,7 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^1.5.14",
     "vite": "^5.0.0",
     "@vitejs/plugin-react": "^4.1.0",
 
