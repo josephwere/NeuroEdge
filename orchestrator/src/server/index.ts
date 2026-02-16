@@ -17,6 +17,7 @@ import { handleChat } from "@handlers/chatHandler";
 import { handleExecution } from "@handlers/executionHandler";
 import { handleAIInference } from "@handlers/aiHandler";
 import { appendEvent, listEvents, readState, writeState } from "@storage/hybrid_db";
+import { InferenceRegistry, InferenceNode } from "@mesh/inference_registry";
 
 export function startServer(
   restPort: number,
@@ -88,6 +89,47 @@ export function startServer(
       time: new Date().toISOString(),
       services,
     });
+  });
+
+  /* ---------------- Mesh Inference Registry ---------------- */
+  const meshRegistry = new InferenceRegistry();
+
+  app.post("/mesh/register", (req: Request, res: Response) => {
+    const { id, baseUrl, kind, capabilities } = req.body || {};
+    if (!id || !baseUrl) {
+      return res.status(400).json({ error: "Missing id or baseUrl" });
+    }
+    meshRegistry.register({
+      id,
+      baseUrl,
+      kind: kind || "unknown",
+      capabilities: Array.isArray(capabilities) ? capabilities : [],
+    } as InferenceNode);
+    res.json({ status: "ok" });
+  });
+
+  app.post("/mesh/heartbeat", (req: Request, res: Response) => {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    meshRegistry.heartbeat(id);
+    res.json({ status: "ok" });
+  });
+
+  app.get("/mesh/nodes", (_req: Request, res: Response) => {
+    res.json(meshRegistry.list());
+  });
+
+  app.post("/mesh/infer", async (req: Request, res: Response) => {
+    const node = meshRegistry.pickNode();
+    if (!node) {
+      return res.status(503).json({ error: "No mesh nodes available" });
+    }
+    try {
+      const response = await axios.post(`${node.baseUrl.replace(/\/$/, "")}/infer`, req.body || {});
+      res.json({ node: node.id, result: response.data });
+    } catch (err: any) {
+      res.status(502).json({ error: "Mesh node inference failed", detail: err?.message || String(err) });
+    }
   });
 
   app.post("/chat", handleChat);
