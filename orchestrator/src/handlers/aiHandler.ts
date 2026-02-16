@@ -15,6 +15,7 @@ export async function handleAIInference(req: Request, res: Response) {
   }
 
   const mlUrl = process.env.ML_URL || "http://localhost:8090";
+  const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:7070";
   const text = String(input || "").toLowerCase();
   const fallbackIntent = text.includes("error") || text.includes("fail")
     ? "analyze_logs"
@@ -30,24 +31,35 @@ export async function handleAIInference(req: Request, res: Response) {
       timestamp: Date.now(),
       payload: { input, payload },
     });
-    const mlResp = await axios.post(`${mlUrl}/infer`, {
-      text: input,
-      payload,
-      context: req.body?.context || {},
-    });
-
-    const mlData = mlResp.data || {};
+    let mlData: any = null;
+    let usedMesh = false;
+    try {
+      const meshResp = await axios.post(`${orchestratorUrl}/mesh/infer`, {
+        text: input,
+        payload,
+        context: req.body?.context || {},
+      });
+      mlData = meshResp.data?.result || meshResp.data;
+      usedMesh = true;
+    } catch {
+      const mlResp = await axios.post(`${mlUrl}/infer`, {
+        text: input,
+        payload,
+        context: req.body?.context || {},
+      });
+      mlData = mlResp.data || {};
+    }
     appendEvent({
       type: "ml.infer.response",
       timestamp: Date.now(),
-      payload: mlData,
+      payload: { ...mlData, mesh: usedMesh },
     });
     res.json({
       success: true,
-      reasoning: `ML inferred action '${mlData.action || "unknown"}'`,
+      reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,
       intent: mlData.action || "unknown",
       risk: "low",
-      ml: mlData,
+      ml: { ...mlData, mesh: usedMesh },
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
