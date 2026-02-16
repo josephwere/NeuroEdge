@@ -31,6 +31,14 @@
     "security": {
       "csp": null
     },
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://releases.goldegelabs.com/neuroedge/{{target}}/{{current_version}}"
+      ],
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+    },
     "bundle": {
       "active": true,
       "targets": "all",
