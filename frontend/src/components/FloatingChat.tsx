@@ -198,7 +198,16 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
       if (res.logs) res.logs.forEach(l => addMessage(`[Log] ${l}`, "info"));
       if (res.meshStatus) res.meshStatus.forEach((n: any) => addMessage(`🌐 [${n.node}] ${n.status}`, "mesh"));
-      if (res.results) res.results.forEach((r: ExecutionResult) => addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error"));
+      if (res.results) {
+        res.results.forEach((r: ExecutionResult) => {
+          const stderr = String(r?.stderr || "");
+          if (!r.success && stderr.toLowerCase().includes("ml inference failed")) {
+            addMessage("⚠️ ML temporarily unavailable. Using local fallback.", "warn");
+            return;
+          }
+          addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
+        });
+      }
       if (res.approvals) res.approvals.forEach(addApproval);
 
     } catch (err: any) {

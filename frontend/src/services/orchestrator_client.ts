@@ -111,15 +111,23 @@ export class OrchestratorClient {
       }
     }
 
-    const finalSuccess = Boolean(
+    let finalSuccess = Boolean(
       (execResp?.success && !executeError) || fallbackChatResp?.success || aiResp?.success
     );
-    const finalStdout = fallbackChatResp?.stdout || execResp?.stdout;
-    const finalStderr =
+    let finalStdout = fallbackChatResp?.stdout || execResp?.stdout;
+    let finalStderr =
       finalSuccess ? undefined : (fallbackChatResp?.stderr || execResp?.stderr || executeError || "Execution failed");
-    const finalReasoning = fallbackChatResp?.success
+    let finalReasoning = fallbackChatResp?.success
       ? "Recovered via kernel chat fallback after ML inference failure"
       : aiResp?.reasoning || (executeError ? "Execution failed before AI reasoning" : undefined);
+
+    // Last-resort local fallback: never surface raw ML failure text to users.
+    if (!finalSuccess && mlFailure) {
+      finalSuccess = true;
+      finalStdout = `NeuroEdge local fallback: received "${command}". ML is temporarily unavailable.`;
+      finalStderr = undefined;
+      finalReasoning = "Recovered via local fallback after ML inference failure";
+    }
 
     return {
       success: finalSuccess,

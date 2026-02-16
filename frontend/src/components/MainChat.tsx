@@ -159,9 +159,16 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       if (res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
 
       if (res.logs) res.logs.forEach((l: string) => addMessage(`[Log] ${l}`, "info"));
-      if (res.results) res.results.forEach((r: any) =>
-        addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error")
-      );
+      if (res.results) {
+        res.results.forEach((r: any) => {
+          const stderr = String(r?.stderr || "");
+          if (!r.success && stderr.toLowerCase().includes("ml inference failed")) {
+            addMessage("⚠️ ML temporarily unavailable. Using local fallback.", "warn");
+            return;
+          }
+          addMessage(r.success ? r.stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
+        });
+      }
     } catch (err: any) {
       addMessage(`❌ Error: ${err.message || err}`, "error");
     }
