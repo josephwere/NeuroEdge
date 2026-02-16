@@ -79,8 +79,8 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const orchestratorUrl = (import.meta as any).env?.VITE_ORCHESTRATOR_URL || "http://localhost:7070";
-    const kernelUrl = "http://localhost:8080/health";
-    const mlUrl = "http://localhost:8090/ready";
+    const kernelUrl = (import.meta as any).env?.VITE_KERNEL_URL || "http://localhost:8080/health";
+    const mlUrl = (import.meta as any).env?.VITE_ML_URL || "http://localhost:8090/ready";
 
     const fetchStatus = async () => {
       const results: ServiceStatus[] = [];
