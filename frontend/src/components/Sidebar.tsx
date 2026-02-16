@@ -15,6 +15,7 @@ interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
   onNavigate: (view: ViewType) => void;
+  onNewChat?: () => void;
   unreadChats?: number;
   pendingApprovals?: number;
   user?: {
@@ -30,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggle,
   onNavigate,
+  onNewChat,
   unreadChats = 0,
   pendingApprovals = 0,
   user = { name: "Guest User", mode: "local" },
@@ -104,7 +106,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ---------- Quick Actions ---------- */}
       <div style={quickActions}>
-        <button style={primaryAction}>➕ New Chat</button>
+        <button style={primaryAction} onClick={onNewChat}>➕ New Chat</button>
         <button style={secondaryAction}>🔐 Login / Get Started</button>
       </div>
         </>

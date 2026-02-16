@@ -1,6 +1,6 @@
 // frontend/src/components/FounderAssistant.tsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { OrchestratorClient } from "@/services/orchestrator_client";
 
 /* -------------------- Types -------------------- */
@@ -21,13 +21,12 @@ interface AlertItem extends FounderMessage {
 /* -------------------- FounderAssistant Component -------------------- */
 const FounderAssistant: React.FC<Props> = ({ orchestrator }) => {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [nextId, setNextId] = useState(1);
+  const nextIdRef = useRef(1);
 
   /* ---------------- Listen for founder messages ---------------- */
   useEffect(() => {
     const handler = (msg: FounderMessage) => {
-      const id = nextId;
-      setNextId(id + 1);
+      const id = nextIdRef.current++;
 
       // Add alert to UI
       setAlerts(prev => [...prev, { ...msg, id }]);
@@ -41,7 +40,7 @@ const FounderAssistant: React.FC<Props> = ({ orchestrator }) => {
 
     orchestrator.onFounderMessage(handler);
     return () => orchestrator.offFounderMessage(handler);
-  }, [orchestrator, nextId]);
+  }, [orchestrator]);
 
   /* ---------------- TTS ---------------- */
   const speak = (text: string) => {

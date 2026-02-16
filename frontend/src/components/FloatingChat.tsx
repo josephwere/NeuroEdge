@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import InfiniteScroll from "react-infinite-scroll-component";
 import { chatContext } from "@/services/chatContext";
 import { OrchestratorClient } from "@/services/orchestrator_client";
-import { saveToCache, getCache } from "@/services/offlineCache";
+import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
@@ -105,6 +105,25 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       setDisplayed(logs.slice(-PAGE_SIZE));
       setPage(1);
     }
+  }, []);
+
+  useEffect(() => {
+    const clearForNewChat = () => {
+      setMessages([]);
+      setDisplayed([]);
+      setPage(0);
+      setInput("");
+      setSuggestions([]);
+      chatContext.clear();
+      clearCache();
+    };
+
+    window.addEventListener("neuroedge:newChat", clearForNewChat as EventListener);
+    return () =>
+      window.removeEventListener(
+        "neuroedge:newChat",
+        clearForNewChat as EventListener
+      );
   }, []);
 
   // --- FounderAssistant Commands ---

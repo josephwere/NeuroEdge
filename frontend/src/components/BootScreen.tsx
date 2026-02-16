@@ -64,6 +64,9 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
       setHints(prev => [...prev, { id: hintId++, message: msg, x: Math.random() * 80 + 10, y: Math.random() * 70 + 10 }]);
 
     let offline = false; // track if we started offline
+    let pollInterval: number | undefined;
+    const healthBase = (import.meta as any).env?.VITE_ORCHESTRATOR_URL || "";
+    const healthUrl = healthBase ? `${healthBase}/health` : "/health";
 
     const simulateModules = async () => {
       for (let i = 0; i < modules.length; i++) {
@@ -80,7 +83,7 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 1200);
-        const res = await fetch("/api/health", { signal: controller.signal });
+        const res = await fetch(healthUrl, { signal: controller.signal });
         clearTimeout(timeout);
         if (res.ok) addLog("✔ Kernel online");
         else throw new Error("Kernel unhealthy");
@@ -95,7 +98,7 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
     const pollKernelOnline = async () => {
       if (!offline) return; // already online
       try {
-        const res = await fetch("/api/health");
+        const res = await fetch(healthUrl);
         if (res.ok) {
           offline = false;
           setWarning(null);
@@ -113,11 +116,15 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
       setTimeout(onDone, 800);
 
       // Poll every 5s if backend comes online
-      const interval = setInterval(pollKernelOnline, 5000);
-      return () => clearInterval(interval);
+      pollInterval = window.setInterval(pollKernelOnline, 5000);
     };
 
     runBoot();
+    return () => {
+      if (pollInterval) {
+        window.clearInterval(pollInterval);
+      }
+    };
   }, [onDone, addNotification]);
 
   return (

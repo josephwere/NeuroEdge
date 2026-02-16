@@ -94,18 +94,45 @@ export class OrchestratorClient {
           : "Execution failed"
         : "";
 
+    let fallbackChatResp: any = null;
+    const combinedFailureText = `${executeError} ${String(execResp?.stderr || "")}`.toLowerCase();
+    const mlFailure = combinedFailureText.includes("ml inference failed");
+    const executionFailed = execResult.status === "rejected" || execResp?.success === false;
+
+    if (executionFailed && mlFailure) {
+      try {
+        fallbackChatResp = await this.postJson("/chat", {
+          kernelId,
+          message: command,
+          text: command,
+        });
+      } catch {
+        fallbackChatResp = null;
+      }
+    }
+
+    const finalSuccess = Boolean(
+      (execResp?.success && !executeError) || fallbackChatResp?.success || aiResp?.success
+    );
+    const finalStdout = fallbackChatResp?.stdout || execResp?.stdout;
+    const finalStderr =
+      finalSuccess ? undefined : (fallbackChatResp?.stderr || execResp?.stderr || executeError || "Execution failed");
+    const finalReasoning = fallbackChatResp?.success
+      ? "Recovered via kernel chat fallback after ML inference failure"
+      : aiResp?.reasoning || (executeError ? "Execution failed before AI reasoning" : undefined);
+
     return {
-      success: Boolean(execResp?.success ?? aiResp?.success ?? false),
-      reasoning: aiResp?.reasoning || (executeError ? "Execution failed before AI reasoning" : undefined),
+      success: finalSuccess,
+      reasoning: finalReasoning,
       intent: aiResp?.intent,
       risk: aiResp?.risk || "low",
-      logs: execResp?.stdout ? [String(execResp.stdout)] : [],
+      logs: finalStdout ? [String(finalStdout)] : [],
       results: [
         {
-          id: execResp?.id,
-          success: Boolean(execResp?.success && !executeError),
-          stdout: execResp?.stdout,
-          stderr: execResp?.stderr || executeError,
+          id: fallbackChatResp?.id || execResp?.id,
+          success: finalSuccess,
+          stdout: finalStdout,
+          stderr: finalStderr,
         },
       ],
       approvals: Array.isArray(execResp?.approvals) ? execResp.approvals : [],

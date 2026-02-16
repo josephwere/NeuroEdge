@@ -4,7 +4,7 @@ import { chatContext } from "@/services/chatContext";
 import { OrchestratorClient } from "@/services/orchestrator_client";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { saveToCache, getCache } from "@/services/offlineCache";
+import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
@@ -54,6 +54,25 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       setDisplayed(logs.slice(-PAGE_SIZE));
       setPage(1);
     }
+  }, []);
+
+  useEffect(() => {
+    const clearForNewChat = () => {
+      setMessages([]);
+      setDisplayed([]);
+      setPage(0);
+      setInput("");
+      setSuggestions([]);
+      chatContext.clear();
+      clearCache();
+    };
+
+    window.addEventListener("neuroedge:newChat", clearForNewChat as EventListener);
+    return () =>
+      window.removeEventListener(
+        "neuroedge:newChat",
+        clearForNewChat as EventListener
+      );
   }, []);
 
   // --- Infinite scroll ---

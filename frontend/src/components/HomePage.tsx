@@ -13,9 +13,7 @@ import ExtensionsPanel from "@/components/ExtensionsPanel";
 import FounderAssistant from "@/components/FounderAssistant"; // Founder voice & alerts
 import TutorialGuide from "@/components/TutorialGuide";
 
-import { ChatHistoryProvider } from "@/services/chatHistoryStore";
 import { OrchestratorClient } from "@/services/orchestrator_client";
-import { NotificationProvider } from "@/services/notificationStore";
 
 import { loadExtension } from "@/extensions/extensionLoader";
 import codeLinter from "@/extensions/examples/codeLinter";
@@ -95,73 +93,92 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
     loadExtension(codeLinter, extCtx);
   }, [orchestrator]);
 
+  const startNewChat = () => {
+    setActiveView("chat");
+    window.dispatchEvent(new CustomEvent("neuroedge:newChat"));
+  };
+
+  const handleTopbarCommand = (cmd: string) => {
+    const normalized = cmd.trim().toLowerCase();
+    if (normalized === "new chat") {
+      startNewChat();
+      return;
+    }
+    if (normalized === "open settings") {
+      setActiveView("settings");
+      return;
+    }
+  };
+
   return (
-    <NotificationProvider>
-      <ChatHistoryProvider>
+    <>
+      <div
+        style={{
+          display: "flex",
+          height: "100vh",
+          width: "100%",
+          overflow: "hidden",
+          backgroundColor: "#f5f6fa",
+        }}
+      >
+        {/* ---------------- Sidebar ---------------- */}
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onNavigate={setActiveView}
+          onNewChat={startNewChat}
+        />
+
+        {/* ---------------- Main Area ---------------- */}
         <div
           style={{
+            flex: 1,
             display: "flex",
-            height: "100vh",
-            width: "100%",
-            overflow: "hidden",
-            backgroundColor: "#f5f6fa",
+            flexDirection: "column",
+            position: "relative",
+            minWidth: 0,
           }}
         >
-          {/* ---------------- Sidebar ---------------- */}
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-            onNavigate={setActiveView}
+          {/* Topbar */}
+          <Topbar
+            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onCommand={handleTopbarCommand}
           />
 
-          {/* ---------------- Main Area ---------------- */}
+          {/* Founder Assistant (voice + alerts) */}
+          <FounderAssistant orchestrator={orchestrator} />
+
+          {/* Main Content */}
           <div
             style={{
               flex: 1,
               display: "flex",
               flexDirection: "column",
               position: "relative",
+              overflow: "hidden",
               minWidth: 0,
             }}
           >
-            {/* Topbar */}
-            <Topbar onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)} />
-
-            {/* Founder Assistant (voice + alerts) */}
-            <FounderAssistant orchestrator={orchestrator} />
-
-            {/* Main Content */}
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                position: "relative",
-                overflow: "hidden",
-                minWidth: 0,
-              }}
-            >
-              {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}
-              {activeView === "dashboard" && <Dashboard />}
-              {activeView === "settings" && <SettingsPanel />}
-              {activeView === "extensions" && <ExtensionsPanel />}
-              {activeView === "history" && <ChatHistoryPanel />}
-            </div>
+            {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}
+            {activeView === "dashboard" && <Dashboard />}
+            {activeView === "settings" && <SettingsPanel />}
+            {activeView === "extensions" && <ExtensionsPanel />}
+            {activeView === "history" && <ChatHistoryPanel />}
           </div>
         </div>
-        <TutorialGuide
-          open={showTutorial}
-          onSkip={() => {
-            localStorage.setItem("neuroedge_tutorial_seen", "1");
-            setShowTutorial(false);
-          }}
-          onFinish={() => {
-            localStorage.setItem("neuroedge_tutorial_seen", "1");
-            setShowTutorial(false);
-          }}
-        />
-      </ChatHistoryProvider>
-    </NotificationProvider>
+      </div>
+      <TutorialGuide
+        open={showTutorial}
+        onSkip={() => {
+          localStorage.setItem("neuroedge_tutorial_seen", "1");
+          setShowTutorial(false);
+        }}
+        onFinish={() => {
+          localStorage.setItem("neuroedge_tutorial_seen", "1");
+          setShowTutorial(false);
+        }}
+      />
+    </>
   );
 };
 

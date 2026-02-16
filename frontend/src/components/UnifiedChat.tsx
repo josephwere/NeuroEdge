@@ -34,7 +34,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
   const [floatingOpen, setFloatingOpen] = useState(false);
   const [launcherPos, setLauncherPos] = useState({
     x: Math.max(24, window.innerWidth - 72),
-    y: Math.max(80, window.innerHeight - 92),
+    y: 88,
   });
 
   /**
@@ -80,7 +80,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
       }));
       setLauncherPos(pos => ({
         x: Math.min(pos.x, innerWidth - 48),
-        y: Math.min(pos.y, innerHeight - 48),
+        y: Math.max(56, Math.min(pos.y, innerHeight - 48)),
       }));
     };
 
@@ -124,7 +124,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
       mx = e.clientX;
       my = e.clientY;
       x = Math.max(8, Math.min(window.innerWidth - 48, x));
-      y = Math.max(8, Math.min(window.innerHeight - 48, y));
+      y = Math.max(56, Math.min(window.innerHeight - 48, y));
       setLauncherPos({ x, y });
     };
 
