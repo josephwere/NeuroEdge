@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNotifications } from "@/stores/notificationStore";
+import { useNotifications } from "@/services/notificationStore";
 
 /* -------------------- */
 /* Types */

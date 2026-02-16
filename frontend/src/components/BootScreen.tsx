@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNotifications } from "@/stores/notificationStore"; // ✅ hook to trigger notifications
+import { useNotifications } from "@/services/notificationStore";
 
 interface BootScreenProps {
   onDone: () => void;
