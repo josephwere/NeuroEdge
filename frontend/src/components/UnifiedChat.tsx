@@ -85,13 +85,14 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
         tabIndex={0} // REQUIRED for keyboard capture
         onKeyDown={handleKeyDown}
         style={{
-          height: "100vh",
-          width: "100vw",
+          height: "100%",
+          width: "100%",
           position: "relative",
           backgroundColor: "#f5f6fa",
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
+          minWidth: 0,
           outline: "none",
           fontFamily: "Arial, sans-serif",
         }}

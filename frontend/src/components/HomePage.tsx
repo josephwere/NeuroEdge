@@ -95,7 +95,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           style={{
             display: "flex",
             height: "100vh",
-            width: "100vw",
+            width: "100%",
             overflow: "hidden",
             backgroundColor: "#f5f6fa",
           }}
@@ -114,6 +114,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
               display: "flex",
               flexDirection: "column",
               position: "relative",
+              minWidth: 0,
             }}
           >
             {/* Topbar */}
@@ -130,6 +131,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
                 flexDirection: "column",
                 position: "relative",
                 overflow: "hidden",
+                minWidth: 0,
               }}
             >
               {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}

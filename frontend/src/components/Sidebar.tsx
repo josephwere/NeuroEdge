@@ -155,11 +155,14 @@ const Avatar: React.FC<{ letter: string }> = ({ letter }) => (
 
 const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
   width: collapsed ? "64px" : "240px",
+  minWidth: collapsed ? "64px" : "240px",
+  flexShrink: 0,
   background: "#1e1e2f",
   color: "#fff",
   height: "100vh",
   display: "flex",
   flexDirection: "column",
+  overflowY: "auto",
   transition: "width 0.25s ease",
 });
 
