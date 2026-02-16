@@ -7,6 +7,9 @@ export interface InferenceNode {
   capabilities: string[];
   lastSeen: number;
   online: boolean;
+  lastLatencyMs?: number;
+  load?: number;
+  cacheSize?: number;
 }
 
 export class InferenceRegistry {
@@ -52,11 +55,30 @@ export class InferenceRegistry {
     return Array.from(this.nodes.values());
   }
 
+  updateMetrics(id: string, metrics: { latencyMs?: number; load?: number; cacheSize?: number }) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    node.lastLatencyMs = metrics.latencyMs ?? node.lastLatencyMs;
+    node.load = metrics.load ?? node.load;
+    node.cacheSize = metrics.cacheSize ?? node.cacheSize;
+    node.lastSeen = Date.now();
+    node.online = true;
+    this.nodes.set(id, node);
+  }
+
   pickNode(): InferenceNode | null {
     this.markOfflineIfStale();
     const online = this.list().filter((n) => n.online);
     if (online.length === 0) return null;
-    const node = online[this.rrIndex % online.length];
+    const scored = online.map((n) => ({
+      node: n,
+      score:
+        (n.lastLatencyMs ?? 500) +
+        (n.load ?? 0) * 100 +
+        (n.cacheSize ?? 0) * 0.1,
+    }));
+    scored.sort((a, b) => a.score - b.score);
+    const node = scored[this.rrIndex % scored.length].node;
     this.rrIndex += 1;
     return node;
   }

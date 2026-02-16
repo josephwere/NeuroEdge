@@ -54,6 +54,15 @@ export async function handleAIInference(req: Request, res: Response) {
       timestamp: Date.now(),
       payload: { ...mlData, mesh: usedMesh },
     });
+    appendEvent({
+      type: "train.signal",
+      timestamp: Date.now(),
+      payload: {
+        source: usedMesh ? "mesh" : "ml",
+        intent: mlData.action || "unknown",
+        input_len: String(input || "").length,
+      },
+    });
     res.json({
       success: true,
       reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,

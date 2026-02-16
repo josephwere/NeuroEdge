@@ -115,6 +115,28 @@ export function startServer(
     res.json({ status: "ok" });
   });
 
+  app.post("/mesh/metrics", (req: Request, res: Response) => {
+    const { id, latency_ms, load, cache_size } = req.body || {};
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    meshRegistry.updateMetrics(id, {
+      latencyMs: typeof latency_ms === "number" ? latency_ms : undefined,
+      load: typeof load === "number" ? load : undefined,
+      cacheSize: typeof cache_size === "number" ? cache_size : undefined,
+    });
+    res.json({ status: "ok" });
+  });
+
+  app.post("/mesh/train-signal", (req: Request, res: Response) => {
+    const { id, signal } = req.body || {};
+    if (!id || !signal) return res.status(400).json({ error: "Missing id or signal" });
+    appendEvent({
+      type: "mesh.train_signal",
+      timestamp: Date.now(),
+      payload: { id, signal },
+    });
+    res.json({ status: "ok" });
+  });
+
   app.get("/mesh/nodes", (_req: Request, res: Response) => {
     res.json(meshRegistry.list());
   });

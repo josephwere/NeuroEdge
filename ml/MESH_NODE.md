@@ -23,7 +23,17 @@ NEUROEDGE_NODE_KIND=laptop \\
 NEUROEDGE_NODE_PORT=8095 \\
 NEUROEDGE_ORCHESTRATOR_URL=http://localhost:7070 \\
 NEUROEDGE_LOCAL_ML_URL=http://localhost:8090 \\
+NEUROEDGE_NODE_KEY=REPLACE_WITH_FERNET_KEY \\
+NEUROEDGE_NODE_UPDATE_TOKEN=REPLACE_WITH_UPDATE_TOKEN \\
 uvicorn edge_node:app --host 0.0.0.0 --port 8095
+```
+
+Generate an encryption key (Fernet):
+```
+python - <<'PY'
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+PY
 ```
 
 ## Orchestrator endpoints
