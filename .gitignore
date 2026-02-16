@@ -1,0 +1,32 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dependencies
+**/node_modules/
+
+# Build artifacts
+**/dist/
+**/build/
+coverage/
+
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Env files (examples are allowed)
+.env
+.env.*
+!.env.example
+
+# Misc temp
+*.tmp
+*.swp

@@ -31,6 +31,10 @@ class InferRequest(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PredictRequest(BaseModel):
+    text: str = ""
+
+
 def _load_agent() -> Optional[Any]:
     if FloatingChatMLAgent is None:
         return None
@@ -72,7 +76,11 @@ def _fallback_action(text: str) -> str:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok", "service": "ml"}
+    return {
+        "status": "ok",
+        "service": "ml",
+        "mode": os.getenv("NEUROEDGE_MODE", "sovereign"),
+    }
 
 
 @app.get("/ready")
@@ -82,6 +90,7 @@ def ready() -> Dict[str, Any]:
         "status": "ready",
         "service": "ml",
         "model_loaded": ml_agent is not None,
+        "mode": os.getenv("NEUROEDGE_MODE", "sovereign"),
     }
 
 
@@ -90,6 +99,32 @@ def infer(req: InferRequest) -> Dict[str, Any]:
     text = _extract_text(req).strip()
     if not text:
         text = "empty_input"
+
+    action = None
+    if ml_agent is not None:
+        try:
+            action = ml_agent.predict_action(text)
+        except Exception:
+            action = None
+
+    if not action:
+        action = _fallback_action(text)
+
+    return {
+        "status": "ok",
+        "action": action,
+        "input": text,
+        "source": "model" if ml_agent is not None else "fallback",
+    }
+
+
+@app.post("/predict")
+def predict(req: PredictRequest) -> Dict[str, Any]:
+    """
+    Compatibility endpoint used by some orchestrator agents.
+    Mirrors /infer action output so older clients don't fail.
+    """
+    text = (req.text or "").strip() or "empty_input"
 
     action = None
     if ml_agent is not None:

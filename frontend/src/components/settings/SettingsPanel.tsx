@@ -25,6 +25,8 @@ interface SettingsState {
    ========================================================= */
 
 const SettingsPanel: React.FC = () => {
+  const runtimeMode = ((import.meta as any).env?.VITE_NEUROEDGE_MODE || "sovereign") as string;
+
   /* -------------------- State -------------------- */
 
   const [settings, setSettings] = useState<SettingsState>({
@@ -143,6 +145,17 @@ const SettingsPanel: React.FC = () => {
             gap: "1rem",
           }}
         >
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Runtime Mode</h3>
+            <div style={{ ...rowStyle, marginBottom: "0.45rem" }}>
+              <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{runtimeMode}</span>
+              <span style={{ color: "#15803d", fontWeight: 600 }}>Local-only</span>
+            </div>
+            <p style={mutedStyle}>
+              NeuroEdge runs as an independent local system. Core chat routing does not require external AI providers.
+            </p>
+          </section>
+
           <section style={cardStyle}>
             <h3 style={titleStyle}>Founder Mode</h3>
             <label style={rowStyle}>
