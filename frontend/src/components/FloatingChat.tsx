@@ -70,6 +70,9 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     let x = position.x, y = position.y;
 
     const down = (e: MouseEvent) => {
+      // Avoid starting drag when interacting with inputs/buttons
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("button, input, textarea, select, a")) return;
       mx = e.clientX; my = e.clientY;
       document.onmousemove = move;
       document.onmouseup = up;
@@ -85,8 +88,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
     const up = () => { document.onmousemove = null; document.onmouseup = null; };
 
-    el.querySelector(".header")?.addEventListener("mousedown", down);
-    return () => el.querySelector(".header")?.removeEventListener("mousedown", down);
+    el.addEventListener("mousedown", down);
+    return () => el.removeEventListener("mousedown", down);
   }, [position.x, position.y, onPositionChange, maximized, embedded]);
 
   // --- Load cache ---
