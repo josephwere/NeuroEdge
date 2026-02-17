@@ -26,6 +26,46 @@ import { confirmSafeAction } from "@/services/safetyPrompts";
 import { loadExtension } from "@/extensions/extensionLoader";
 import codeLinter from "@/extensions/examples/codeLinter";
 
+interface WindowShellProps {
+  title: string;
+  children: React.ReactNode;
+  onClose?: () => void;
+  modal?: boolean;
+}
+
+const WindowShell: React.FC<WindowShellProps> = ({ title, children, onClose, modal = false }) => {
+  const [minimized, setMinimized] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+
+  return (
+    <div
+      style={
+        modal
+          ? modalWindowStyle(maximized)
+          : maximized
+          ? mainWindowMaximizedStyle
+          : mainWindowStyle
+      }
+    >
+      <div style={windowHeaderStyle}>
+        <div style={{ fontWeight: 700, letterSpacing: "0.01em" }}>{title}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          <button style={windowBtnStyle("#f59e0b")} onClick={() => setMinimized((v) => !v)} title={minimized ? "Expand" : "Minimize"}>
+            {minimized ? "▢" : "—"}
+          </button>
+          <button style={windowBtnStyle("#22c55e")} onClick={() => setMaximized((v) => !v)} title={maximized ? "Restore" : "Maximize"}>
+            {maximized ? "❐" : "□"}
+          </button>
+          <button style={windowBtnStyle("#ef4444")} onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+      </div>
+      {!minimized && <div style={windowBodyStyle}>{children}</div>}
+    </div>
+  );
+};
+
 /* ----------------------------- */
 /* Home Content for Chat View    */
 /* ----------------------------- */
@@ -223,45 +263,60 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
               minWidth: 0,
             }}
           >
-            {activeView !== "chat" && (
-              <div style={viewHeaderStyle}>
-                <strong>{activeView.replace("_", " ").toUpperCase()}</strong>
-                <button style={viewCloseBtnStyle} onClick={() => setActiveView("chat")}>
-                  Close
-                </button>
-              </div>
-            )}
             {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}
-            {activeView === "my_chats" && <MyChatsPanel />}
-            {activeView === "projects" && <ProjectsPanel />}
-            {activeView === "dashboard" && <Dashboard />}
-            {activeView === "settings" && <SettingsPanel />}
-            {activeView === "extensions" && <ExtensionsPanel />}
-            {activeView === "history" && <ChatHistoryPanel />}
+            {activeView === "my_chats" && (
+              <WindowShell title="My Chats" onClose={() => setActiveView("chat")}>
+                <MyChatsPanel />
+              </WindowShell>
+            )}
+            {activeView === "projects" && (
+              <WindowShell title="Projects" onClose={() => setActiveView("chat")}>
+                <ProjectsPanel />
+              </WindowShell>
+            )}
+            {activeView === "dashboard" && (
+              <WindowShell title="Dashboard" onClose={() => setActiveView("chat")}>
+                <Dashboard />
+              </WindowShell>
+            )}
+            {activeView === "settings" && (
+              <WindowShell title="Settings" onClose={() => setActiveView("chat")}>
+                <SettingsPanel />
+              </WindowShell>
+            )}
+            {activeView === "extensions" && (
+              <WindowShell title="Extensions" onClose={() => setActiveView("chat")}>
+                <ExtensionsPanel />
+              </WindowShell>
+            )}
+            {activeView === "history" && (
+              <WindowShell title="History & Governance" onClose={() => setActiveView("chat")}>
+                <ChatHistoryPanel />
+              </WindowShell>
+            )}
           </div>
         </div>
       </div>
       {showLoginPage && (
         <div style={overlayStyle}>
-          <div style={overlayCardStyle}>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button style={overlayCloseBtn} onClick={() => setShowLoginPage(false)}>Close</button>
-            </div>
+          <WindowShell title="Login / Access" modal onClose={() => setShowLoginPage(false)}>
             <Login embedded onSuccess={() => setShowLoginPage(false)} />
-          </div>
+          </WindowShell>
         </div>
       )}
       {showProfileModal && (
         <div style={overlayStyle}>
-          <ProfileSettings
-            session={{
-              name: user?.name,
-              email: user?.email,
-              mode: user?.guest ? "guest" : "account",
-              token: user?.token,
-            }}
-            onClose={() => setShowProfileModal(false)}
-          />
+          <WindowShell title="Profile & Settings" modal onClose={() => setShowProfileModal(false)}>
+            <ProfileSettings
+              session={{
+                name: user?.name,
+                email: user?.email,
+                mode: user?.guest ? "guest" : "account",
+                token: user?.token,
+              }}
+              onClose={() => setShowProfileModal(false)}
+            />
+          </WindowShell>
         </div>
       )}
       <TutorialGuide
@@ -292,37 +347,64 @@ const overlayStyle: React.CSSProperties = {
   padding: "1rem",
 };
 
-const overlayCardStyle: React.CSSProperties = {
-  width: "min(540px, 100%)",
-  maxHeight: "92vh",
-  overflow: "auto",
+const mainWindowStyle: React.CSSProperties = {
+  margin: "0.65rem",
+  borderRadius: 14,
+  border: "1px solid rgba(148,163,184,0.28)",
+  background: "rgba(15,23,42,0.82)",
+  boxShadow: "0 16px 36px rgba(2,6,23,0.42)",
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  flex: 1,
+  overflow: "hidden",
 };
 
-const overlayCloseBtn: React.CSSProperties = {
-  border: "1px solid rgba(148,163,184,0.35)",
-  borderRadius: 8,
-  background: "rgba(15,23,42,0.88)",
-  color: "#e2e8f0",
-  padding: "0.35rem 0.55rem",
-  cursor: "pointer",
+const mainWindowMaximizedStyle: React.CSSProperties = {
+  ...mainWindowStyle,
+  position: "absolute",
+  inset: "0.65rem",
+  zIndex: 25,
+  margin: 0,
 };
 
-const viewHeaderStyle: React.CSSProperties = {
+const modalWindowStyle = (maximized: boolean): React.CSSProperties => ({
+  width: maximized ? "min(1200px, 96vw)" : "min(860px, 96vw)",
+  height: maximized ? "92vh" : "min(86vh, 900px)",
+  borderRadius: 14,
+  border: "1px solid rgba(148,163,184,0.28)",
+  background: "rgba(15,23,42,0.96)",
+  boxShadow: "0 16px 42px rgba(2,6,23,0.56)",
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+});
+
+const windowHeaderStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  padding: "0.45rem 0.7rem",
+  gap: "0.6rem",
+  padding: "0.52rem 0.72rem",
   borderBottom: "1px solid rgba(148,163,184,0.22)",
-  background: "rgba(15,23,42,0.75)",
+  background: "rgba(15,23,42,0.95)",
   color: "#e2e8f0",
-  fontSize: "0.78rem",
+  fontSize: "0.8rem",
 };
 
-const viewCloseBtnStyle: React.CSSProperties = {
-  border: "1px solid rgba(248,113,113,0.55)",
-  borderRadius: 8,
-  background: "#7f1d1d",
-  color: "#fff",
-  padding: "0.28rem 0.58rem",
-  cursor: "pointer",
+const windowBodyStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: "auto",
 };
+
+const windowBtnStyle = (bg: string): React.CSSProperties => ({
+  border: "none",
+  borderRadius: 8,
+  background: bg,
+  color: "#fff",
+  padding: "0.2rem 0.48rem",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: "0.75rem",
+});

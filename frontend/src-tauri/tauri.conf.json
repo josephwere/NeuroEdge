@@ -37,7 +37,7 @@
       "endpoints": [
         "https://github.com/josephwere/NeuroEdge/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+      "pubkey": "c4f9a8d2e7b1f0a3d9c6e5b4a7f2c1d8e9b0a4c7d3f6e2b5c8a9d1f0e7c3b2a6"
     },
     "bundle": {
       "active": true,

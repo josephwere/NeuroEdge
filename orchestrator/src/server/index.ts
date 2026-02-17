@@ -162,6 +162,25 @@ function readDashboardSummary() {
       treasuryAllocationPct: 10,
       notes: "Compute-donation rewards config",
     },
+    rewardsLedger: {
+      config: {
+        pointsPerUsd: 100,
+        wdcPerPoint: 0.01,
+        wdcListingLive: false,
+        payoutMode: "points_only",
+      },
+      wallets: [
+        {
+          userId: "u2",
+          userName: "Guest User",
+          points: 0,
+          totalEarnedPoints: 0,
+          pendingCashUsd: 0,
+          pendingWdc: 0,
+          updatedAt: Date.now(),
+        },
+      ],
+    },
     modelControl: {
       model: "neuroedge-13b-instruct",
       temperature: 0.3,
@@ -480,6 +499,115 @@ export function startServer(
       enabled: Boolean(cryptoRewards?.enabled),
     });
     res.json({ success: true, cryptoRewards });
+  });
+
+  app.post("/admin/dashboard/rewards/config/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const { dashboard } = readDashboardSummary();
+    const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+    const incoming = req.body?.config || {};
+    const nextConfig = {
+      pointsPerUsd: Math.max(1, Number(incoming.pointsPerUsd || ledger?.config?.pointsPerUsd || 100)),
+      wdcPerPoint: Math.max(0, Number(incoming.wdcPerPoint || ledger?.config?.wdcPerPoint || 0.01)),
+      wdcListingLive: Boolean(incoming.wdcListingLive ?? ledger?.config?.wdcListingLive ?? false),
+      payoutMode: String(incoming.payoutMode || ledger?.config?.payoutMode || "points_only"),
+    };
+    const nextLedger = { ...ledger, config: nextConfig, wallets: Array.isArray(ledger.wallets) ? ledger.wallets : [] };
+    mergeDashboardSection("rewardsLedger", nextLedger);
+    auditDashboardAction(req, "rewards_ledger", "save_config", nextConfig);
+    res.json({ success: true, rewardsLedger: nextLedger });
+  });
+
+  app.post("/admin/dashboard/rewards/wallets/credit", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const userId = String(req.body?.userId || "").trim();
+    const userName = String(req.body?.userName || "User");
+    const points = Math.max(0, Number(req.body?.points || 0));
+    if (!userId || points <= 0) return res.status(400).json({ error: "Missing userId or invalid points" });
+    const { dashboard } = readDashboardSummary();
+    const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+    const wallets = Array.isArray(ledger.wallets) ? ledger.wallets : [];
+    let found = false;
+    const nextWallets = wallets.map((w: any) => {
+      if (String(w.userId) !== userId) return w;
+      found = true;
+      return {
+        ...w,
+        userName: w.userName || userName,
+        points: Math.max(0, Number(w.points || 0) + points),
+        totalEarnedPoints: Math.max(0, Number(w.totalEarnedPoints || 0) + points),
+        updatedAt: Date.now(),
+      };
+    });
+    if (!found) {
+      nextWallets.unshift({
+        userId,
+        userName,
+        points,
+        totalEarnedPoints: points,
+        pendingCashUsd: 0,
+        pendingWdc: 0,
+        updatedAt: Date.now(),
+      });
+    }
+    const nextLedger = { ...ledger, wallets: nextWallets, config: ledger.config || {} };
+    mergeDashboardSection("rewardsLedger", nextLedger);
+    auditDashboardAction(req, "rewards_wallet", "credit", { userId, points });
+    res.json({ success: true, rewardsLedger: nextLedger });
+  });
+
+  app.post("/admin/dashboard/rewards/wallets/debit", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const userId = String(req.body?.userId || "").trim();
+    const points = Math.max(0, Number(req.body?.points || 0));
+    if (!userId || points <= 0) return res.status(400).json({ error: "Missing userId or invalid points" });
+    const { dashboard } = readDashboardSummary();
+    const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+    const wallets = Array.isArray(ledger.wallets) ? ledger.wallets : [];
+    const nextWallets = wallets.map((w: any) =>
+      String(w.userId) === userId
+        ? {
+            ...w,
+            points: Math.max(0, Number(w.points || 0) - points),
+            updatedAt: Date.now(),
+          }
+        : w
+    );
+    const nextLedger = { ...ledger, wallets: nextWallets, config: ledger.config || {} };
+    mergeDashboardSection("rewardsLedger", nextLedger);
+    auditDashboardAction(req, "rewards_wallet", "debit", { userId, points });
+    res.json({ success: true, rewardsLedger: nextLedger });
+  });
+
+  app.post("/admin/dashboard/rewards/wallets/convert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const userId = String(req.body?.userId || "").trim();
+    const points = Math.max(0, Number(req.body?.points || 0));
+    const target = String(req.body?.target || "cash").toLowerCase();
+    if (!userId || points <= 0) return res.status(400).json({ error: "Missing userId or invalid points" });
+    const { dashboard } = readDashboardSummary();
+    const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+    const config = (ledger.config || {}) as Record<string, any>;
+    const pointsPerUsd = Math.max(1, Number(config.pointsPerUsd || 100));
+    const wdcPerPoint = Math.max(0, Number(config.wdcPerPoint || 0.01));
+    const wallets = Array.isArray(ledger.wallets) ? ledger.wallets : [];
+
+    const nextWallets = wallets.map((w: any) => {
+      if (String(w.userId) !== userId) return w;
+      const currentPoints = Math.max(0, Number(w.points || 0));
+      const usePoints = Math.min(points, currentPoints);
+      const next: any = {
+        ...w,
+        points: currentPoints - usePoints,
+        updatedAt: Date.now(),
+      };
+      if (target === "wdc") {
+        next.pendingWdc = Number((Number(w.pendingWdc || 0) + usePoints * wdcPerPoint).toFixed(6));
+      } else {
+        next.pendingCashUsd = Number((Number(w.pendingCashUsd || 0) + usePoints / pointsPerUsd).toFixed(2));
+      }
+      return next;
+    });
+    const nextLedger = { ...ledger, wallets: nextWallets, config };
+    mergeDashboardSection("rewardsLedger", nextLedger);
+    auditDashboardAction(req, "rewards_wallet", "convert", { userId, points, target });
+    res.json({ success: true, rewardsLedger: nextLedger });
   });
 
   app.post("/admin/dashboard/model/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder"]), (req: Request, res: Response) => {

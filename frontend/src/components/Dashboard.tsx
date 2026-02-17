@@ -78,6 +78,26 @@ interface CryptoRewardsConfig {
   notes: string;
 }
 
+interface RewardWallet {
+  userId: string;
+  userName: string;
+  points: number;
+  totalEarnedPoints: number;
+  pendingCashUsd: number;
+  pendingWdc: number;
+  updatedAt: number;
+}
+
+interface RewardsLedger {
+  config: {
+    pointsPerUsd: number;
+    wdcPerPoint: number;
+    wdcListingLive: boolean;
+    payoutMode: "points_only" | "cash_only" | "wdc_only" | "hybrid";
+  };
+  wallets: RewardWallet[];
+}
+
 interface ModelControl {
   model: string;
   temperature: number;
@@ -342,6 +362,35 @@ const Dashboard: React.FC = () => {
   });
 
   const [devWebhook, setDevWebhook] = useState("");
+  const [rewardsLedger, setRewardsLedger] = useState<RewardsLedger>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_rewards_ledger_v1");
+      return raw
+        ? JSON.parse(raw)
+        : {
+            config: {
+              pointsPerUsd: 100,
+              wdcPerPoint: 0.01,
+              wdcListingLive: false,
+              payoutMode: "points_only",
+            },
+            wallets: [],
+          };
+    } catch {
+      return {
+        config: {
+          pointsPerUsd: 100,
+          wdcPerPoint: 0.01,
+          wdcListingLive: false,
+          payoutMode: "points_only",
+        },
+        wallets: [],
+      };
+    }
+  });
+  const [rewardUserId, setRewardUserId] = useState("u2");
+  const [rewardUserName, setRewardUserName] = useState("Guest User");
+  const [rewardPointsInput, setRewardPointsInput] = useState("100");
   const [devEnvironment, setDevEnvironment] = useState<"dev" | "staging" | "prod">("dev");
   const [devApiKeys, setDevApiKeys] = useState<DevApiKey[]>(() => {
     try {
@@ -481,6 +530,9 @@ const Dashboard: React.FC = () => {
     localStorage.setItem("neuroedge_dashboard_crypto_rewards_v1", JSON.stringify(cryptoRewards));
   }, [cryptoRewards]);
   useEffect(() => {
+    localStorage.setItem("neuroedge_rewards_ledger_v1", JSON.stringify(rewardsLedger));
+  }, [rewardsLedger]);
+  useEffect(() => {
     localStorage.setItem("neuroedge_feature_flags_v2", JSON.stringify(featureFlags));
   }, [featureFlags]);
   useEffect(() => {
@@ -604,6 +656,7 @@ const Dashboard: React.FC = () => {
     if (remote.payment && typeof remote.payment === "object") setPayment(remote.payment);
     if (remote.cryptoRewards && typeof remote.cryptoRewards === "object") setCryptoRewards(remote.cryptoRewards);
     if (remote.modelControl && typeof remote.modelControl === "object") setModelControl(remote.modelControl);
+    if (remote.rewardsLedger && typeof remote.rewardsLedger === "object") setRewardsLedger(remote.rewardsLedger);
     if (remote.featureFlags && typeof remote.featureFlags === "object") setFeatureFlags(remote.featureFlags);
     if (Array.isArray(remote.supportTickets)) setSupportTickets(remote.supportTickets);
     if (Array.isArray(remote.devApiKeys)) setDevApiKeys(remote.devApiKeys);
@@ -624,6 +677,7 @@ const Dashboard: React.FC = () => {
       if (data.payment) setPayment(data.payment);
       if (data.cryptoRewards) setCryptoRewards(data.cryptoRewards);
       if (data.modelControl) setModelControl(data.modelControl);
+      if (data.rewardsLedger) setRewardsLedger(data.rewardsLedger);
       if (data.featureFlags) setFeatureFlags(data.featureFlags);
       if (Array.isArray(data.supportTickets)) setSupportTickets(data.supportTickets);
       if (Array.isArray(data.devApiKeys)) setDevApiKeys(data.devApiKeys);
@@ -857,6 +911,52 @@ const Dashboard: React.FC = () => {
   const saveCryptoRewards = async () => {
     await callAction("/admin/dashboard/crypto/save", { cryptoRewards });
     addNotification({ type: "success", message: "Crypto rewards configuration saved." });
+  };
+
+  const saveRewardsConfig = async () => {
+    await callAction("/admin/dashboard/rewards/config/save", { config: rewardsLedger.config });
+    addNotification({ type: "success", message: "Rewards conversion config saved." });
+  };
+
+  const creditPoints = async () => {
+    const points = Number(rewardPointsInput || 0);
+    if (!rewardUserId.trim() || points <= 0) {
+      addNotification({ type: "error", message: "Enter user ID and positive points." });
+      return;
+    }
+    await callAction("/admin/dashboard/rewards/wallets/credit", {
+      userId: rewardUserId.trim(),
+      userName: rewardUserName.trim() || "User",
+      points,
+    });
+    addNotification({ type: "success", message: "Points credited." });
+  };
+
+  const debitPoints = async () => {
+    const points = Number(rewardPointsInput || 0);
+    if (!rewardUserId.trim() || points <= 0) {
+      addNotification({ type: "error", message: "Enter user ID and positive points." });
+      return;
+    }
+    await callAction("/admin/dashboard/rewards/wallets/debit", {
+      userId: rewardUserId.trim(),
+      points,
+    });
+    addNotification({ type: "success", message: "Points debited." });
+  };
+
+  const convertPoints = async (target: "cash" | "wdc") => {
+    const points = Number(rewardPointsInput || 0);
+    if (!rewardUserId.trim() || points <= 0) {
+      addNotification({ type: "error", message: "Enter user ID and positive points." });
+      return;
+    }
+    await callAction("/admin/dashboard/rewards/wallets/convert", {
+      userId: rewardUserId.trim(),
+      points,
+      target,
+    });
+    addNotification({ type: "success", message: `Points converted to ${target.toUpperCase()} pending balance.` });
   };
 
   const runTwinAction = async (path: string, body: any = {}) => {
@@ -1351,6 +1451,85 @@ const Dashboard: React.FC = () => {
           Ready state: stores compute donation reward policy and payout wallet config for transparent reward accounting.
         </div>
         <button style={primary} onClick={saveCryptoRewards}>Save Crypto Rewards</button>
+      </Card>
+      <Card title="Rewards Wallets (Points → Cash/WDC Ready)">
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={rewardUserId} onChange={(e) => setRewardUserId(e.target.value)} placeholder="User ID" style={input} />
+            <input value={rewardUserName} onChange={(e) => setRewardUserName(e.target.value)} placeholder="User name" style={input} />
+            <input value={rewardPointsInput} onChange={(e) => setRewardPointsInput(e.target.value)} placeholder="Points" style={input} />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={primary} onClick={creditPoints}>Credit Points</button>
+            <button style={chip} onClick={debitPoints}>Debit Points</button>
+            <button style={chip} onClick={() => convertPoints("cash")}>Convert → Cash</button>
+            <button style={chip} onClick={() => convertPoints("wdc")}>Convert → WDC</button>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="number"
+              value={rewardsLedger.config.pointsPerUsd}
+              onChange={(e) =>
+                setRewardsLedger((p) => ({ ...p, config: { ...p.config, pointsPerUsd: Number(e.target.value) || 1 } }))
+              }
+              placeholder="Points per USD"
+              style={input}
+            />
+            <input
+              type="number"
+              step="0.000001"
+              value={rewardsLedger.config.wdcPerPoint}
+              onChange={(e) =>
+                setRewardsLedger((p) => ({ ...p, config: { ...p.config, wdcPerPoint: Number(e.target.value) || 0 } }))
+              }
+              placeholder="WDC per point"
+              style={input}
+            />
+            <select
+              value={rewardsLedger.config.payoutMode}
+              onChange={(e) =>
+                setRewardsLedger((p) => ({
+                  ...p,
+                  config: { ...p.config, payoutMode: e.target.value as RewardsLedger["config"]["payoutMode"] },
+                }))
+              }
+              style={input}
+            >
+              <option value="points_only">points_only</option>
+              <option value="cash_only">cash_only</option>
+              <option value="wdc_only">wdc_only</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </div>
+          <div style={row}>
+            <span>WDC listing live</span>
+            <button
+              style={chip}
+              onClick={() =>
+                setRewardsLedger((p) => ({
+                  ...p,
+                  config: { ...p.config, wdcListingLive: !p.config.wdcListingLive },
+                }))
+              }
+            >
+              {rewardsLedger.config.wdcListingLive ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+          <button style={primary} onClick={saveRewardsConfig}>Save Conversion Config</button>
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+          {rewardsLedger.wallets.length === 0 && <div style={muted}>No reward wallets yet.</div>}
+          {rewardsLedger.wallets.map((w) => (
+            <div key={w.userId} style={log}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <strong>{w.userName} ({w.userId})</strong>
+                <span>{new Date(w.updatedAt || Date.now()).toLocaleString()}</span>
+              </div>
+              <div>Points: {Number(w.points || 0).toLocaleString()} • Total Earned: {Number(w.totalEarnedPoints || 0).toLocaleString()}</div>
+              <div>Pending Cash: ${Number(w.pendingCashUsd || 0).toFixed(2)} • Pending WDC: {Number(w.pendingWdc || 0).toFixed(6)}</div>
+            </div>
+          ))}
+        </div>
       </Card>
       <Card title="Integrations & API Platform (Founder Premium)">
         <div style={{ display: "grid", gap: 8 }}>
