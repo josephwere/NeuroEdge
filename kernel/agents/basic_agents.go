@@ -1,4 +1,4 @@
-//kernel/agents/basic_agents.go
+// kernel/agents/basic_agents.go
 package agents
 
 import "neuroedge/kernel/types"
@@ -16,7 +16,8 @@ func (a *baseAgent) Stop()        {}
 func (a *baseAgent) Learn()       {}
 
 func (a *baseAgent) EvaluatePerformance() bool {
-	return true // placeholder
+	// Basic health signal: agent must have a name and an event bus attached.
+	return a.name != "" && a.bus != nil
 }
 
 // ---- Concrete agents ----

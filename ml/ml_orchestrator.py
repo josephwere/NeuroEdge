@@ -1,6 +1,10 @@
 import queue
 import threading
 import time
+import json
+import os
+import urllib.request
+import urllib.error
 import grpc
 from concurrent import futures
 import ml_models  # your internal models library
@@ -11,6 +15,25 @@ import proto.neuroedge_pb2_grpc as pb2_grpc
 # Task Queue
 # =========================
 task_queue = queue.Queue()
+CALLBACK_URL = os.getenv("NEUROEDGE_KERNEL_CALLBACK_URL", "http://localhost:8080/ml/callback")
+CALLBACK_TIMEOUT_SEC = float(os.getenv("NEUROEDGE_KERNEL_CALLBACK_TIMEOUT_SEC", "3"))
+
+
+def send_kernel_callback(payload):
+    if not CALLBACK_URL:
+        return False
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        CALLBACK_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=CALLBACK_TIMEOUT_SEC) as resp:
+            return 200 <= resp.status < 300
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return False
 
 # =========================
 # Model Registry
@@ -47,9 +70,28 @@ def worker():
             print(f"🧠 Running task {task_id} on {engine_name}")
             result = model_registry.run(engine_name, input_data)
             print(f"✅ Task {task_id} completed: {result}")
-            # TODO: send result back to Go kernel via gRPC callback
+            callback_ok = send_kernel_callback(
+                {
+                    "task_id": task_id,
+                    "engine": engine_name,
+                    "status": "completed",
+                    "result": result,
+                    "timestamp": int(time.time()),
+                }
+            )
+            if not callback_ok:
+                print(f"⚠️ Kernel callback failed for task {task_id}")
         except Exception as e:
             print(f"❌ Task {task_id} failed: {e}")
+            send_kernel_callback(
+                {
+                    "task_id": task.get("id"),
+                    "engine": task.get("engine"),
+                    "status": "failed",
+                    "error": str(e),
+                    "timestamp": int(time.time()),
+                }
+            )
         finally:
             task_queue.task_done()
 

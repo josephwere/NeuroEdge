@@ -3,7 +3,7 @@ import { EventBus } from "@core/event_bus";
 import { Logger } from "@utils/logger";
 import { PermissionManager } from "@utils/permissions";
 import { runCommand } from "@utils/shell";
-import { ExecutionRequest, ExecutionResult } from "@types/execution";
+import { ExecutionRequest, ExecutionResult } from "../types/execution";
 
 export class DevExecutionAgent implements OrchestratorAgent {
   constructor(
@@ -24,7 +24,7 @@ export class DevExecutionAgent implements OrchestratorAgent {
     });
   }
 
-  private async handleExecution(req: ExecutionRequest) {
+  async handleExecution(req: ExecutionRequest) {
     if (!this.permissions.validate(req)) {
       this.logger.warn(this.name(), "Execution blocked by permissions");
       return;
@@ -51,4 +51,4 @@ export class DevExecutionAgent implements OrchestratorAgent {
       this.bus.emit("dev:result", response);
     }
   }
-  }
+}

@@ -2,6 +2,7 @@ type EventCallback = (payload: any) => void;
 
 export class EventBus {
   private listeners: Map<string, EventCallback[]> = new Map();
+  constructor(_logger?: unknown) {}
 
   subscribe(event: string, callback: EventCallback) {
     if (!this.listeners.has(event)) this.listeners.set(event, []);

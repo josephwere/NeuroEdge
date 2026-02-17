@@ -1,5 +1,6 @@
 import { EventBus } from "@core/event_bus";
-import { Logger } from "@core/logger";
+import { Logger } from "@utils/logger";
+import axios from "axios";
 
 export class MeshExecutor {
   private eventBus: EventBus;
@@ -24,18 +25,42 @@ export class MeshExecutor {
       "MeshExecutor",
       `Executing on ${node}: ${command} ${args?.join(" ") || ""}`
     );
+    const timeoutMs = Math.max(1000, Number(process.env.MESH_EXEC_TIMEOUT_MS || 10000));
+    const commandPayload = { command, args: Array.isArray(args) ? args : [] };
+    const candidates = [`${node.replace(/\/$/, "")}/execute`, `${node.replace(/\/$/, "")}/infer`];
 
-    // TODO: replace with real SSH / WebSocket / API call to node
-    const result = {
-      success: true,
-      stdout: "Simulated remote execution completed",
-      stderr: "",
+    let lastError = "remote execution failed";
+    for (const url of candidates) {
+      try {
+        const resp = await axios.post(url, commandPayload, { timeout: timeoutMs });
+        const data = resp.data || {};
+        const result = {
+          success: Boolean(data.success !== false),
+          stdout:
+            typeof data.stdout === "string"
+              ? data.stdout
+              : typeof data.response === "string"
+                ? data.response
+                : typeof data.result === "string"
+                  ? data.result
+                  : JSON.stringify(data),
+          stderr: typeof data.stderr === "string" ? data.stderr : "",
+          endpoint: url,
+        };
+        this.eventBus.emit("mesh:execution_result", { node, command, result });
+        return result;
+      } catch (err: any) {
+        lastError = err?.response?.data?.error || err?.message || String(err);
+      }
+    }
+
+    const failed = {
+      success: false,
+      stdout: "",
+      stderr: lastError,
     };
-
-    // emit the result event for frontend/logging purposes
-    this.eventBus.emit("mesh:execution_result", { node, command, result });
-
-    return result;
+    this.eventBus.emit("mesh:execution_result", { node, command, result: failed });
+    return failed;
   }
 
   // Broadcast a command to all known nodes

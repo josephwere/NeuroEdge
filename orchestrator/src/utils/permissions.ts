@@ -1,4 +1,4 @@
-import { ExecutionRequest } from "@types/execution";
+import { ExecutionRequest } from "../types/execution";
 
 export class PermissionManager {
   private approvedIds = new Set<string>();

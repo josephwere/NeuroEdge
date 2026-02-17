@@ -1,8 +1,5 @@
-// frontend/src/components/ExtensionsPanel.tsx
-import React, { useEffect, useState } from "react";
-import { loadExtension } from "@/extensions/extensionLoader";
+import React, { useEffect, useMemo, useState } from "react";
 
-/** -------------------- Types -------------------- */
 export interface Extension {
   id: string;
   name: string;
@@ -12,60 +9,94 @@ export interface Extension {
   version?: string;
 }
 
-/** -------------------- ExtensionsPanel Component -------------------- */
 const ExtensionsPanel: React.FC = () => {
   const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [version, setVersion] = useState("1.0.0");
+  const [permissionsText, setPermissionsText] = useState("read-chat");
 
-  // Load initial extensions (mocked, replace with real loader if needed)
-  useEffect(() => {
-    const initialExtensions: Extension[] = [
-      {
-        id: "code-linter",
-        name: "Code Linter",
-        description: "Automatically checks and formats code blocks",
-        active: true,
-        permissions: ["read-chat", "execute-scripts"],
-        version: "1.0.0",
-      },
-      {
-        id: "analytics-plugin",
-        name: "Analytics Plugin",
-        description: "Provides execution metrics and dashboards",
-        active: false,
-        permissions: ["read-metrics"],
-        version: "0.9.2",
-      },
-      {
-        id: "custom-commands",
-        name: "Custom Commands",
-        description: "Adds custom commands to the NeuroEdge Command Palette",
-        active: true,
-        permissions: ["execute-scripts"],
-        version: "1.1.0",
-      },
-    ];
-    setExtensions(initialExtensions);
-  }, []);
+  const baseUrl = useMemo(
+    () => String(import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:7070").replace(/\/$/, ""),
+    []
+  );
 
-  /** Toggle extension activation */
-  const toggleExtension = (id: string) => {
-    setExtensions(prev =>
-      prev.map(ext => (ext.id === id ? { ...ext, active: !ext.active } : ext))
-    );
+  const fetchExtensions = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch(`${baseUrl}/admin/dashboard/extensions`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      setExtensions(Array.isArray(data.extensions) ? data.extensions : []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load extensions");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  /** Demo: Load a new extension dynamically */
-  const handleLoadNew = async () => {
-    const newExt: Extension = {
-      id: "example-extension",
-      name: "Example Extension",
-      description: "Demonstration extension",
-      active: true,
-      permissions: ["read-chat"],
-      version: "0.1.0",
-    };
-    // In real use, call loadExtension(newExt, extContext) here
-    setExtensions(prev => [...prev, newExt]);
+  useEffect(() => {
+    fetchExtensions();
+  }, []);
+
+  const callAction = async (path: string, body: Record<string, any>) => {
+    setError("");
+    const resp = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+    setExtensions(Array.isArray(data.extensions) ? data.extensions : []);
+  };
+
+  const toggleExtension = async (id: string) => {
+    try {
+      await callAction("/admin/dashboard/extensions/toggle", { id });
+    } catch (err: any) {
+      setError(err?.message || "Toggle failed");
+    }
+  };
+
+  const deleteExtension = async (id: string) => {
+    try {
+      await callAction("/admin/dashboard/extensions/delete", { id });
+    } catch (err: any) {
+      setError(err?.message || "Delete failed");
+    }
+  };
+
+  const handleCreate = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Extension name is required");
+      return;
+    }
+    const permissions = permissionsText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      await callAction("/admin/dashboard/extensions/upsert", {
+        extension: {
+          name: trimmedName,
+          description: description.trim(),
+          version: version.trim() || "1.0.0",
+          permissions,
+          active: true,
+        },
+      });
+      setName("");
+      setDescription("");
+      setVersion("1.0.0");
+      setPermissionsText("read-chat");
+    } catch (err: any) {
+      setError(err?.message || "Create failed");
+    }
   };
 
   return (
@@ -74,33 +105,46 @@ const ExtensionsPanel: React.FC = () => {
         <div>
           <div style={eyebrowStyle}>Runtime Governance</div>
           <h2 style={titleStyle}>🧩 Extensions / Plugins</h2>
-          <p style={subtitleStyle}>
-            Manage mini-modules safely: activate, deactivate, or load new ones.
-          </p>
+          <p style={subtitleStyle}>Manage extension lifecycle from orchestrator state.</p>
         </div>
-        <button onClick={handleLoadNew} style={primaryActionStyle}>
-          ➕ Load New Extension
+        <button onClick={fetchExtensions} style={secondaryActionStyle} disabled={loading}>
+          {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
+      <div style={createCardStyle}>
+        <div style={cardTitleStyle}>Create Extension</div>
+        <div style={formGridStyle}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Extension name" style={inputStyle} />
+          <input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Version (e.g. 1.0.0)" style={inputStyle} />
+        </div>
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" style={inputStyle} />
+        <input
+          value={permissionsText}
+          onChange={(e) => setPermissionsText(e.target.value)}
+          placeholder="Permissions comma-separated"
+          style={inputStyle}
+        />
+        <button onClick={handleCreate} style={primaryActionStyle}>➕ Load New Extension</button>
+      </div>
+
+      {error ? <div style={errorStyle}>{error}</div> : null}
+
       <div style={listStyle}>
-        {extensions.map(ext => (
+        {extensions.map((ext) => (
           <div key={ext.id} style={cardStyle(ext.active)}>
             <div>
               <div style={cardTitleStyle}>{ext.name}</div>
-              {ext.description && (
-                <div style={cardSubtitleStyle}>
-                  {ext.description} {ext.version && `v${ext.version}`}
-                </div>
-              )}
-              <div style={cardMetaStyle}>
-                Permissions: {ext.permissions.join(", ") || "None"}
-              </div>
+              {ext.description ? <div style={cardSubtitleStyle}>{ext.description} {ext.version ? `v${ext.version}` : ""}</div> : null}
+              <div style={cardMetaStyle}>Permissions: {(ext.permissions || []).join(", ") || "None"}</div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <span style={statusPillStyle(ext.active)}>{ext.active ? "Active" : "Inactive"}</span>
               <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)}>
                 {ext.active ? "Deactivate" : "Activate"}
+              </button>
+              <button onClick={() => deleteExtension(ext.id)} style={dangerButtonStyle}>
+                Delete
               </button>
             </div>
           </div>
@@ -147,6 +191,36 @@ const subtitleStyle: React.CSSProperties = {
   color: "#94a3b8",
 };
 
+const createCardStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.7rem",
+  marginBottom: "1rem",
+  padding: "1rem",
+  borderRadius: 16,
+  border: "1px solid rgba(148, 163, 184, 0.2)",
+  background: "rgba(15, 23, 42, 0.75)",
+};
+
+const formGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.7rem",
+  gridTemplateColumns: "1fr 180px",
+};
+
+const inputStyle: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.25)",
+  background: "rgba(15, 23, 42, 0.6)",
+  color: "#e2e8f0",
+  borderRadius: 10,
+  padding: "0.55rem 0.7rem",
+  fontSize: "0.85rem",
+};
+
+const listStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "1rem",
+};
+
 const primaryActionStyle: React.CSSProperties = {
   padding: "0.55rem 1rem",
   background: "#2563eb",
@@ -157,9 +231,14 @@ const primaryActionStyle: React.CSSProperties = {
   fontSize: "0.85rem",
 };
 
-const listStyle: React.CSSProperties = {
-  display: "grid",
-  gap: "1rem",
+const secondaryActionStyle: React.CSSProperties = {
+  padding: "0.55rem 1rem",
+  background: "rgba(30,41,59,0.85)",
+  border: "1px solid rgba(148,163,184,0.25)",
+  color: "#e2e8f0",
+  cursor: "pointer",
+  borderRadius: 10,
+  fontSize: "0.85rem",
 };
 
 const cardStyle = (active: boolean): React.CSSProperties => ({
@@ -208,3 +287,23 @@ const actionButtonStyle = (active: boolean): React.CSSProperties => ({
   color: "#fff",
   fontSize: "0.8rem",
 });
+
+const dangerButtonStyle: React.CSSProperties = {
+  padding: "0.4rem 0.75rem",
+  borderRadius: 8,
+  border: "1px solid rgba(239,68,68,0.3)",
+  cursor: "pointer",
+  background: "rgba(239,68,68,0.15)",
+  color: "#fca5a5",
+  fontSize: "0.8rem",
+};
+
+const errorStyle: React.CSSProperties = {
+  color: "#fecaca",
+  background: "rgba(127,29,29,0.35)",
+  border: "1px solid rgba(248,113,113,0.4)",
+  borderRadius: 10,
+  padding: "0.6rem 0.8rem",
+  marginBottom: "0.8rem",
+  fontSize: "0.85rem",
+};

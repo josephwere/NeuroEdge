@@ -411,7 +411,7 @@ export async function handleAIInference(req: Request, res: Response) {
       assistant += "\n\n⚠️ Confidence is limited for this answer. Please refine query or provide source constraints.";
     }
 
-    const payload = {
+    const responsePayload = {
       success: true,
       reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,
       intent: mlData.action || "unknown",
@@ -429,8 +429,8 @@ export async function handleAIInference(req: Request, res: Response) {
       ml: { ...mlData, mesh: usedMesh },
       timestamp: new Date().toISOString(),
     };
-    aiCache.set(key, { ts: Date.now(), data: payload });
-    res.json(payload);
+    aiCache.set(key, { ts: Date.now(), data: responsePayload });
+    res.json(responsePayload);
   } catch (err) {
     console.warn("[aiHandler] ML unavailable, returning fallback intent");
     const inputTokens = Math.max(1, Math.ceil(String(input || "").length / 4));
@@ -466,7 +466,7 @@ export async function handleAIInference(req: Request, res: Response) {
       fallbackIntent,
       contextArr
     );
-    const payload = {
+    const responsePayload = {
       success: true,
       reasoning: `Fallback inferred action '${fallbackIntent}'`,
       intent: fallbackIntent,
@@ -480,7 +480,7 @@ export async function handleAIInference(req: Request, res: Response) {
       },
       timestamp: new Date().toISOString(),
     };
-    aiCache.set(key, { ts: Date.now(), data: payload });
-    res.json(payload);
+    aiCache.set(key, { ts: Date.now(), data: responsePayload });
+    res.json(responsePayload);
   }
 }

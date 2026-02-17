@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/index.ts", "src/types/**/*.d.ts"],
+  "exclude": [
+    "src/agents/**",
+    "src/floating_chat/**",
+    "src/swarm/**",
+    "src/federation/execution/**",
+    "src/mesh/**"
+  ]
+}

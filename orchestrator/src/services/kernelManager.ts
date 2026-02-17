@@ -16,7 +16,7 @@ export class KernelManager {
   private kernels: Map<string, KernelStatus> = new Map();
   private healthCheckInterval = 10000; // 10s
   private maxFailures = 3;
-  private healthTimer: NodeJS.Timer | null = null;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
   private roundRobinIndex = 0;
   private warnedMissingGetInfo = new Set<string>();
 

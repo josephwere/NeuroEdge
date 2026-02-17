@@ -152,8 +152,36 @@ export class KernelClient {
     };
   }
 
-  /* -------------------- Placeholder for Streaming -------------------- */
+  /* -------------------- Streaming Command Wrapper -------------------- */
   async streamCommand(cmd: KernelCommand, onData: (chunk: any) => void): Promise<void> {
-    console.warn("[KernelClient] streamCommand not implemented yet. Placeholder for future NeuroEdge streaming.");
+    const startedAt = Date.now();
+    onData({
+      type: "start",
+      id: cmd.id,
+      timestamp: new Date().toISOString(),
+    });
+    const response = await this.sendWithRetry(cmd);
+    const emitLines = (kind: "stdout" | "stderr", text?: string) => {
+      const value = String(text || "").trim();
+      if (!value) return;
+      const lines = value.split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        onData({
+          type: kind,
+          id: cmd.id,
+          chunk: line,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    };
+    emitLines("stdout", response.stdout);
+    emitLines("stderr", response.stderr);
+    onData({
+      type: "end",
+      id: cmd.id,
+      success: response.success,
+      durationMs: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    });
   }
 }

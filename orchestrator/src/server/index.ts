@@ -148,6 +148,32 @@ function readDashboardSummary() {
     supportTickets: [],
     devApiKeys: [{ id: "k1", name: "Default SDK Key", keyMasked: "neur...9x3a", createdAt: Date.now(), revoked: false }],
     webhooks: [],
+    extensions: [
+      {
+        id: "code-linter",
+        name: "Code Linter",
+        description: "Automatically checks and formats code blocks",
+        active: true,
+        permissions: ["read-chat", "execute-scripts"],
+        version: "1.0.0",
+      },
+      {
+        id: "analytics-plugin",
+        name: "Analytics Plugin",
+        description: "Provides execution metrics and dashboards",
+        active: false,
+        permissions: ["read-metrics"],
+        version: "0.9.2",
+      },
+      {
+        id: "custom-commands",
+        name: "Custom Commands",
+        description: "Adds custom commands to the NeuroEdge Command Palette",
+        active: true,
+        permissions: ["execute-scripts"],
+        version: "1.1.0",
+      },
+    ],
     agentsLocal: [
       { id: "ag1", name: "Research Agent", memoryDays: 30, tools: ["research", "web"], permission: "workspace" },
       { id: "ag2", name: "Code Agent", memoryDays: 14, tools: ["code", "files"], permission: "project" },
@@ -591,6 +617,58 @@ export function startServer(
     mergeDashboardSection("savedPrompts", next);
     auditDashboardAction(req, "prompts", "delete", { id });
     res.json({ success: true, savedPrompts: next });
+  });
+
+  app.get("/admin/dashboard/extensions", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (_req: Request, res: Response) => {
+    const { dashboard } = readDashboardSummary();
+    const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    res.json({ success: true, extensions });
+  });
+
+  app.post("/admin/dashboard/extensions/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+    const input = req.body?.extension || {};
+    const name = String(input.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Missing extension name" });
+    const { dashboard } = readDashboardSummary();
+    const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    const id = String(input.id || `ext-${Date.now()}`);
+    const exists = extensions.some((x: any) => x.id === id);
+    const sanitized = {
+      id,
+      name,
+      description: String(input.description || ""),
+      active: input.active !== false,
+      permissions: Array.isArray(input.permissions) ? input.permissions.map((p: any) => String(p)) : [],
+      version: String(input.version || "1.0.0"),
+    };
+    const next = exists
+      ? extensions.map((x: any) => (x.id === id ? { ...x, ...sanitized } : x))
+      : [sanitized, ...extensions];
+    mergeDashboardSection("extensions", next);
+    auditDashboardAction(req, "extensions", exists ? "update" : "create", { id });
+    res.json({ success: true, extensions: next });
+  });
+
+  app.post("/admin/dashboard/extensions/toggle", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    const next = extensions.map((x: any) => (x.id === id ? { ...x, active: !x.active } : x));
+    mergeDashboardSection("extensions", next);
+    auditDashboardAction(req, "extensions", "toggle", { id });
+    res.json({ success: true, extensions: next });
+  });
+
+  app.post("/admin/dashboard/extensions/delete", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    const next = extensions.filter((x: any) => x.id !== id);
+    mergeDashboardSection("extensions", next);
+    auditDashboardAction(req, "extensions", "delete", { id });
+    res.json({ success: true, extensions: next });
   });
 
   app.post("/admin/dashboard/enterprise/departments/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
