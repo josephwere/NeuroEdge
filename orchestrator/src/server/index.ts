@@ -40,7 +40,10 @@ export function startServer(
   const app = express();
   app.use((_req: Request, res: Response, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key, X-Org-Id, X-Workspace-Id"
+    );
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     if (_req.method === "OPTIONS") {
       return res.sendStatus(204);
