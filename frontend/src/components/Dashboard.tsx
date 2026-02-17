@@ -33,8 +33,12 @@ interface UserRecord {
   id: string;
   name: string;
   email: string;
-  role: "user" | "moderator" | "admin" | "founder";
-  status: "active" | "pending" | "review" | "banned" | "verified";
+  role: "user" | "moderator" | "admin" | "founder" | "developer";
+  status: "active" | "pending" | "review" | "banned" | "verified" | "suspended" | "revoked";
+  founderRegistered?: boolean;
+  companyOwnedOnly?: boolean;
+  allowedDeviceId?: string;
+  company?: string;
 }
 
 interface Offer {
@@ -157,6 +161,136 @@ interface PermissionCatalogItem {
 interface AccessControlState {
   rolePermissions: Record<string, { defaultAction?: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
   userOverrides: Array<{ userId: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
+  updatedAt?: number;
+}
+
+interface DeviceProtectionPolicy {
+  enabled: boolean;
+  monitorCommands: boolean;
+  monitorFileChanges: boolean;
+  monitorNetworkEgress: boolean;
+  blockUnknownExecutables: boolean;
+  virusScanOnUpload: boolean;
+  dataExfiltrationShield: boolean;
+  autoQuarantineOnCritical: boolean;
+  enterpriseMode: boolean;
+  retentionDays: number;
+}
+
+interface ManagedDeviceRecord {
+  id: string;
+  hostname: string;
+  os: string;
+  ownerUserId: string;
+  ownerOrg: string;
+  companyOwned: boolean;
+  status: string;
+  allowExternalStorage: boolean;
+  allowUnsignedApps: boolean;
+  antiVirusVersion: string;
+  lastSeenAt: number;
+  updatedAt: number;
+}
+
+interface WorkerActivityRecord {
+  id: string;
+  actor: string;
+  actorRole: string;
+  deviceId: string;
+  eventType: string;
+  command: string;
+  filePath: string;
+  networkTarget: string;
+  details: string;
+  severity: "low" | "medium" | "high" | "critical";
+  threatSignals: string[];
+  orgId?: string;
+  workspaceId?: string;
+  timestamp: number;
+}
+
+interface SecurityAlertRecord {
+  id: string;
+  title: string;
+  severity: "low" | "medium" | "high" | "critical";
+  actor: string;
+  actorRole: string;
+  deviceId: string;
+  signals: string[];
+  status: string;
+  orgId?: string;
+  workspaceId?: string;
+  timestamp: number;
+}
+
+interface DeviceProtectionState {
+  policy: DeviceProtectionPolicy;
+  managedDevices: ManagedDeviceRecord[];
+  workerActivities: WorkerActivityRecord[];
+  securityAlerts: SecurityAlertRecord[];
+  antiTheft?: {
+    enabled?: boolean;
+    optInRequired?: boolean;
+    remoteLockAuthorizedOnly?: boolean;
+  };
+  loanProtection?: {
+    enabled?: boolean;
+    overdueDaysThreshold?: number;
+    restrictedModeFeatures?: string[];
+    disputeProcess?: boolean;
+  };
+  resilience?: {
+    selfHealingEnabled?: boolean;
+    rollbackEnabled?: boolean;
+    safeMode?: {
+      active?: boolean;
+      reason?: string;
+      activatedAt?: number;
+    };
+    lastRollback?: {
+      version?: string;
+      at?: number;
+      actor?: string;
+      reason?: string;
+    };
+  };
+  snapshots?: Array<{
+    version: string;
+    createdAt: number;
+    backendBuild?: string;
+    frontendBuild?: string;
+    schemaVersion?: string;
+    envHash?: string;
+  }>;
+  integrityBaseline?: Record<string, string>;
+  backup?: {
+    enabled?: boolean;
+    cadence?: string;
+    retentionDays?: number;
+    offsiteTarget?: string;
+    encryptAtRest?: boolean;
+    includeSnapshots?: boolean;
+    includeEvents?: boolean;
+    updatedAt?: number;
+    lastRun?: {
+      id?: string;
+      mode?: string;
+      startedAt?: number;
+      completedAt?: number;
+      snapshotCount?: number;
+      eventCount?: number;
+      encrypted?: boolean;
+      offsiteTarget?: string;
+      status?: string;
+    };
+  };
+  zeroTrust?: {
+    enabled?: boolean;
+    lastRotatedAt?: number;
+    rotationId?: string;
+    policy?: string;
+    actor?: string;
+  };
   updatedAt?: number;
 }
 
@@ -623,6 +757,70 @@ const Dashboard: React.FC = () => {
   });
   const [selectedAccessRole, setSelectedAccessRole] = useState("user");
   const [selectedAccessUserId, setSelectedAccessUserId] = useState("u2");
+  const [deviceProtection, setDeviceProtection] = useState<DeviceProtectionState>({
+    policy: {
+      enabled: true,
+      monitorCommands: true,
+      monitorFileChanges: true,
+      monitorNetworkEgress: true,
+      blockUnknownExecutables: true,
+      virusScanOnUpload: true,
+      dataExfiltrationShield: true,
+      autoQuarantineOnCritical: true,
+      enterpriseMode: true,
+      retentionDays: 90,
+    },
+    managedDevices: [],
+    workerActivities: [],
+    securityAlerts: [],
+    antiTheft: { enabled: true, optInRequired: true, remoteLockAuthorizedOnly: true },
+    loanProtection: {
+      enabled: true,
+      overdueDaysThreshold: 30,
+      restrictedModeFeatures: ["emergency_calls", "payment_portal", "support_access"],
+      disputeProcess: true,
+    },
+    resilience: {
+      selfHealingEnabled: true,
+      rollbackEnabled: true,
+      safeMode: { active: false, reason: "", activatedAt: 0 },
+    },
+    snapshots: [],
+    integrityBaseline: {},
+    backup: {
+      enabled: true,
+      cadence: "daily",
+      retentionDays: 30,
+      offsiteTarget: "encrypted-offsite",
+      encryptAtRest: true,
+      includeSnapshots: true,
+      includeEvents: true,
+    },
+    zeroTrust: {
+      enabled: true,
+      lastRotatedAt: 0,
+      rotationId: "",
+      policy: "token validation on every request + service auth",
+    },
+    updatedAt: 0,
+  });
+  const [deviceDraft, setDeviceDraft] = useState({
+    id: "",
+    hostname: "",
+    os: "linux",
+    ownerUserId: "u2",
+    ownerOrg: "personal",
+    companyOwned: true,
+    antiVirusVersion: "",
+  });
+  const [aegisOutput, setAegisOutput] = useState<any>(null);
+  const [aegisMalwareInput, setAegisMalwareInput] = useState("");
+  const [aegisPromptInput, setAegisPromptInput] = useState("");
+  const [aegisDeviceId, setAegisDeviceId] = useState("");
+  const [aegisLoanStatus, setAegisLoanStatus] = useState<"current" | "grace" | "overdue" | "dispute">("current");
+  const [aegisOverdueDays, setAegisOverdueDays] = useState("0");
+  const [aegisSnapshotVersion, setAegisSnapshotVersion] = useState("");
+  const [aegisSafeModeReason, setAegisSafeModeReason] = useState("Security incident response");
   const [latestGeneratedApiKey, setLatestGeneratedApiKey] = useState("");
   const [webhookEvent, setWebhookEvent] = useState("chat.completed");
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() => {
@@ -702,6 +900,10 @@ const Dashboard: React.FC = () => {
   });
   const [newOfferName, setNewOfferName] = useState("");
   const [newOfferPct, setNewOfferPct] = useState("10");
+  const [staffName, setStaffName] = useState("");
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffRole, setStaffRole] = useState<"admin" | "developer">("admin");
+  const [staffDeviceId, setStaffDeviceId] = useState("");
   const [futureFeatures, setFutureFeatures] = useState([
     { id: "f1", name: "Voice-native AI Calls", phase: "design", owner: "founder", priority: "high" },
     { id: "f2", name: "Autonomous Workflow Builder", phase: "in_progress", owner: "platform", priority: "high" },
@@ -789,13 +991,25 @@ const Dashboard: React.FC = () => {
     let sessionToken = "";
     let userOrg = "";
     let userWorkspace = "";
+    let userEmail = "";
+    let userName = "";
+    let userRole = "";
+    let deviceId = "";
     try {
+      deviceId = localStorage.getItem("neuroedge_device_id") || "";
+      if (!deviceId) {
+        deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem("neuroedge_device_id", deviceId);
+      }
       const rawUser = localStorage.getItem("neuroedge_user");
       if (rawUser) {
         const parsed = JSON.parse(rawUser);
         userToken = String(parsed?.token || "");
         userOrg = String(parsed?.orgId || "");
         userWorkspace = String(parsed?.workspaceId || "");
+        userEmail = String(parsed?.email || "");
+        userName = String(parsed?.name || "");
+        userRole = String(parsed?.role || "");
       }
       const rawSession = localStorage.getItem("neuroedge_session");
       if (rawSession) {
@@ -803,6 +1017,9 @@ const Dashboard: React.FC = () => {
         sessionToken = String(parsed?.token || "");
         userOrg = userOrg || String(parsed?.orgId || "");
         userWorkspace = userWorkspace || String(parsed?.workspaceId || "");
+        userEmail = userEmail || String(parsed?.email || "");
+        userName = userName || String(parsed?.name || "");
+        userRole = userRole || String(parsed?.role || "");
       }
     } catch {
       // ignore localStorage parsing issues and fallback to env defaults
@@ -812,6 +1029,10 @@ const Dashboard: React.FC = () => {
       apiKey: envApiKey,
       orgId: userOrg || envOrg || "personal",
       workspaceId: userWorkspace || envWorkspace || "default",
+      userEmail,
+      userName,
+      userRole,
+      deviceId,
     };
   };
 
@@ -823,6 +1044,10 @@ const Dashboard: React.FC = () => {
       "x-org-id": auth.orgId,
       "x-workspace-id": auth.workspaceId,
     };
+    if (auth.userEmail) h["x-user-email"] = auth.userEmail;
+    if (auth.userName) h["x-user-name"] = auth.userName;
+    if (auth.userRole) h["x-user-role"] = auth.userRole;
+    if (auth.deviceId) h["x-device-id"] = auth.deviceId;
     if (auth.token) h.Authorization = `Bearer ${auth.token}`;
     if (auth.apiKey) {
       h["x-api-key"] = auth.apiKey;
@@ -870,6 +1095,7 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.domainLinks)) setDomainLinks(remote.domainLinks);
     if (remote.accessControl && typeof remote.accessControl === "object") setAccessControl(remote.accessControl);
     if (Array.isArray(remote.permissionCatalog)) setPermissionCatalog(remote.permissionCatalog);
+    if (remote.deviceProtection && typeof remote.deviceProtection === "object") setDeviceProtection(remote.deviceProtection);
     if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
     if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
@@ -901,6 +1127,7 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.domainLinks)) setDomainLinks(data.domainLinks);
       if (data.accessControl && typeof data.accessControl === "object") setAccessControl(data.accessControl);
       if (Array.isArray(data.permissionCatalog)) setPermissionCatalog(data.permissionCatalog);
+      if (data.deviceProtection && typeof data.deviceProtection === "object") setDeviceProtection(data.deviceProtection);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
       if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
@@ -931,6 +1158,14 @@ const Dashboard: React.FC = () => {
         const access = await getJson("/admin/dashboard/access/bootstrap");
         if (Array.isArray(access?.permissionCatalog)) setPermissionCatalog(access.permissionCatalog);
         if (access?.accessControl && typeof access.accessControl === "object") setAccessControl(access.accessControl);
+      } catch {
+        // ignore when not authorized
+      }
+      try {
+        const security = await getJson("/admin/device-protection/bootstrap");
+        if (security?.deviceProtection && typeof security.deviceProtection === "object") {
+          setDeviceProtection(security.deviceProtection);
+        }
       } catch {
         // ignore when not authorized
       }
@@ -1020,6 +1255,55 @@ const Dashboard: React.FC = () => {
   const assignRole = async (id: string, role: UserRecord["role"]) => {
     await callAction("/admin/dashboard/users/role", { id, role });
     addNotification({ type: "success", message: `Role updated for ${id}` });
+  };
+
+  const localDeviceId = () => {
+    let id = "";
+    try {
+      id = localStorage.getItem("neuroedge_device_id") || "";
+      if (!id) {
+        id = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem("neuroedge_device_id", id);
+      }
+    } catch {
+      id = `dev-${Date.now()}`;
+    }
+    return id;
+  };
+
+  const registerStaffUser = async () => {
+    const name = staffName.trim();
+    const email = staffEmail.trim().toLowerCase();
+    if (!name || !email) {
+      addNotification({ type: "error", message: "Enter staff name and email." });
+      return;
+    }
+    const deviceId = staffDeviceId.trim() || localDeviceId();
+    const data = await callAction("/admin/dashboard/staff/register", {
+      user: {
+        name,
+        email,
+        role: staffRole,
+        allowedDeviceId: deviceId,
+      },
+    });
+    if (data?.success) {
+      setStaffName("");
+      setStaffEmail("");
+      setStaffDeviceId("");
+      addNotification({ type: "success", message: `${staffRole} account registered and device-bound.` });
+    }
+  };
+
+  const bindStaffDevice = async (id: string, deviceId: string) => {
+    const nextDevice = deviceId.trim() || localDeviceId();
+    const data = await callAction("/admin/dashboard/staff/device/bind", { id, allowedDeviceId: nextDevice });
+    if (data?.success) addNotification({ type: "success", message: `Device bound for ${id}` });
+  };
+
+  const setStaffAccess = async (id: string, action: "allow" | "suspend" | "revoke") => {
+    const data = await callAction("/admin/dashboard/staff/access", { id, action });
+    if (data?.success) addNotification({ type: "success", message: `Account ${id}: ${action}` });
   };
 
   const updateUserStatus = async (id: string, status: UserRecord["status"]) => {
@@ -1944,6 +2228,69 @@ const Dashboard: React.FC = () => {
     return "inherit";
   };
 
+  const saveDeviceProtectionPolicy = async () => {
+    const data = await callAction("/admin/device-protection/policy/save", { policy: deviceProtection.policy });
+    if (data?.success) addNotification({ type: "success", message: "Device protection policy saved." });
+  };
+
+  const upsertManagedDevice = async () => {
+    if (!deviceDraft.id.trim() || !deviceDraft.hostname.trim()) {
+      addNotification({ type: "error", message: "Enter device id and hostname." });
+      return;
+    }
+    const data = await callAction("/admin/device-protection/devices/upsert", {
+      device: {
+        id: deviceDraft.id.trim(),
+        hostname: deviceDraft.hostname.trim(),
+        os: deviceDraft.os,
+        ownerUserId: deviceDraft.ownerUserId,
+        ownerOrg: deviceDraft.ownerOrg,
+        companyOwned: deviceDraft.companyOwned,
+        antiVirusVersion: deviceDraft.antiVirusVersion,
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Device registered/updated." });
+      setDeviceDraft((prev) => ({ ...prev, id: "", hostname: "" }));
+    }
+  };
+
+  const applyDeviceAction = async (id: string, action: "allow" | "suspend" | "revoke" | "quarantine") => {
+    const data = await callAction("/admin/device-protection/devices/action", { id, action });
+    if (data?.success) addNotification({ type: "success", message: `Device ${id}: ${action}` });
+  };
+
+  const ingestSecurityActivity = async (activity: Partial<WorkerActivityRecord>) => {
+    const data = await callAction("/admin/device-protection/activity/ingest", { activity });
+    if (data?.success) addNotification({ type: "info", message: `Activity ingested (${data.activity?.severity || "unknown"})` });
+  };
+
+  const runAegisAction = async (path: string, body: any = {}) => {
+    try {
+      const isGet = path.startsWith("GET:");
+      const target = isGet ? path.replace("GET:", "") : path;
+      const data = isGet ? await getJson(target) : await callAction(target, body);
+      if (data) {
+        setAegisOutput(data);
+        if (data.deviceProtection && typeof data.deviceProtection === "object") {
+          setDeviceProtection((prev) => ({ ...prev, ...data.deviceProtection }));
+        }
+      }
+      return data;
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Aegis action failed: ${err?.message || err}` });
+      return null;
+    }
+  };
+
+  const selectedAegisDeviceId = () => {
+    const selected = aegisDeviceId.trim();
+    if (selected) return selected;
+    if (deviceDraft.id.trim()) return deviceDraft.id.trim();
+    if (deviceProtection.managedDevices[0]?.id) return deviceProtection.managedDevices[0].id;
+    return "";
+  };
+
   const domainRegistryCard = (
     <Card title="Domain & Link Registry (Founder/Admin)">
       <div style={{ display: "grid", gap: 8 }}>
@@ -2158,11 +2505,337 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const deviceProtectionCard = (
+    <Card title="Device Protection & Workforce Security">
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={muted}>
+          Protects GoldegeLabs and paid enterprise devices against misuse, malware patterns, data exfiltration, and suspicious worker activity.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            ["enabled", "Protection Enabled"],
+            ["monitorCommands", "Monitor Commands"],
+            ["monitorFileChanges", "Monitor File Changes"],
+            ["monitorNetworkEgress", "Monitor Network Egress"],
+            ["blockUnknownExecutables", "Block Unknown Executables"],
+            ["virusScanOnUpload", "Virus Scan Uploads"],
+            ["dataExfiltrationShield", "Data Exfiltration Shield"],
+            ["autoQuarantineOnCritical", "Auto Quarantine Critical"],
+            ["enterpriseMode", "Enterprise Mode"],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              style={chip}
+              onClick={() =>
+                setDeviceProtection((prev) => ({
+                  ...prev,
+                  policy: { ...prev.policy, [k]: !Boolean((prev.policy as any)[k]) },
+                }))
+              }
+            >
+              {label}: {Boolean((deviceProtection.policy as any)[k]) ? "On" : "Off"}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="number"
+            value={deviceProtection.policy.retentionDays}
+            onChange={(e) =>
+              setDeviceProtection((prev) => ({
+                ...prev,
+                policy: { ...prev.policy, retentionDays: Number(e.target.value) || 90 },
+              }))
+            }
+            placeholder="Retention days"
+            style={input}
+          />
+          <button style={primary} onClick={saveDeviceProtectionPolicy} disabled={!canAccessAdminOps}>
+            Save Policy
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Register Managed Device</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input value={deviceDraft.id} onChange={(e) => setDeviceDraft((p) => ({ ...p, id: e.target.value }))} placeholder="Device ID" style={input} />
+          <input value={deviceDraft.hostname} onChange={(e) => setDeviceDraft((p) => ({ ...p, hostname: e.target.value }))} placeholder="Hostname" style={input} />
+          <input value={deviceDraft.os} onChange={(e) => setDeviceDraft((p) => ({ ...p, os: e.target.value }))} placeholder="OS" style={input} />
+          <input value={deviceDraft.ownerUserId} onChange={(e) => setDeviceDraft((p) => ({ ...p, ownerUserId: e.target.value }))} placeholder="Owner User ID" style={input} />
+          <input value={deviceDraft.ownerOrg} onChange={(e) => setDeviceDraft((p) => ({ ...p, ownerOrg: e.target.value }))} placeholder="Owner Org" style={input} />
+          <input
+            value={deviceDraft.antiVirusVersion}
+            onChange={(e) => setDeviceDraft((p) => ({ ...p, antiVirusVersion: e.target.value }))}
+            placeholder="Antivirus version"
+            style={input}
+          />
+          <button style={chip} onClick={() => setDeviceDraft((p) => ({ ...p, companyOwned: !p.companyOwned }))}>
+            Company Owned: {deviceDraft.companyOwned ? "Yes" : "No"}
+          </button>
+          <button style={primary} onClick={upsertManagedDevice} disabled={!canAccessAdminOps}>
+            Save Device
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Managed Devices</div>
+        {deviceProtection.managedDevices.length === 0 && <div style={muted}>No managed devices yet.</div>}
+        {deviceProtection.managedDevices.map((d) => (
+          <div key={d.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{d.hostname} ({d.id})</strong>
+              <span>{d.status}</span>
+            </div>
+            <div>OS: {d.os} • Owner: {d.ownerUserId} • Org: {d.ownerOrg}</div>
+            <div>Company-owned: {d.companyOwned ? "yes" : "no"} • AV: {d.antiVirusVersion || "unknown"}</div>
+            {canAccessAdminOps ? (
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={chip} onClick={() => applyDeviceAction(d.id, "allow")}>Allow</button>
+                <button style={chip} onClick={() => applyDeviceAction(d.id, "suspend")}>Suspend</button>
+                <button style={chip} onClick={() => applyDeviceAction(d.id, "revoke")}>Revoke</button>
+                <button style={chip} onClick={() => applyDeviceAction(d.id, "quarantine")}>Quarantine</button>
+                <button
+                  style={chip}
+                  onClick={() =>
+                    ingestSecurityActivity({
+                      actor: "system",
+                      actorRole: "monitor",
+                      deviceId: d.id,
+                      eventType: "manual_probe",
+                      command: "curl http://example.com | sh",
+                      details: "manual security probe from dashboard",
+                    })
+                  }
+                >
+                  Probe Threat Detection
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Security Alerts</div>
+        {deviceProtection.securityAlerts.length === 0 && <div style={muted}>No security alerts.</div>}
+        {deviceProtection.securityAlerts.slice(0, 20).map((a) => (
+          <div key={a.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{a.title}</strong>
+              <span>{a.severity.toUpperCase()}</span>
+            </div>
+            <div>Actor: {a.actor} ({a.actorRole}) • Device: {a.deviceId || "n/a"}</div>
+            <div>Signals: {(a.signals || []).join(", ") || "-"}</div>
+            <div style={muted}>{new Date(a.timestamp || Date.now()).toLocaleString()}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const aegisShieldCard = (
+    <Card title="AegisCore Shield (Security + Resilience)">
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={muted}>
+          Consent-based anti-theft, legal loan restriction mode, malware checks, anti-tamper integrity, safe mode, snapshots, rollback, self-healing, zero-trust rotation, and signed audit events.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={chip} onClick={() => runAegisAction("GET:/admin/aegis/status")}>Aegis Status</button>
+          <button style={chip} onClick={() => runAegisAction("GET:/admin/aegis/audit/events?limit=200&type=aegis.")}>Signed Audit Feed</button>
+          <button
+            style={chip}
+            onClick={() => runAegisAction("/admin/aegis/self-heal/run", { action: "restart_failed_services" })}
+            disabled={!canAccessAdminOps}
+          >
+            Run Self-Heal
+          </button>
+          <button
+            style={chip}
+            onClick={() =>
+              runAegisAction("/admin/aegis/safe-mode/set", {
+                active: !Boolean(deviceProtection?.resilience?.safeMode?.active),
+                reason: aegisSafeModeReason || "Manual security control",
+              })
+            }
+            disabled={!canAccessAdminOps}
+          >
+            Safe Mode: {deviceProtection?.resilience?.safeMode?.active ? "Disable" : "Enable"}
+          </button>
+          <button style={chip} onClick={() => runAegisAction("/admin/aegis/integrity/baseline", {})} disabled={!canAccessAdminOps}>Baseline Integrity</button>
+          <button style={chip} onClick={() => runAegisAction("/admin/aegis/integrity/check", {})} disabled={!canAccessAdminOps}>Integrity Check</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Anti-Theft (Opt-in + Consent)</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={aegisDeviceId}
+            onChange={(e) => setAegisDeviceId(e.target.value)}
+            placeholder="Device ID (optional)"
+            style={input}
+          />
+          <button
+            style={chip}
+            onClick={() => runAegisAction("/admin/aegis/antitheft/flag", { deviceId: selectedAegisDeviceId(), stolen: true, consentPreGranted: true })}
+            disabled={!canAccessAdminOps || !selectedAegisDeviceId()}
+          >
+            Flag Stolen + Lock
+          </button>
+          <button
+            style={chip}
+            onClick={() => runAegisAction("/admin/aegis/antitheft/flag", { deviceId: selectedAegisDeviceId(), stolen: false, consentPreGranted: false })}
+            disabled={!canAccessAdminOps || !selectedAegisDeviceId()}
+          >
+            Clear Theft Flag
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Loan Protection (Legal Restricted Mode)</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select value={aegisLoanStatus} onChange={(e) => setAegisLoanStatus(e.target.value as any)} style={input}>
+            <option value="current">current</option>
+            <option value="grace">grace</option>
+            <option value="overdue">overdue</option>
+            <option value="dispute">dispute</option>
+          </select>
+          <input
+            type="number"
+            value={aegisOverdueDays}
+            onChange={(e) => setAegisOverdueDays(e.target.value)}
+            placeholder="Overdue days"
+            style={input}
+          />
+          <button
+            style={chip}
+            onClick={() =>
+              runAegisAction("/admin/aegis/loan/status", {
+                deviceId: selectedAegisDeviceId(),
+                loanStatus: aegisLoanStatus,
+                overdueDays: Number(aegisOverdueDays || 0),
+              })
+            }
+            disabled={!canAccessAdminOps || !selectedAegisDeviceId()}
+          >
+            Apply Loan Status
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Malware + Prompt Injection Shield</div>
+        <textarea
+          value={aegisMalwareInput}
+          onChange={(e) => setAegisMalwareInput(e.target.value)}
+          placeholder="Paste upload content sample or suspicious script to scan..."
+          style={{ ...input, minHeight: 80 }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            style={chip}
+            onClick={() => runAegisAction("/admin/aegis/malware/scan", { source: "dashboard", text: aegisMalwareInput })}
+            disabled={!canAccessAdminOps}
+          >
+            Scan Malware
+          </button>
+          <input
+            value={aegisPromptInput}
+            onChange={(e) => setAegisPromptInput(e.target.value)}
+            placeholder="Prompt shield text..."
+            style={input}
+          />
+          <button style={chip} onClick={() => runAegisAction("/admin/aegis/prompt-shield/check", { input: aegisPromptInput })} disabled={!canAccessAdminOps}>
+            Prompt Shield Check
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>Snapshots, Backup, Rollback, Zero Trust</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={aegisSnapshotVersion}
+            onChange={(e) => setAegisSnapshotVersion(e.target.value)}
+            placeholder="Snapshot version (e.g. v1.0.5)"
+            style={input}
+          />
+          <button
+            style={chip}
+            onClick={() =>
+              runAegisAction("/admin/aegis/snapshot/create", {
+                version: aegisSnapshotVersion.trim() || `v${Date.now()}`,
+              })
+            }
+            disabled={!canAccessAdminOps}
+          >
+            Create Snapshot
+          </button>
+          <button
+            style={chip}
+            onClick={() => runAegisAction("/admin/aegis/rollback", { version: aegisSnapshotVersion.trim(), reason: "manual founder rollback" })}
+            disabled={!canAccessAdminOps || !aegisSnapshotVersion.trim()}
+          >
+            Rollback
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            style={chip}
+            onClick={() =>
+              runAegisAction("/admin/aegis/backup/config", {
+                backup: {
+                  enabled: true,
+                  cadence: "daily",
+                  retentionDays: 30,
+                  offsiteTarget: "encrypted-offsite",
+                  encryptAtRest: true,
+                  includeSnapshots: true,
+                  includeEvents: true,
+                },
+              })
+            }
+            disabled={!canAccessAdminOps}
+          >
+            Save Backup Policy
+          </button>
+          <button style={chip} onClick={() => runAegisAction("/admin/aegis/backup/run", { mode: "incremental" })} disabled={!canAccessAdminOps}>Run Backup</button>
+          <button style={chip} onClick={() => runAegisAction("/admin/aegis/zero-trust/rotate-keys", {})} disabled={dashboardRole !== "founder"}>
+            Rotate Internal Keys (Founder)
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={aegisSafeModeReason}
+            onChange={(e) => setAegisSafeModeReason(e.target.value)}
+            placeholder="Safe mode reason"
+            style={input}
+          />
+          <button style={chip} onClick={() => exportOutputTxt("aegis_output", aegisOutput || "No Aegis output yet.")}>Export TXT</button>
+          <button style={chip} onClick={() => exportOutputWord("aegis_output", aegisOutput || "No Aegis output yet.")}>Export Word</button>
+          <button style={chip} onClick={() => printOutputPdf("Aegis Output", aegisOutput || "No Aegis output yet.")}>Export PDF</button>
+          <button style={chip} onClick={() => setAegisOutput(null)}>Clear Output</button>
+        </div>
+        <pre style={{ ...log, maxHeight: 220, overflow: "auto", whiteSpace: "pre-wrap" }}>
+          {aegisOutput ? JSON.stringify(aegisOutput, null, 2) : "No Aegis output yet."}
+        </pre>
+      </div>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
+      {deviceProtectionCard}
+      {aegisShieldCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -2517,18 +3190,45 @@ const Dashboard: React.FC = () => {
         </div>
       </Card>
       <Card title="Role Governance">
+        <div style={log}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Founder Staff Registration (GoldegeLabs devices only)</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <input value={staffName} onChange={(e) => setStaffName(e.target.value)} placeholder="Staff full name" style={input} />
+            <input value={staffEmail} onChange={(e) => setStaffEmail(e.target.value)} placeholder="Staff email" style={input} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <select value={staffRole} onChange={(e) => setStaffRole(e.target.value as "admin" | "developer")} style={input}>
+                <option value="admin">admin</option>
+                <option value="developer">developer</option>
+              </select>
+              <input
+                value={staffDeviceId}
+                onChange={(e) => setStaffDeviceId(e.target.value)}
+                placeholder={`Device ID (leave blank to auto-use ${localDeviceId()})`}
+                style={input}
+              />
+            </div>
+            <button style={primary} onClick={registerStaffUser}>Register Staff + Bind Device</button>
+          </div>
+        </div>
         {users.map((u) => (
           <div key={u.id} style={row}>
-            <span>{u.name} ({u.role})</span>
+            <span>
+              {u.name} ({u.role}) • {u.status}
+              {u.founderRegistered ? " • founder-registered" : ""}
+              {u.companyOwnedOnly ? " • company-device-only" : ""}
+            </span>
             <div style={{ display: "flex", gap: 6 }}>
               <select value={u.role} onChange={(e) => assignRole(u.id, e.target.value as UserRecord["role"])} style={{ ...input, width: 130 }}>
                 <option value="user">user</option>
                 <option value="moderator">moderator</option>
                 <option value="admin">admin</option>
+                <option value="developer">developer</option>
                 <option value="founder">founder</option>
               </select>
-              <button style={chip} onClick={() => updateUserStatus(u.id, "banned")}>Ban</button>
-              <button style={chip} onClick={() => updateUserStatus(u.id, "verified")}>Verify</button>
+              <button style={chip} onClick={() => setStaffAccess(u.id, "allow")}>Allow</button>
+              <button style={chip} onClick={() => setStaffAccess(u.id, "suspend")}>Suspend</button>
+              <button style={chip} onClick={() => setStaffAccess(u.id, "revoke")}>Revoke</button>
+              <button style={chip} onClick={() => bindStaffDevice(u.id, localDeviceId())}>Bind This Device</button>
             </div>
           </div>
         ))}
@@ -2893,6 +3593,8 @@ const Dashboard: React.FC = () => {
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
+      {deviceProtectionCard}
+      {aegisShieldCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -3199,6 +3901,8 @@ const Dashboard: React.FC = () => {
 
   const enterpriseView = (
     <div style={grid}>
+      {deviceProtectionCard}
+      {aegisShieldCard}
       <Card title="Team Roles & Department Controls">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -3207,6 +3911,7 @@ const Dashboard: React.FC = () => {
               <option value="user">user</option>
               <option value="moderator">moderator</option>
               <option value="admin">admin</option>
+              <option value="developer">developer</option>
               <option value="founder">founder</option>
             </select>
           </div>
