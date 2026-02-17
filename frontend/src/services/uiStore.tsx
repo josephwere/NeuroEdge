@@ -1,6 +1,7 @@
 // frontend/src/services/uiStore.ts
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { applyBrandingToDocument } from "@/services/branding";
 
 /* -------------------- */
 /* Types */
@@ -10,6 +11,9 @@ export interface User {
   email: string;
   token: string;
   guest: boolean;
+  provider?: "email" | "google" | "github" | "phone" | "guest";
+  phone?: string;
+  country?: string;
 }
 
 interface UIState {
@@ -80,12 +84,17 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   }, [themePreference]);
 
   const toggleTheme = () => {
-    setThemePreference((prev) => (prev === "dark" ? "light" : "dark"));
+    setThemePreference((prev) => {
+      if (prev === "system") return "light";
+      if (prev === "light") return "dark";
+      return "system";
+    });
   };
 
   useEffect(() => {
     localStorage.setItem("neuroedge_theme_pref", themePreference);
     document.documentElement.setAttribute("data-theme", theme);
+    applyBrandingToDocument();
   }, [themePreference, theme]);
 
   useEffect(() => {

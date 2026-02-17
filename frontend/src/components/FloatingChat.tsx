@@ -680,7 +680,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                 placeholder="execute • debug • fix • analyze"
                 style={{
                   width: "100%",
-                  padding: "10px",
+                  padding: "10px 7.9rem 10px 10px",
                   background: "rgba(15, 23, 42, 0.8)",
                   border: "1px solid rgba(148, 163, 184, 0.3)",
                   color: isListening ? "transparent" : "#e2e8f0",
@@ -689,6 +689,64 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                   outline: "none",
                 }}
               />
+              <div
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  right: 8,
+                  transform: "translateY(-50%)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {!!recordingDraft && !isListening ? (
+                  <>
+                    <button
+                      onClick={sendRecordingDraft}
+                      style={inlineRoundBtn("#16a34a", "#fff")}
+                      title="Send recorded transcript"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={acceptRecordingDraft}
+                      style={inlineRoundBtn("#ffffff", "#0f172a", "1px solid rgba(255,255,255,0.65)")}
+                      title="Use recorded transcript"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={cancelRecordingDraft}
+                      style={inlineRoundBtn("#dc2626", "#fff")}
+                      title="Discard recording"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={toggleVoiceInput}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 999,
+                      background: "transparent",
+                      color: "#e2e8f0",
+                      border: "none",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      fontSize: "1.05rem",
+                      lineHeight: 1,
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                    title={isListening ? "Stop voice input" : "Start voice input"}
+                  >
+                    {isListening ? "◼" : "🎤"}
+                  </button>
+                )}
+              </div>
               {isListening && (
                 <div
                   style={{
@@ -733,74 +791,6 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               )}
             </div>
             <button
-              onClick={toggleVoiceInput}
-              style={{
-                padding: "10px",
-                background: "transparent",
-                border: "1px solid rgba(148,163,184,0.2)",
-                color: "#fff",
-                borderRadius: 8,
-                marginLeft: 6,
-                fontWeight: 700,
-                fontSize: "1.2rem",
-              }}
-              title={isListening ? "Stop voice input" : "Start voice input"}
-            >
-              {isListening ? "◼" : "🎙"}
-            </button>
-            {!!recordingDraft && !isListening && (
-              <>
-                <button
-                  onClick={sendRecordingDraft}
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 999,
-                    border: "none",
-                    background: "#16a34a",
-                    color: "#fff",
-                    marginLeft: 6,
-                    fontWeight: 800,
-                  }}
-                  title="Send recorded transcript"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={acceptRecordingDraft}
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 999,
-                    border: "1px solid rgba(255,255,255,0.65)",
-                    background: "#ffffff",
-                    color: "#0f172a",
-                    marginLeft: 6,
-                    fontWeight: 800,
-                  }}
-                  title="Use recorded transcript"
-                >
-                  ✓
-                </button>
-                <button
-                  onClick={cancelRecordingDraft}
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 999,
-                    border: "none",
-                    background: "#dc2626",
-                    color: "#fff",
-                    marginLeft: 6,
-                    fontWeight: 800,
-                  }}
-                  title="Discard recording"
-                >
-                  ✕
-                </button>
-              </>
-            )}
-            <button
               onClick={isSending ? cancelSend : send}
               style={{
                 width: 44,
@@ -827,6 +817,20 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 };
 
 export default FloatingChat;
+
+const inlineRoundBtn = (bg: string, color: string, border = "none"): React.CSSProperties => ({
+  width: 28,
+  height: 28,
+  borderRadius: 999,
+  border,
+  background: bg,
+  color,
+  cursor: "pointer",
+  fontWeight: 800,
+  display: "grid",
+  placeItems: "center",
+  lineHeight: 1,
+});
 
 const miniActionStyle: React.CSSProperties = {
   border: "1px solid rgba(148, 163, 184, 0.3)",

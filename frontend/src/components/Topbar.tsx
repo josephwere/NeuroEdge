@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUI } from "@/services/uiStore";
+import { loadBranding } from "@/services/branding";
 
 interface TopbarProps {
   onSearch?: (query: string) => void;
@@ -23,6 +24,7 @@ const Topbar: React.FC<TopbarProps> = ({
   const [showCommands, setShowCommands] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [branding, setBranding] = useState(() => loadBranding());
 
   /* -------------------- */
   /* Network status */
@@ -37,6 +39,16 @@ const Topbar: React.FC<TopbarProps> = ({
     return () => {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
     };
   }, []);
 
@@ -78,8 +90,8 @@ const Topbar: React.FC<TopbarProps> = ({
           gap: "0.5rem",
         }}
       >
-        <img src="/icon.png" alt="NeuroEdge" style={{ width: 18, height: 18, borderRadius: 4 }} />
-        NeuroEdge
+          <img src={branding.iconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 18, height: 18, borderRadius: 4 }} />
+          {branding.productName || "NeuroEdge"}
       </button>
 
       {/* Offline indicator */}
@@ -139,11 +151,11 @@ const Topbar: React.FC<TopbarProps> = ({
 
       {/* Theme Toggle */}
       <button
-        title="Toggle theme"
+        title={`Theme: ${themePreference} (click to cycle)`}
         style={iconButton}
         onClick={() => toggleTheme()}
       >
-        {theme === "light" ? "🌙" : "☀️"}
+        {themePreference === "system" ? "🖥️" : theme === "light" ? "🌙" : "☀️"}
       </button>
 
       {/* User Menu */}

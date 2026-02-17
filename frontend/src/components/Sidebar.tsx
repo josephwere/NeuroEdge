@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
 import { useUI } from "@/services/uiStore";
+import { loadBranding } from "@/services/branding";
 
 /* -------------------- */
 /* Types */
@@ -51,6 +52,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [showProfileActions, setShowProfileActions] = useState(false);
   const [profileAvatar, setProfileAvatar] = useState<string>("");
   const [profileName, setProfileName] = useState<string>(user.name);
+  const [branding, setBranding] = useState(() => loadBranding());
 
   useEffect(() => {
     const readProfile = () => {
@@ -73,13 +75,23 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [user.name]);
 
+  useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
+
   return (
     <div style={sidebarStyle(collapsed)}>
       {/* ---------- Header ---------- */}
       <div style={headerStyle(collapsed)}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-          <img src="/logo.png" alt="NeuroEdge" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
-          {!collapsed && <strong style={{ fontSize: "1.1rem" }}>NeuroEdge</strong>}
+          <img src={branding.logoUrl || "/logo.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
+          {!collapsed && <strong style={{ fontSize: "1.1rem" }}>{branding.productName || "NeuroEdge"}</strong>}
         </div>
         <button onClick={onToggle} style={iconButton}>
           {collapsed ? "➡️" : "⬅️"}

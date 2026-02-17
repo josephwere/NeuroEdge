@@ -4,6 +4,7 @@ import { chatContext } from "@/services/chatContext";
 import { listConversations } from "@/services/conversationStore";
 import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
 import { isFounderUser } from "@/services/founderAccess";
+import { applyBrandingToDocument, defaultBranding, loadBranding, saveBranding, type BrandingConfig } from "@/services/branding";
 
 type View = "founder" | "admin" | "developer" | "agents" | "user" | "enterprise";
 
@@ -382,6 +383,7 @@ const Dashboard: React.FC = () => {
     { id: "f3", name: "Enterprise Data Residency", phase: "planned", owner: "enterprise", priority: "medium" },
     { id: "f4", name: "Realtime Co-Pilot Screen Assist", phase: "planned", owner: "product", priority: "high" },
   ]);
+  const [brandingDraft, setBrandingDraft] = useState<BrandingConfig>(() => loadBranding());
 
   useEffect(() => {
     localStorage.setItem("neuroedge_dashboard_users_v1", JSON.stringify(users));
@@ -422,6 +424,15 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("neuroedge_enterprise_sso_v1", JSON.stringify(ssoConfig));
   }, [ssoConfig]);
+  useEffect(() => {
+    const sync = () => setBrandingDraft(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", sync as EventListener);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", sync as EventListener);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
   useEffect(() => {
     if (!agentsLocal.length) {
       setSelectedAgentId("");
@@ -895,6 +906,42 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const readImageAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const onBrandAssetUpload = async (kind: "logoUrl" | "iconUrl" | "faviconUrl", files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      addNotification({ type: "error", message: "Please upload an image file." });
+      return;
+    }
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      setBrandingDraft((prev) => ({ ...prev, [kind]: dataUrl }));
+      addNotification({ type: "success", message: `${kind.replace("Url", "")} selected.` });
+    } catch {
+      addNotification({ type: "error", message: "Failed to read image." });
+    }
+  };
+
+  const saveBrandingSettings = () => {
+    const next: BrandingConfig = {
+      productName: brandingDraft.productName.trim() || defaultBranding.productName,
+      logoUrl: brandingDraft.logoUrl || defaultBranding.logoUrl,
+      iconUrl: brandingDraft.iconUrl || defaultBranding.iconUrl,
+      faviconUrl: brandingDraft.faviconUrl || brandingDraft.iconUrl || defaultBranding.faviconUrl,
+    };
+    saveBranding(next);
+    applyBrandingToDocument(next);
+    addNotification({ type: "success", message: "Branding updated across app." });
+  };
+
   const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
     if (!confirmSafeAction({ title: `${service} service`, actionLabel: "restart" })) return;
     const reason = window.prompt(`Reason for restarting ${service}:`, "Emergency maintenance");
@@ -1095,6 +1142,55 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
         ))}
+      </Card>
+      <Card title="Branding Studio (Founder/System Admin)">
+        <input
+          value={brandingDraft.productName}
+          onChange={(e) => setBrandingDraft((p) => ({ ...p, productName: e.target.value }))}
+          placeholder="Product name"
+          style={input}
+        />
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={row}>
+            <span>Logo</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("logoUrl", e.target.files)} />
+            </label>
+          </div>
+          <div style={row}>
+            <span>Icon</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("iconUrl", e.target.files)} />
+            </label>
+          </div>
+          <div style={row}>
+            <span>Favicon</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("faviconUrl", e.target.files)} />
+            </label>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <img src={brandingDraft.logoUrl || defaultBranding.logoUrl} alt="logo preview" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+          <img src={brandingDraft.iconUrl || defaultBranding.iconUrl} alt="icon preview" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(148,163,184,0.35)" }} />
+          <img src={brandingDraft.faviconUrl || defaultBranding.faviconUrl} alt="favicon preview" style={{ width: 20, height: 20, objectFit: "cover", borderRadius: 4, border: "1px solid rgba(148,163,184,0.35)" }} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={saveBrandingSettings}>Save Branding</button>
+          <button
+            style={chip}
+            onClick={() => {
+              setBrandingDraft(defaultBranding);
+              saveBranding(defaultBranding);
+              addNotification({ type: "info", message: "Branding reset to defaults." });
+            }}
+          >
+            Reset Default
+          </button>
+        </div>
       </Card>
       <Card title="System Health & Security">
         <Stat label="Uptime" value={`${adminMetrics?.uptimeSec || 0}s`} />
