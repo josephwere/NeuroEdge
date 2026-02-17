@@ -197,33 +197,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   }, [orchestrator]);
 
   // --- Send message / command ---
-  const handleSend = async () => {
-    if (!input.trim()) return;
-    setSuggestions([]);
-
-    const id = Date.now().toString();
-    const userMsg: Message = { id, role: "user", text: input, type: "info" };
-    setMessages(m => [...m, userMsg]);
-    setDisplayed(d => [...d, userMsg]);
-    chatContext.add({ role: "user", content: input });
-    addHistoryMessage({ id, role: "user", text: input, type: "info" });
-    if (activeConversationId) {
-      appendConversationMessage(activeConversationId, {
-        id,
-        role: "user",
-        text: input,
-        type: "info",
-        timestamp: Date.now(),
-      });
-    }
-
-    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
-
-    const userInput = input;
-    setInput("");
-
+  const executeWithContext = async (userInput: string, contextMessages: Message[]) => {
     try {
-      const currentContext = [...messages, userMsg].map((m) => ({
+      const currentContext = contextMessages.map((m) => ({
         role: m.role,
         content: m.text,
       }));
@@ -257,6 +233,34 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     } catch (err: any) {
       addMessage(`❌ Error: ${err.message || err}`, "error");
     }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    setSuggestions([]);
+
+    const id = Date.now().toString();
+    const userMsg: Message = { id, role: "user", text: input, type: "info" };
+    setMessages(m => [...m, userMsg]);
+    setDisplayed(d => [...d, userMsg]);
+    chatContext.add({ role: "user", content: input });
+    addHistoryMessage({ id, role: "user", text: input, type: "info" });
+    if (activeConversationId) {
+      appendConversationMessage(activeConversationId, {
+        id,
+        role: "user",
+        text: input,
+        type: "info",
+        timestamp: Date.now(),
+      });
+    }
+
+    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
+
+    const userInput = input;
+    setInput("");
+
+    await executeWithContext(userInput, [...messages, userMsg]);
   };
 
   // --- Helpers ---
@@ -362,9 +366,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     return kept;
   };
 
-  const applyMessageEdit = (id: string, nextText: string) => {
+  const applyMessageEdit = (id: string, nextText: string): Message[] | null => {
     const clean = nextText.trim();
-    if (!clean) return;
+    if (!clean) return null;
     const truncated = truncateFromMessage(id, false);
     const updated = truncated.map((m) => (m.id === id ? { ...m, text: clean } : m));
     setMessages(updated);
@@ -374,6 +378,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     updateCachedItemText(id, clean);
     updateHistoryMessage(id, clean);
     if (activeConversationId) updateConversationMessage(activeConversationId, id, clean);
+    return updated;
   };
 
   const applyMessageDelete = (id: string) => {
@@ -621,10 +626,14 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    applyMessageEdit(msg.id, editingDraft);
+                  onClick={async () => {
+                    const updated = applyMessageEdit(msg.id, editingDraft);
                     setEditingMessageId(null);
                     setEditingDraft("");
+                    if (!updated) return;
+                    const edited = updated.find((m) => m.id === msg.id);
+                    if (!edited) return;
+                    await executeWithContext(edited.text, updated);
                   }}
                   style={{
                     border: "none",
