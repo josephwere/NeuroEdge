@@ -277,6 +277,23 @@ function readDashboardSummary() {
     supportTickets: [],
     devApiKeys: [{ id: "k1", name: "Default SDK Key", keyMasked: "neur...9x3a", createdAt: Date.now(), revoked: false }],
     integrations: [],
+    domainLinks: [
+      {
+        id: "lnk-1",
+        name: "Main Product Site",
+        url: "https://example.com",
+        type: "public",
+        environment: "production",
+        audience: "users",
+        status: "active",
+        description: "Primary user-facing website",
+        tags: ["website", "public"],
+        owner: "founder",
+        notes: "Replace with your real domain",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ],
     webhooks: [],
     extensions: [
       {
@@ -828,6 +845,134 @@ export function startServer(
     mergeDashboardSection("integrations", next);
     auditDashboardAction(req, "integrations", "delete", { id });
     res.json({ success: true, integrations: next });
+  });
+
+  app.post("/admin/dashboard/links/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const input = req.body?.link || {};
+    const name = String(input?.name || "").trim();
+    const url = String(input?.url || "").trim();
+    if (!name || !url) return res.status(400).json({ error: "Missing link name or url" });
+    try {
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        return res.status(400).json({ error: "Only http/https links are allowed" });
+      }
+    } catch {
+      return res.status(400).json({ error: "Invalid URL format" });
+    }
+
+    const allowedTypes = new Set(["public", "internal", "admin", "api", "docs", "test"]);
+    const allowedEnvironments = new Set(["development", "staging", "production", "testing"]);
+    const allowedAudiences = new Set(["users", "admins", "founder", "developers", "enterprise", "internal"]);
+    const allowedStatuses = new Set(["active", "inactive", "testing", "deprecated"]);
+    const type = String(input?.type || "public");
+    const environment = String(input?.environment || "production");
+    const audience = String(input?.audience || "users");
+    const status = String(input?.status || "active");
+    if (!allowedTypes.has(type)) return res.status(400).json({ error: "Invalid type" });
+    if (!allowedEnvironments.has(environment)) return res.status(400).json({ error: "Invalid environment" });
+    if (!allowedAudiences.has(audience)) return res.status(400).json({ error: "Invalid audience" });
+    if (!allowedStatuses.has(status)) return res.status(400).json({ error: "Invalid status" });
+
+    const { dashboard } = readDashboardSummary();
+    const links = Array.isArray(dashboard.domainLinks) ? dashboard.domainLinks : [];
+    const id = String(input?.id || `lnk-${Date.now()}`);
+    const exists = links.some((it: any) => it.id === id);
+    const tags = Array.isArray(input?.tags)
+      ? input.tags.map((t: any) => String(t || "").trim()).filter(Boolean).slice(0, 20)
+      : [];
+    const now = Date.now();
+    const nextItem = {
+      id,
+      name,
+      url,
+      type,
+      environment,
+      audience,
+      status,
+      description: String(input?.description || ""),
+      tags,
+      owner: String(input?.owner || req.auth?.sub || "founder"),
+      notes: String(input?.notes || ""),
+      createdAt: Number(input?.createdAt || now),
+      updatedAt: now,
+    };
+    const next = exists
+      ? links.map((it: any) => (it.id === id ? { ...it, ...nextItem } : it))
+      : [nextItem, ...links];
+    mergeDashboardSection("domainLinks", next);
+    auditDashboardAction(req, "domain_links", exists ? "update" : "create", {
+      id,
+      name,
+      audience,
+      environment,
+      status,
+    });
+    res.json({ success: true, domainLinks: next });
+  });
+
+  app.post("/admin/dashboard/links/toggle", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const links = Array.isArray(dashboard.domainLinks) ? dashboard.domainLinks : [];
+    const now = Date.now();
+    const next = links.map((it: any) =>
+      it.id === id
+        ? { ...it, status: String(it.status) === "active" ? "inactive" : "active", updatedAt: now }
+        : it
+    );
+    mergeDashboardSection("domainLinks", next);
+    auditDashboardAction(req, "domain_links", "toggle", { id });
+    res.json({ success: true, domainLinks: next });
+  });
+
+  app.post("/admin/dashboard/links/delete", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const links = Array.isArray(dashboard.domainLinks) ? dashboard.domainLinks : [];
+    const next = links.filter((it: any) => it.id !== id);
+    mergeDashboardSection("domainLinks", next);
+    auditDashboardAction(req, "domain_links", "delete", { id });
+    res.json({ success: true, domainLinks: next });
+  });
+
+  app.post("/admin/dashboard/links/verify", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), async (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const links = Array.isArray(dashboard.domainLinks) ? dashboard.domainLinks : [];
+    const target = links.find((it: any) => String(it.id) === id);
+    if (!target) return res.status(404).json({ error: "Link not found" });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(String(target.url), { method: "GET", redirect: "follow", signal: controller.signal });
+      clearTimeout(timeout);
+      auditDashboardAction(req, "domain_links", "verify", {
+        id,
+        status: response.status,
+        ok: response.ok,
+      });
+      res.json({
+        success: true,
+        id,
+        url: target.url,
+        reachable: response.ok,
+        status: response.status,
+      });
+    } catch (err: any) {
+      clearTimeout(timeout);
+      auditDashboardAction(req, "domain_links", "verify_failed", { id, error: String(err?.message || err) });
+      res.status(200).json({
+        success: false,
+        id,
+        url: target.url,
+        reachable: false,
+        error: String(err?.message || err),
+      });
+    }
   });
 
   app.post("/dashboard/integrations/request-key", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (req: Request, res: Response) => {

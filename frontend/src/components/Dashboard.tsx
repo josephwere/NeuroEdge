@@ -169,6 +169,22 @@ interface IntegrationApp {
   updatedAt?: number;
 }
 
+interface DomainLink {
+  id: string;
+  name: string;
+  url: string;
+  type: "public" | "internal" | "admin" | "api" | "docs" | "test";
+  environment: "development" | "staging" | "production" | "testing";
+  audience: "users" | "admins" | "founder" | "developers" | "enterprise" | "internal";
+  status: "active" | "inactive" | "testing" | "deprecated";
+  description: string;
+  tags: string[];
+  owner: string;
+  notes: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface AgentProfile {
   id: string;
   name: string;
@@ -549,6 +565,27 @@ const Dashboard: React.FC = () => {
       return [];
     }
   });
+  const [domainLinks, setDomainLinks] = useState<DomainLink[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_domain_links_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [domainLinkDraft, setDomainLinkDraft] = useState({
+    id: "",
+    name: "",
+    url: "",
+    type: "public" as DomainLink["type"],
+    environment: "production" as DomainLink["environment"],
+    audience: "users" as DomainLink["audience"],
+    status: "active" as DomainLink["status"],
+    description: "",
+    tagsCsv: "",
+    owner: "",
+    notes: "",
+  });
   const [integrationDraft, setIntegrationDraft] = useState({
     appName: "",
     appDescription: "",
@@ -679,6 +716,9 @@ const Dashboard: React.FC = () => {
     localStorage.setItem("neuroedge_integrations_v1", JSON.stringify(integrations));
   }, [integrations]);
   useEffect(() => {
+    localStorage.setItem("neuroedge_domain_links_v1", JSON.stringify(domainLinks));
+  }, [domainLinks]);
+  useEffect(() => {
     localStorage.setItem("neuroedge_support_tickets_v1", JSON.stringify(supportTickets));
   }, [supportTickets]);
   useEffect(() => {
@@ -799,6 +839,7 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.devApiKeys)) setDevApiKeys(remote.devApiKeys);
     if (Array.isArray(remote.webhooks)) setWebhooks(remote.webhooks);
     if (Array.isArray(remote.integrations)) setIntegrations(remote.integrations);
+    if (Array.isArray(remote.domainLinks)) setDomainLinks(remote.domainLinks);
     if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
     if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
@@ -827,6 +868,7 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.devApiKeys)) setDevApiKeys(data.devApiKeys);
       if (Array.isArray(data.webhooks)) setWebhooks(data.webhooks);
       if (Array.isArray(data.integrations)) setIntegrations(data.integrations);
+      if (Array.isArray(data.domainLinks)) setDomainLinks(data.domainLinks);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
       if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
@@ -1674,6 +1716,84 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const clearDomainLinkDraft = () => {
+    setDomainLinkDraft({
+      id: "",
+      name: "",
+      url: "",
+      type: "public",
+      environment: "production",
+      audience: "users",
+      status: "active",
+      description: "",
+      tagsCsv: "",
+      owner: "",
+      notes: "",
+    });
+  };
+
+  const upsertDomainLink = async () => {
+    const name = domainLinkDraft.name.trim();
+    const url = domainLinkDraft.url.trim();
+    if (!name || !url) {
+      addNotification({ type: "error", message: "Enter link name and URL." });
+      return;
+    }
+    const tags = domainLinkDraft.tagsCsv
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const data = await callAction("/admin/dashboard/links/upsert", {
+      link: {
+        id: domainLinkDraft.id || undefined,
+        name,
+        url,
+        type: domainLinkDraft.type,
+        environment: domainLinkDraft.environment,
+        audience: domainLinkDraft.audience,
+        status: domainLinkDraft.status,
+        description: domainLinkDraft.description.trim(),
+        tags,
+        owner: domainLinkDraft.owner.trim(),
+        notes: domainLinkDraft.notes.trim(),
+      },
+    });
+    if (data?.success) {
+      clearDomainLinkDraft();
+      addNotification({ type: "success", message: "Domain/link saved." });
+    }
+  };
+
+  const editDomainLink = (link: DomainLink) => {
+    setDomainLinkDraft({
+      id: link.id,
+      name: link.name,
+      url: link.url,
+      type: link.type,
+      environment: link.environment,
+      audience: link.audience,
+      status: link.status,
+      description: link.description || "",
+      tagsCsv: Array.isArray(link.tags) ? link.tags.join(", ") : "",
+      owner: link.owner || "",
+      notes: link.notes || "",
+    });
+  };
+
+  const toggleDomainLink = async (id: string) => {
+    await callAction("/admin/dashboard/links/toggle", { id });
+  };
+
+  const verifyDomainLink = async (id: string) => {
+    const data = await callAction("/admin/dashboard/links/verify", { id });
+    if (!data) return;
+    if (data.reachable) {
+      addNotification({ type: "success", message: `Link verified (${data.status}).` });
+    } else {
+      addNotification({ type: "warn", message: `Link not reachable: ${data.error || data.status || "unknown"}` });
+    }
+  };
+
   const testWebhook = async (id: string) => {
     const hook = webhooks.find((w) => w.id === id);
     if (!hook) return;
@@ -1750,9 +1870,145 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: "Department added." });
   };
 
+  const domainRegistryCard = (
+    <Card title="Domain & Link Registry (Founder/Admin)">
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={domainLinkDraft.name}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, name: e.target.value }))}
+          placeholder="Link name (e.g. Production App, User Portal, Test URL)"
+          style={input}
+        />
+        <input
+          value={domainLinkDraft.url}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, url: e.target.value }))}
+          placeholder="https://your-domain.com"
+          style={input}
+        />
+        <textarea
+          value={domainLinkDraft.description}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, description: e.target.value }))}
+          placeholder="Description (e.g. this is for users, this is test url, this is admin API)"
+          style={{ ...input, minHeight: 70 }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select
+            value={domainLinkDraft.type}
+            onChange={(e) => setDomainLinkDraft((p) => ({ ...p, type: e.target.value as DomainLink["type"] }))}
+            style={input}
+          >
+            <option value="public">public</option>
+            <option value="internal">internal</option>
+            <option value="admin">admin</option>
+            <option value="api">api</option>
+            <option value="docs">docs</option>
+            <option value="test">test</option>
+          </select>
+          <select
+            value={domainLinkDraft.environment}
+            onChange={(e) => setDomainLinkDraft((p) => ({ ...p, environment: e.target.value as DomainLink["environment"] }))}
+            style={input}
+          >
+            <option value="development">development</option>
+            <option value="staging">staging</option>
+            <option value="production">production</option>
+            <option value="testing">testing</option>
+          </select>
+          <select
+            value={domainLinkDraft.audience}
+            onChange={(e) => setDomainLinkDraft((p) => ({ ...p, audience: e.target.value as DomainLink["audience"] }))}
+            style={input}
+          >
+            <option value="users">users</option>
+            <option value="admins">admins</option>
+            <option value="founder">founder</option>
+            <option value="developers">developers</option>
+            <option value="enterprise">enterprise</option>
+            <option value="internal">internal</option>
+          </select>
+          <select
+            value={domainLinkDraft.status}
+            onChange={(e) => setDomainLinkDraft((p) => ({ ...p, status: e.target.value as DomainLink["status"] }))}
+            style={input}
+          >
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="testing">testing</option>
+            <option value="deprecated">deprecated</option>
+          </select>
+        </div>
+        <input
+          value={domainLinkDraft.tagsCsv}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, tagsCsv: e.target.value }))}
+          placeholder="Tags (comma-separated): users, auth, test"
+          style={input}
+        />
+        <input
+          value={domainLinkDraft.owner}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, owner: e.target.value }))}
+          placeholder="Owner (team or person)"
+          style={input}
+        />
+        <input
+          value={domainLinkDraft.notes}
+          onChange={(e) => setDomainLinkDraft((p) => ({ ...p, notes: e.target.value }))}
+          placeholder="Notes (alerts, SLA, routing details)"
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={upsertDomainLink}>
+            {domainLinkDraft.id ? "Update Link" : "Add Link"}
+          </button>
+          <button style={chip} onClick={clearDomainLinkDraft}>Clear Form</button>
+        </div>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+        {domainLinks.length === 0 && <div style={muted}>No domains/links registered yet.</div>}
+        {domainLinks.map((link) => (
+          <div key={link.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <strong>{link.name}</strong>
+              <span>{link.environment} • {link.status}</span>
+            </div>
+            <div style={{ marginTop: 4, wordBreak: "break-all" }}>{link.url}</div>
+            <div style={{ marginTop: 4, color: "#94a3b8" }}>{link.description || "No description."}</div>
+            <div style={{ marginTop: 4 }}>
+              Type: {link.type} • Audience: {link.audience} • Owner: {link.owner || "n/a"}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              Tags: {(link.tags || []).join(", ") || "-"}
+            </div>
+            {link.notes ? <div style={{ marginTop: 4 }}>Notes: {link.notes}</div> : null}
+            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button style={chip} onClick={() => editDomainLink(link)}>Edit</button>
+              <button style={chip} onClick={() => navigator.clipboard?.writeText(link.url)}>Copy URL</button>
+              <button style={chip} onClick={() => verifyDomainLink(link.id)}>Verify</button>
+              <button style={chip} onClick={() => toggleDomainLink(link.id)}>
+                {link.status === "active" ? "Deactivate" : "Activate"}
+              </button>
+              <button
+                style={chip}
+                onClick={() =>
+                  runGuarded(
+                    `domain link ${link.name}`,
+                    () => callAction("/admin/dashboard/links/delete", { id: link.id }),
+                    "delete"
+                  )
+                }
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
       {trainingStudioCard}
+      {domainRegistryCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -2481,6 +2737,7 @@ const Dashboard: React.FC = () => {
   const adminView = (
     <div style={grid}>
       {trainingStudioCard}
+      {domainRegistryCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
