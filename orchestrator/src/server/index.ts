@@ -44,6 +44,7 @@ import {
   buildExpansionProposal,
   generateModuleWithConfirmation,
 } from "@core/selfExpansion";
+import { callIdverseWithFallback, IdverseConfig, maskApiKey } from "@integrations/idverse";
 import path from "path";
 import fs from "fs";
 import * as crypto from "crypto";
@@ -121,6 +122,82 @@ function isPaidUser(req: Request): boolean {
 
 function generateApiKey(prefix = "ne_sk"): string {
   return `${prefix}-${crypto.randomBytes(24).toString("hex")}`;
+}
+
+function boolEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
+function readIdverseConfigFromState(): IdverseConfig {
+  const state = readState();
+  const saved = (state.summary?.idverse || {}) as Record<string, any>;
+  const enabled = typeof saved.enabled === "boolean" ? saved.enabled : boolEnv("IDVERSE_ENABLED", true);
+  return {
+    enabled,
+    baseUrl: String(saved.baseUrl || process.env.IDVERSE_BASE_URL || "").trim(),
+    apiKey: String(saved.apiKey || process.env.IDVERSE_API_KEY || "").trim(),
+    projectId: String(saved.projectId || process.env.IDVERSE_PROJECT_ID || "").trim(),
+    timeoutMs: Math.max(1000, Number(saved.timeoutMs || process.env.IDVERSE_TIMEOUT_MS || 12000)),
+    strictBiometric:
+      typeof saved.strictBiometric === "boolean"
+        ? saved.strictBiometric
+        : boolEnv("IDVERSE_STRICT_BIOMETRIC", true),
+    strictLiveness:
+      typeof saved.strictLiveness === "boolean"
+        ? saved.strictLiveness
+        : boolEnv("IDVERSE_STRICT_LIVENESS", true),
+  };
+}
+
+function writeIdverseConfigToState(next: IdverseConfig): IdverseConfig {
+  const current = readState();
+  writeState({
+    ...current,
+    summary: {
+      ...(current.summary || {}),
+      idverse: next,
+    },
+  });
+  return next;
+}
+
+function idversePublicView(cfg: IdverseConfig): Record<string, any> {
+  return {
+    enabled: cfg.enabled,
+    baseUrl: cfg.baseUrl,
+    projectId: cfg.projectId,
+    timeoutMs: cfg.timeoutMs,
+    strictBiometric: cfg.strictBiometric,
+    strictLiveness: cfg.strictLiveness,
+    apiKeyMasked: maskApiKey(cfg.apiKey),
+    configured: Boolean(cfg.baseUrl && cfg.apiKey),
+  };
+}
+
+function sanitizeText(raw: string): string {
+  return String(raw || "")
+    .replace(/\u0000/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
+function stripHtml(raw: string): string {
+  return String(raw || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeBase64Safe(data: string): Buffer | null {
+  try {
+    return Buffer.from(String(data || ""), "base64");
+  } catch {
+    return null;
+  }
 }
 
 function readDashboardSummary() {
@@ -246,6 +323,7 @@ function readDashboardSummary() {
       clientId: "",
       metadataUrl: "",
     },
+    idverse: idversePublicView(readIdverseConfigFromState()),
   };
   const dashboard = { ...defaults, ...((state.summary?.dashboard || {}) as Record<string, any>) };
   return { state, dashboard };
@@ -958,6 +1036,198 @@ export function startServer(
     res.json({ success: true, ssoConfig });
   });
 
+  app.get("/admin/dashboard/idverse", requireWorkspace, requireScope("admin:read"), requireRole(["founder", "admin", "developer"]), (_req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    res.json({ success: true, idverse: idversePublicView(cfg) });
+  });
+
+  app.post("/admin/dashboard/idverse/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const current = readIdverseConfigFromState();
+    const input = req.body?.idverse || req.body || {};
+    const candidateBaseUrl = String(input.baseUrl ?? current.baseUrl).trim();
+    if (candidateBaseUrl && !/^https?:\/\//i.test(candidateBaseUrl)) {
+      return res.status(400).json({ error: "Invalid baseUrl. Must start with http:// or https://" });
+    }
+
+    const apiKeyInput = String(input.apiKey ?? "").trim();
+    const next: IdverseConfig = {
+      enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled,
+      baseUrl: candidateBaseUrl || "",
+      apiKey:
+        apiKeyInput && apiKeyInput.includes("...")
+          ? current.apiKey
+          : apiKeyInput || current.apiKey,
+      projectId: String(input.projectId ?? current.projectId).trim(),
+      timeoutMs: Math.max(1000, Number(input.timeoutMs ?? current.timeoutMs ?? 12000)),
+      strictBiometric:
+        typeof input.strictBiometric === "boolean" ? input.strictBiometric : current.strictBiometric,
+      strictLiveness:
+        typeof input.strictLiveness === "boolean" ? input.strictLiveness : current.strictLiveness,
+    };
+    writeIdverseConfigToState(next);
+    mergeDashboardSection("idverse", idversePublicView(next));
+    auditDashboardAction(req, "idverse", "save", {
+      enabled: next.enabled,
+      baseUrl: next.baseUrl,
+      strictBiometric: next.strictBiometric,
+      strictLiveness: next.strictLiveness,
+    });
+    return res.json({ success: true, idverse: idversePublicView(next) });
+  });
+
+  app.get("/idverse/status", requireWorkspace, requireScope("identity:read"), async (_req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    if (!cfg.enabled) {
+      return res.json({
+        success: true,
+        provider: "idverse",
+        healthy: false,
+        configured: false,
+        reason: "disabled",
+        config: idversePublicView(cfg),
+      });
+    }
+    if (!cfg.baseUrl || !cfg.apiKey) {
+      return res.json({
+        success: true,
+        provider: "idverse",
+        healthy: false,
+        configured: false,
+        reason: "not_configured",
+        config: idversePublicView(cfg),
+      });
+    }
+    try {
+      const ping = await callIdverseWithFallback(cfg, "get", ["health", "status"]);
+      return res.json({
+        success: true,
+        provider: "idverse",
+        healthy: true,
+        configured: true,
+        endpoint: ping.endpoint,
+        config: idversePublicView(cfg),
+      });
+    } catch (err: any) {
+      return res.status(502).json({
+        success: false,
+        provider: "idverse",
+        healthy: false,
+        configured: true,
+        error: err?.message || String(err),
+        config: idversePublicView(cfg),
+      });
+    }
+  });
+
+  app.post("/neuroedge/verify-identity", requireWorkspace, requireScope("identity:verify"), async (req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    const payload = {
+      ...(req.body || {}),
+      provider: "idverse",
+      strictBiometric: cfg.strictBiometric,
+      strictLiveness: cfg.strictLiveness,
+    };
+    try {
+      const resp = await callIdverseWithFallback(
+        cfg,
+        "post",
+        ["identity/verify", "verify-identity", "kyc/verify", "v1/identity/verify"],
+        payload
+      );
+      appendEvent({
+        type: "identity.verify",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          endpoint: resp.endpoint,
+          verified: Boolean(resp.data?.verified ?? resp.data?.success),
+        },
+      });
+      return res.json({ success: true, provider: "idverse", endpoint: resp.endpoint, result: resp.data });
+    } catch (err: any) {
+      return res.status(502).json({ error: "IDVerse verify failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neuroedge/liveness-check", requireWorkspace, requireScope("identity:verify"), async (req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    try {
+      const resp = await callIdverseWithFallback(
+        cfg,
+        "post",
+        ["identity/liveness", "liveness-check", "v1/identity/liveness"],
+        req.body || {}
+      );
+      appendEvent({
+        type: "identity.liveness",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          endpoint: resp.endpoint,
+          passed: Boolean(resp.data?.passed ?? resp.data?.success),
+        },
+      });
+      return res.json({ success: true, provider: "idverse", endpoint: resp.endpoint, result: resp.data });
+    } catch (err: any) {
+      return res.status(502).json({ error: "IDVerse liveness failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neuroedge/biometric-match", requireWorkspace, requireScope("identity:verify"), async (req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    try {
+      const resp = await callIdverseWithFallback(
+        cfg,
+        "post",
+        ["identity/biometric/match", "biometric-match", "v1/identity/biometric/match"],
+        req.body || {}
+      );
+      appendEvent({
+        type: "identity.biometric_match",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          endpoint: resp.endpoint,
+          matched: Boolean(resp.data?.matched ?? resp.data?.success),
+        },
+      });
+      return res.json({ success: true, provider: "idverse", endpoint: resp.endpoint, result: resp.data });
+    } catch (err: any) {
+      return res.status(502).json({ error: "IDVerse biometric match failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neuroedge/user/identity", requireWorkspace, requireScope("identity:read"), async (req: Request, res: Response) => {
+    const cfg = readIdverseConfigFromState();
+    const userId = String(req.query.userId || req.auth?.sub || "").trim();
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
+    try {
+      const resp = await callIdverseWithFallback(
+        cfg,
+        "get",
+        ["identity/user", "user/identity", "v1/identity/user"],
+        undefined,
+        { userId }
+      );
+      appendEvent({
+        type: "identity.user_fetch",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          endpoint: resp.endpoint,
+          userId,
+        },
+      });
+      return res.json({ success: true, provider: "idverse", endpoint: resp.endpoint, identity: resp.data });
+    } catch (err: any) {
+      return res.status(502).json({ error: "IDVerse user identity fetch failed", detail: err?.message || String(err) });
+    }
+  });
+
   app.get("/admin/system/metrics", requireWorkspace, requireScope("admin:read"), async (_req: Request, res: Response) => {
     const mem = process.memoryUsage();
     const kernels = await globalKernelManager.getAllHealth();
@@ -1451,6 +1721,329 @@ export function startServer(
     });
     res.json({ success: true, event: evt });
   });
+
+  app.get(
+    "/admin/training/overview",
+    requireWorkspace,
+    requireScope("training:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const limit = Math.max(50, Math.min(5000, Number(req.query.limit) || 1000));
+      const samples = listTrainingSamples(limit) as Array<Record<string, any>>;
+      const byRating = samples.reduce(
+        (acc, s) => {
+          const key = String(s.rating || "neutral");
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>
+      );
+      const byTag: Record<string, number> = {};
+      for (const s of samples) {
+        const tags = Array.isArray(s.tags) ? s.tags : [];
+        for (const tag of tags) {
+          const k = String(tag || "").trim().toLowerCase();
+          if (!k) continue;
+          byTag[k] = (byTag[k] || 0) + 1;
+        }
+      }
+      res.json({
+        success: true,
+        total: samples.length,
+        byRating,
+        topTags: Object.entries(byTag)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 20)
+          .map(([tag, count]) => ({ tag, count })),
+        latest: samples.slice(-10),
+        orgId: req.auth?.orgId || "personal",
+        workspaceId: req.auth?.workspaceId || "default",
+      });
+    }
+  );
+
+  app.post(
+    "/admin/training/ingest/text",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    trainingLimiter,
+    (req: Request, res: Response) => {
+      const title = sanitizeText(String(req.body?.title || "manual_text"));
+      const text = sanitizeText(String(req.body?.text || ""));
+      const tags = Array.isArray(req.body?.tags) ? req.body.tags.map((t: any) => String(t)) : [];
+      const options = req.body?.options || {};
+      if (!text) return res.status(400).json({ error: "Missing text" });
+      const maxChars = Math.max(1000, Number(process.env.TRAINING_TEXT_MAX_CHARS || 200000));
+      const clipped = text.slice(0, maxChars);
+      const evt = recordTrainingSample({
+        query: `ingest:text:${title}`,
+        response: clipped,
+        rating: "up",
+        orgId: req.auth?.orgId,
+        workspaceId: req.auth?.workspaceId,
+        actor: req.auth?.sub,
+        tags: ["ingest", "text", ...tags],
+      });
+      appendEvent({
+        type: "training.ingest.text",
+        timestamp: Date.now(),
+        payload: {
+          title,
+          chars: clipped.length,
+          options,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+        },
+      });
+      res.json({ success: true, ingested: 1, chars: clipped.length, event: evt });
+    }
+  );
+
+  app.post(
+    "/admin/training/ingest/files",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    trainingLimiter,
+    (req: Request, res: Response) => {
+      const files = Array.isArray(req.body?.files) ? req.body.files : [];
+      const tags = Array.isArray(req.body?.tags) ? req.body.tags.map((t: any) => String(t)) : [];
+      const options = req.body?.options || {};
+      if (files.length === 0) return res.status(400).json({ error: "Missing files" });
+      const maxFiles = Math.max(1, Number(process.env.TRAINING_MAX_FILES_PER_INGEST || 200));
+      const maxChars = Math.max(1000, Number(process.env.TRAINING_TEXT_MAX_CHARS || 200000));
+      const maxBinaryBytes = Math.max(1024, Number(process.env.TRAINING_BINARY_MAX_BYTES || 3000000));
+      const sliced = files.slice(0, maxFiles);
+      const accepted: Array<Record<string, any>> = [];
+      const rejected: Array<Record<string, any>> = [];
+
+      for (const f of sliced) {
+        const name = String(f?.name || "unknown").trim();
+        const mime = String(f?.type || "").toLowerCase();
+        const textContent = typeof f?.textContent === "string" ? f.textContent : "";
+        const base64 = typeof f?.base64 === "string" ? f.base64 : "";
+        const lowerName = name.toLowerCase();
+        const ext = lowerName.includes(".") ? lowerName.slice(lowerName.lastIndexOf(".")) : "";
+        const isTextish =
+          mime.startsWith("text/") ||
+          [".txt", ".md", ".json", ".csv", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".rs", ".html", ".css", ".sql", ".yaml", ".yml"].includes(ext);
+
+        if (isTextish && textContent) {
+          const cleaned = sanitizeText(textContent).slice(0, maxChars);
+          if (!cleaned) {
+            rejected.push({ name, reason: "empty_text" });
+            continue;
+          }
+          recordTrainingSample({
+            query: `ingest:file:${name}`,
+            response: cleaned,
+            rating: "up",
+            orgId: req.auth?.orgId,
+            workspaceId: req.auth?.workspaceId,
+            actor: req.auth?.sub,
+            tags: ["ingest", "file", ext.replace(".", "") || "text", ...tags],
+          });
+          accepted.push({ name, mode: "text", chars: cleaned.length });
+          continue;
+        }
+
+        if (base64) {
+          const buf = decodeBase64Safe(base64);
+          if (!buf) {
+            rejected.push({ name, reason: "invalid_base64" });
+            continue;
+          }
+          if (buf.length > maxBinaryBytes) {
+            rejected.push({ name, reason: "binary_too_large", bytes: buf.length });
+            continue;
+          }
+          const descriptor = `binary_file name=${name} mime=${mime || "unknown"} bytes=${buf.length} ext=${ext || "none"}`;
+          recordTrainingSample({
+            query: `ingest:file:${name}`,
+            response: descriptor,
+            rating: "neutral",
+            orgId: req.auth?.orgId,
+            workspaceId: req.auth?.workspaceId,
+            actor: req.auth?.sub,
+            tags: ["ingest", "binary", ext.replace(".", "") || "bin", ...tags],
+          });
+          accepted.push({ name, mode: "binary", bytes: buf.length });
+          continue;
+        }
+
+        rejected.push({ name, reason: "unsupported_or_empty" });
+      }
+
+      appendEvent({
+        type: "training.ingest.files",
+        timestamp: Date.now(),
+        payload: {
+          accepted: accepted.length,
+          rejected: rejected.length,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          options,
+        },
+      });
+      res.json({
+        success: true,
+        accepted,
+        rejected,
+        ingested: accepted.length,
+      });
+    }
+  );
+
+  app.post(
+    "/admin/training/ingest/urls",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    trainingLimiter,
+    async (req: Request, res: Response) => {
+      const urls = Array.isArray(req.body?.urls) ? req.body.urls.map((u: any) => String(u || "").trim()).filter(Boolean) : [];
+      const tags = Array.isArray(req.body?.tags) ? req.body.tags.map((t: any) => String(t)) : [];
+      const options = req.body?.options || {};
+      if (urls.length === 0) return res.status(400).json({ error: "Missing urls" });
+
+      const maxUrls = Math.max(1, Number(process.env.TRAINING_MAX_URLS_PER_INGEST || 25));
+      const maxChars = Math.max(1000, Number(process.env.TRAINING_TEXT_MAX_CHARS || 200000));
+      const timeoutMs = Math.max(1000, Number(process.env.RESEARCH_HTTP_TIMEOUT_MS || 7000));
+      const accepted: Array<Record<string, any>> = [];
+      const rejected: Array<Record<string, any>> = [];
+
+      for (const rawUrl of urls.slice(0, maxUrls)) {
+        try {
+          const url = new URL(rawUrl);
+          if (!["http:", "https:"].includes(url.protocol)) {
+            rejected.push({ url: rawUrl, reason: "invalid_protocol" });
+            continue;
+          }
+          const resp = await axios.get(rawUrl, {
+            timeout: timeoutMs,
+            maxContentLength: 4_000_000,
+            responseType: "text",
+          });
+          const bodyRaw = String(resp.data || "");
+          const cleaned = sanitizeText(stripHtml(bodyRaw)).slice(0, maxChars);
+          if (!cleaned) {
+            rejected.push({ url: rawUrl, reason: "empty_content" });
+            continue;
+          }
+          recordTrainingSample({
+            query: `ingest:url:${rawUrl}`,
+            response: cleaned,
+            rating: "up",
+            orgId: req.auth?.orgId,
+            workspaceId: req.auth?.workspaceId,
+            actor: req.auth?.sub,
+            tags: ["ingest", "url", ...tags],
+            citations: [{ title: rawUrl, url: rawUrl }],
+          });
+          accepted.push({ url: rawUrl, chars: cleaned.length, status: resp.status });
+        } catch (err: any) {
+          rejected.push({ url: rawUrl, reason: err?.message || String(err) });
+        }
+      }
+
+      appendEvent({
+        type: "training.ingest.urls",
+        timestamp: Date.now(),
+        payload: {
+          accepted: accepted.length,
+          rejected: rejected.length,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          options,
+        },
+      });
+      res.json({ success: true, accepted, rejected, ingested: accepted.length });
+    }
+  );
+
+  app.post(
+    "/admin/training/ingest/research",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    trainingLimiter,
+    async (req: Request, res: Response) => {
+      const query = String(req.body?.query || "").trim();
+      const tags = Array.isArray(req.body?.tags) ? req.body.tags.map((t: any) => String(t)) : [];
+      if (!query) return res.status(400).json({ error: "Missing query" });
+      try {
+        const result = await runResearch(query);
+        const combined = [
+          `query: ${query}`,
+          `summary: ${result.summary}`,
+          `citations:`,
+          ...result.citations.map((c) => `- ${c.title || c.url}: ${c.url}`),
+        ].join("\n");
+        const evt = recordTrainingSample({
+          query: `ingest:research:${query}`,
+          response: combined,
+          rating: "up",
+          orgId: req.auth?.orgId,
+          workspaceId: req.auth?.workspaceId,
+          actor: req.auth?.sub,
+          tags: ["ingest", "research", ...tags],
+          citations: result.citations.map((c) => ({ title: c.title, url: c.url })),
+        });
+        res.json({
+          success: true,
+          event: evt,
+          ingested: 1,
+          pagesFetched: result.pagesFetched,
+          citations: result.citations,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: "Research ingest failed", detail: err?.message || String(err) });
+      }
+    }
+  );
+
+  app.post(
+    "/admin/training/jobs/run",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const body = req.body || {};
+      const mode = String(body.mode || "incremental");
+      const evalSuite = String(body.evalSuite || "core");
+      const targetModel = String(body.targetModel || process.env.ML_MODEL_NAME || "neuroedge-ml");
+      const id = `train-${crypto.randomUUID()}`;
+      appendEvent({
+        type: "training.job.requested",
+        timestamp: Date.now(),
+        payload: {
+          id,
+          mode,
+          evalSuite,
+          targetModel,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          options: body.options || {},
+        },
+      });
+      res.json({
+        success: true,
+        job: {
+          id,
+          status: "queued",
+          mode,
+          evalSuite,
+          targetModel,
+          queuedAt: Date.now(),
+        },
+      });
+    }
+  );
 
   app.get("/training/samples", requireWorkspace, requireScope("training:read"), (req: Request, res: Response) => {
     const limit = Number(req.query.limit) || 200;

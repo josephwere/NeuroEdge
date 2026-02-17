@@ -108,7 +108,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const jwtScopes = parseScopes(claims || undefined);
   const apiKeyScopes = parseScopeList(
     process.env.API_KEY_SCOPES ||
-      "chat:write execute:run ai:infer research:run mesh:read mesh:write billing:read storage:write federation:read federation:write training:read training:write admin:read admin:write founder:*"
+      "chat:write execute:run ai:infer research:run mesh:read mesh:write billing:read storage:write federation:read federation:write training:read training:write identity:read identity:verify identity:write admin:read admin:write founder:*"
   );
   const scopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : [];
   const requestedOrg = req.header("x-org-id") || undefined;

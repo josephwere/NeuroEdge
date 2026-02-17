@@ -98,6 +98,26 @@ interface RewardsLedger {
   wallets: RewardWallet[];
 }
 
+interface IdverseConfig {
+  enabled: boolean;
+  baseUrl: string;
+  projectId: string;
+  timeoutMs: number;
+  strictBiometric: boolean;
+  strictLiveness: boolean;
+  apiKey: string;
+  apiKeyMasked?: string;
+}
+
+interface TrainingStudioOptions {
+  dedupe: boolean;
+  piiFilter: boolean;
+  autoTag: boolean;
+  semanticChunking: boolean;
+  crawlLinks: boolean;
+  citationMode: boolean;
+}
+
 interface ModelControl {
   model: string;
   temperature: number;
@@ -388,6 +408,34 @@ const Dashboard: React.FC = () => {
       };
     }
   });
+  const [idverseConfig, setIdverseConfig] = useState<IdverseConfig>(() => ({
+    enabled: true,
+    baseUrl: "",
+    projectId: "",
+    timeoutMs: 12000,
+    strictBiometric: true,
+    strictLiveness: true,
+    apiKey: "",
+    apiKeyMasked: "",
+  }));
+  const [idverseStatus, setIdverseStatus] = useState<any>(null);
+  const [trainingTitle, setTrainingTitle] = useState("Founder Training Note");
+  const [trainingText, setTrainingText] = useState("");
+  const [trainingTagsCsv, setTrainingTagsCsv] = useState("founder,custom,high-signal");
+  const [trainingUrls, setTrainingUrls] = useState("");
+  const [trainingResearchQuery, setTrainingResearchQuery] = useState("");
+  const [trainingUploadFiles, setTrainingUploadFiles] = useState<Array<{ name: string; type: string; textContent?: string; base64?: string }>>([]);
+  const [trainingOverview, setTrainingOverview] = useState<any>(null);
+  const [trainingJobMode, setTrainingJobMode] = useState<"incremental" | "full" | "eval_only">("incremental");
+  const [trainingEvalSuite, setTrainingEvalSuite] = useState<"core" | "math" | "code" | "research" | "all">("core");
+  const [trainingOptions, setTrainingOptions] = useState<TrainingStudioOptions>({
+    dedupe: true,
+    piiFilter: true,
+    autoTag: true,
+    semanticChunking: true,
+    crawlLinks: false,
+    citationMode: true,
+  });
   const [rewardUserId, setRewardUserId] = useState("u2");
   const [rewardUserName, setRewardUserName] = useState("Guest User");
   const [rewardPointsInput, setRewardPointsInput] = useState("100");
@@ -657,6 +705,12 @@ const Dashboard: React.FC = () => {
     if (remote.cryptoRewards && typeof remote.cryptoRewards === "object") setCryptoRewards(remote.cryptoRewards);
     if (remote.modelControl && typeof remote.modelControl === "object") setModelControl(remote.modelControl);
     if (remote.rewardsLedger && typeof remote.rewardsLedger === "object") setRewardsLedger(remote.rewardsLedger);
+    if (remote.idverse && typeof remote.idverse === "object") {
+      setIdverseConfig((prev) => ({
+        ...prev,
+        ...remote.idverse,
+      }));
+    }
     if (remote.featureFlags && typeof remote.featureFlags === "object") setFeatureFlags(remote.featureFlags);
     if (Array.isArray(remote.supportTickets)) setSupportTickets(remote.supportTickets);
     if (Array.isArray(remote.devApiKeys)) setDevApiKeys(remote.devApiKeys);
@@ -678,6 +732,13 @@ const Dashboard: React.FC = () => {
       if (data.cryptoRewards) setCryptoRewards(data.cryptoRewards);
       if (data.modelControl) setModelControl(data.modelControl);
       if (data.rewardsLedger) setRewardsLedger(data.rewardsLedger);
+      if (data.idverse) {
+        setIdverseConfig((prev) => ({
+          ...prev,
+          ...data.idverse,
+          apiKey: prev.apiKey,
+        }));
+      }
       if (data.featureFlags) setFeatureFlags(data.featureFlags);
       if (Array.isArray(data.supportTickets)) setSupportTickets(data.supportTickets);
       if (Array.isArray(data.devApiKeys)) setDevApiKeys(data.devApiKeys);
@@ -918,6 +979,50 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: "Rewards conversion config saved." });
   };
 
+  const saveIdverseConfig = async () => {
+    const payload = {
+      idverse: {
+        enabled: idverseConfig.enabled,
+        baseUrl: idverseConfig.baseUrl.trim(),
+        projectId: idverseConfig.projectId.trim(),
+        timeoutMs: Number(idverseConfig.timeoutMs) || 12000,
+        strictBiometric: idverseConfig.strictBiometric,
+        strictLiveness: idverseConfig.strictLiveness,
+        apiKey: idverseConfig.apiKey.trim() || idverseConfig.apiKeyMasked || "",
+      },
+    };
+    const data = await callAction("/admin/dashboard/idverse/save", payload);
+    if (data?.idverse) {
+      setIdverseConfig((prev) => ({
+        ...prev,
+        ...data.idverse,
+        apiKey: "",
+      }));
+      addNotification({ type: "success", message: "IDVerse configuration saved." });
+    }
+  };
+
+  const checkIdverseStatus = async () => {
+    try {
+      const data = await getJson("/idverse/status");
+      setIdverseStatus(data);
+      addNotification({ type: "info", message: data?.healthy ? "IDVerse is healthy." : "IDVerse is not healthy." });
+    } catch (err: any) {
+      setIdverseStatus({ success: false, error: err?.message || String(err) });
+      addNotification({ type: "error", message: err?.message || "IDVerse status check failed." });
+    }
+  };
+
+  const runIdverseVerifySample = async () => {
+    const data = await callAction("/neuroedge/verify-identity", {
+      userId: "sample-user",
+      docType: "passport",
+      country: "UG",
+      sessionId: `dash-${Date.now()}`,
+    });
+    if (data) setBackendOutput(data);
+  };
+
   const creditPoints = async () => {
     const points = Number(rewardPointsInput || 0);
     if (!rewardUserId.trim() || points <= 0) {
@@ -1101,6 +1206,212 @@ const Dashboard: React.FC = () => {
       addNotification({ type: "error", message: `Backend action failed: ${err?.message || err}` });
     }
   };
+
+  const parseTags = () =>
+    trainingTagsCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const ingestTrainingText = async () => {
+    const text = trainingText.trim();
+    if (!text) {
+      addNotification({ type: "warn", message: "Enter training text first." });
+      return;
+    }
+    const data = await callAction("/admin/training/ingest/text", {
+      title: trainingTitle.trim() || "manual_training",
+      text,
+      tags: parseTags(),
+      options: trainingOptions,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Training text ingested (${data.chars || 0} chars).` });
+    }
+  };
+
+  const ingestTrainingUrls = async () => {
+    const urls = trainingUrls
+      .split(/\n+/)
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length === 0) {
+      addNotification({ type: "warn", message: "Paste one or more URLs first." });
+      return;
+    }
+    const data = await callAction("/admin/training/ingest/urls", {
+      urls,
+      tags: parseTags(),
+      options: trainingOptions,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `URL ingest complete. Accepted ${data.ingested || 0}.` });
+      setBackendOutput(data);
+    }
+  };
+
+  const ingestTrainingResearch = async () => {
+    const query = trainingResearchQuery.trim();
+    if (!query) {
+      addNotification({ type: "warn", message: "Enter a research query first." });
+      return;
+    }
+    const data = await callAction("/admin/training/ingest/research", {
+      query,
+      tags: parseTags(),
+      options: trainingOptions,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Research ingest completed." });
+      setBackendOutput(data);
+    }
+  };
+
+  const readFileAsBase64 = async (file: File) => {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  };
+
+  const prepareTrainingFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const maxFiles = 200;
+    const maxTextBytes = 2 * 1024 * 1024;
+    const maxBinaryBytes = 4 * 1024 * 1024;
+    const next: Array<{ name: string; type: string; textContent?: string; base64?: string }> = [];
+    for (const f of Array.from(files).slice(0, maxFiles)) {
+      const name = (f as any).webkitRelativePath || f.name;
+      const lower = name.toLowerCase();
+      const isText =
+        f.type.startsWith("text/") ||
+        /\.(md|txt|json|csv|ts|tsx|js|jsx|py|go|java|rs|sql|yaml|yml|html|css)$/i.test(lower);
+      try {
+        if (isText && f.size <= maxTextBytes) {
+          const textContent = (await f.text()).slice(0, 200000);
+          next.push({ name, type: f.type || "text/plain", textContent });
+        } else if ((/\.zip$/i.test(lower) || /\.pdf$/i.test(lower) || !isText) && f.size <= maxBinaryBytes) {
+          const base64 = await readFileAsBase64(f);
+          next.push({ name, type: f.type || "application/octet-stream", base64 });
+        }
+      } catch {
+        // skip unreadable file
+      }
+    }
+    setTrainingUploadFiles((prev) => [...prev, ...next]);
+    addNotification({ type: "success", message: `Prepared ${next.length} training file(s).` });
+  };
+
+  const ingestTrainingFiles = async () => {
+    if (trainingUploadFiles.length === 0) {
+      addNotification({ type: "warn", message: "Add files/folders/zip/pdf first." });
+      return;
+    }
+    const data = await callAction("/admin/training/ingest/files", {
+      files: trainingUploadFiles,
+      tags: parseTags(),
+      options: trainingOptions,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `File ingest complete. Accepted ${data.ingested || 0}.` });
+      setBackendOutput(data);
+    }
+  };
+
+  const loadTrainingOverview = async () => {
+    try {
+      const data = await getJson("/admin/training/overview?limit=2000");
+      setTrainingOverview(data);
+      addNotification({ type: "info", message: "Training overview refreshed." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: err?.message || "Failed to load training overview." });
+    }
+  };
+
+  const queueTrainingJob = async () => {
+    const data = await callAction("/admin/training/jobs/run", {
+      mode: trainingJobMode,
+      evalSuite: trainingEvalSuite,
+      options: trainingOptions,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Training job queued (${data?.job?.id || "unknown"}).` });
+      setBackendOutput(data);
+    }
+  };
+
+  const trainingStudioCard = (
+    <Card title="NeuroEdge Training Studio (Founder/Admin)">
+      <div style={{ display: "grid", gap: 8 }}>
+        <input value={trainingTitle} onChange={(e) => setTrainingTitle(e.target.value)} placeholder="Dataset title" style={input} />
+        <textarea value={trainingText} onChange={(e) => setTrainingText(e.target.value)} placeholder="Paste raw training text, policy docs, instructions..." style={{ ...input, minHeight: 90 }} />
+        <input value={trainingTagsCsv} onChange={(e) => setTrainingTagsCsv(e.target.value)} placeholder="Tags (comma-separated)" style={input} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={ ingestTrainingText }>Ingest Text</button>
+          <button style={chip} onClick={() => { setTrainingTitle("Founder Training Note"); setTrainingText(""); }}>Clear Text</button>
+        </div>
+
+        <textarea value={trainingUrls} onChange={(e) => setTrainingUrls(e.target.value)} placeholder={"URL list (one per line)\nhttps://example.com/a\nhttps://example.com/b"} style={{ ...input, minHeight: 90 }} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={chip} onClick={ingestTrainingUrls}>Ingest URLs (crawl text)</button>
+          <input value={trainingResearchQuery} onChange={(e) => setTrainingResearchQuery(e.target.value)} placeholder="Research query for dataset generation" style={{ ...input, minWidth: 220 }} />
+          <button style={chip} onClick={ingestTrainingResearch}>Ingest Research Query</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <label style={chip}>
+            Upload Files
+            <input type="file" multiple style={{ display: "none" }} onChange={(e) => prepareTrainingFiles(e.target.files)} />
+          </label>
+          <label style={chip}>
+            Upload Folder
+            <input type="file" multiple webkitdirectory="" style={{ display: "none" }} onChange={(e) => prepareTrainingFiles(e.target.files)} />
+          </label>
+          <label style={chip}>
+            Upload Zip/PDF
+            <input type="file" multiple accept=".zip,.pdf" style={{ display: "none" }} onChange={(e) => prepareTrainingFiles(e.target.files)} />
+          </label>
+          <button style={primary} onClick={ingestTrainingFiles}>Ingest Prepared Files</button>
+          <button style={chip} onClick={() => setTrainingUploadFiles([])}>Clear Prepared</button>
+        </div>
+        <div style={muted}>Prepared files: {trainingUploadFiles.length}. Supports files, folders, zip, pdf, and mixed datasets.</div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, dedupe: !p.dedupe }))}>Dedupe: {trainingOptions.dedupe ? "on" : "off"}</button>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, piiFilter: !p.piiFilter }))}>PII Filter: {trainingOptions.piiFilter ? "on" : "off"}</button>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, autoTag: !p.autoTag }))}>Auto-tag: {trainingOptions.autoTag ? "on" : "off"}</button>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, semanticChunking: !p.semanticChunking }))}>Chunking: {trainingOptions.semanticChunking ? "on" : "off"}</button>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, crawlLinks: !p.crawlLinks }))}>Crawl Links: {trainingOptions.crawlLinks ? "on" : "off"}</button>
+          <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, citationMode: !p.citationMode }))}>Citation Mode: {trainingOptions.citationMode ? "on" : "off"}</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select value={trainingJobMode} onChange={(e) => setTrainingJobMode(e.target.value as any)} style={input}>
+            <option value="incremental">incremental</option>
+            <option value="full">full</option>
+            <option value="eval_only">eval_only</option>
+          </select>
+          <select value={trainingEvalSuite} onChange={(e) => setTrainingEvalSuite(e.target.value as any)} style={input}>
+            <option value="core">core</option>
+            <option value="math">math</option>
+            <option value="code">code</option>
+            <option value="research">research</option>
+            <option value="all">all</option>
+          </select>
+          <button style={primary} onClick={queueTrainingJob}>Queue Training Job</button>
+          <button style={chip} onClick={loadTrainingOverview}>Refresh Overview</button>
+          <button style={chip} onClick={() => window.open(`${apiBase}/training/export?limit=10000`, "_blank")}>Export JSONL</button>
+        </div>
+      </div>
+      <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto" }}>
+        {trainingOverview ? JSON.stringify(trainingOverview, null, 2) : "No training overview yet."}
+      </pre>
+    </Card>
+  );
 
   const readImageAsDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -1333,6 +1644,7 @@ const Dashboard: React.FC = () => {
 
   const founderView = (
     <div style={grid}>
+      {trainingStudioCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -1530,6 +1842,57 @@ const Dashboard: React.FC = () => {
             </div>
           ))}
         </div>
+      </Card>
+      <Card title="IDVerse Identity Bridge">
+        <div style={row}>
+          <span>Enabled</span>
+          <button style={chip} onClick={() => setIdverseConfig((p) => ({ ...p, enabled: !p.enabled }))}>
+            {idverseConfig.enabled ? "Enabled" : "Disabled"}
+          </button>
+        </div>
+        <input
+          value={idverseConfig.baseUrl}
+          onChange={(e) => setIdverseConfig((p) => ({ ...p, baseUrl: e.target.value }))}
+          placeholder="IDVerse base URL (https://...)"
+          style={input}
+        />
+        <input
+          value={idverseConfig.projectId}
+          onChange={(e) => setIdverseConfig((p) => ({ ...p, projectId: e.target.value }))}
+          placeholder="Project ID"
+          style={input}
+        />
+        <input
+          value={idverseConfig.apiKey}
+          onChange={(e) => setIdverseConfig((p) => ({ ...p, apiKey: e.target.value }))}
+          placeholder={idverseConfig.apiKeyMasked ? `API Key (${idverseConfig.apiKeyMasked})` : "IDVerse API key"}
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="number"
+            value={idverseConfig.timeoutMs}
+            onChange={(e) => setIdverseConfig((p) => ({ ...p, timeoutMs: Number(e.target.value) || 12000 }))}
+            placeholder="Timeout ms"
+            style={input}
+          />
+          <button style={chip} onClick={() => setIdverseConfig((p) => ({ ...p, strictBiometric: !p.strictBiometric }))}>
+            Biometrics: {idverseConfig.strictBiometric ? "strict" : "relaxed"}
+          </button>
+          <button style={chip} onClick={() => setIdverseConfig((p) => ({ ...p, strictLiveness: !p.strictLiveness }))}>
+            Liveness: {idverseConfig.strictLiveness ? "strict" : "relaxed"}
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={saveIdverseConfig}>Save IDVerse Config</button>
+          <button style={chip} onClick={checkIdverseStatus}>Check Status</button>
+          <button style={chip} onClick={runIdverseVerifySample}>Run Verify Sample</button>
+        </div>
+        {idverseStatus && (
+          <div style={log}>
+            <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(idverseStatus, null, 2)}</pre>
+          </div>
+        )}
       </Card>
       <Card title="Integrations & API Platform (Founder Premium)">
         <div style={{ display: "grid", gap: 8 }}>
@@ -1971,6 +2334,7 @@ const Dashboard: React.FC = () => {
 
   const adminView = (
     <div style={grid}>
+      {trainingStudioCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
