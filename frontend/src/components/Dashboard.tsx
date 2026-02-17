@@ -428,6 +428,9 @@ const Dashboard: React.FC = () => {
   const [trainingOverview, setTrainingOverview] = useState<any>(null);
   const [trainingJobMode, setTrainingJobMode] = useState<"incremental" | "full" | "eval_only">("incremental");
   const [trainingEvalSuite, setTrainingEvalSuite] = useState<"core" | "math" | "code" | "research" | "all">("core");
+  const [endpointMethod, setEndpointMethod] = useState<"GET" | "POST">("GET");
+  const [endpointPath, setEndpointPath] = useState("/auth/whoami");
+  const [endpointBody, setEndpointBody] = useState("{\n  \"example\": true\n}");
   const [trainingOptions, setTrainingOptions] = useState<TrainingStudioOptions>({
     dedupe: true,
     piiFilter: true,
@@ -1205,6 +1208,29 @@ const Dashboard: React.FC = () => {
     } catch (err: any) {
       addNotification({ type: "error", message: `Backend action failed: ${err?.message || err}` });
     }
+  };
+
+  const runEndpointConsole = async () => {
+    const path = endpointPath.trim();
+    if (!path.startsWith("/")) {
+      addNotification({ type: "error", message: "Path must start with /" });
+      return;
+    }
+    if (endpointMethod === "GET") {
+      await runBackendAction(`GET:${path}`);
+      return;
+    }
+    let payload: any = {};
+    const raw = endpointBody.trim();
+    if (raw) {
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        addNotification({ type: "error", message: "Invalid JSON body." });
+        return;
+      }
+    }
+    await runBackendAction(path, payload);
   };
 
   const parseTags = () =>
@@ -2207,16 +2233,54 @@ const Dashboard: React.FC = () => {
       <Card title="Backend Capabilities">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <button style={chip} onClick={() => runBackendAction("GET:/system/status")}>System Status</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/status")}>Orchestrator Status</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/auth/whoami")}>Auth WhoAmI</button>
           <button style={chip} onClick={() => runBackendAction("GET:/mesh/nodes")}>Mesh Nodes</button>
+          <button style={chip} onClick={() => runBackendAction("/mesh/register", { id: `dash-${Date.now()}`, baseUrl: "http://localhost:8095", kind: "dashboard", capabilities: ["infer"] })}>Mesh Register</button>
+          <button style={chip} onClick={() => runBackendAction("/mesh/heartbeat", { id: "dash-node" })}>Mesh Heartbeat</button>
+          <button style={chip} onClick={() => runBackendAction("/mesh/metrics", { id: "dash-node", latency_ms: 8, load: 0.2, cache_size: 5 })}>Mesh Metrics</button>
+          <button style={chip} onClick={() => runBackendAction("/mesh/train-signal", { id: "dash-node", signal: { quality: "high", source: "dashboard" } })}>Mesh Train Signal</button>
           <button style={chip} onClick={() => runBackendAction("GET:/fed/model")}>Federated Model</button>
+          <button style={chip} onClick={() => runBackendAction("/fed/sign", { payload: { id: "dash-sample", ts: Date.now() } })}>Federated Sign</button>
+          <button style={chip} onClick={() => runBackendAction("/fed/update", { update: { id: "dash-sample", n_features: 3, classes: ["a"], coef: [[0,0,0]], intercept: [0] }, sig: "" })}>Federated Update</button>
           <button style={chip} onClick={() => runBackendAction("GET:/doctrine/rules")}>Doctrine Rules</button>
+          <button style={chip} onClick={() => runBackendAction("/doctrine/rules", { id: `rule-${Date.now()}`, version: 1, enabled: true, category: "security", action: "block", pattern: "prompt injection", message: "Blocked by doctrine." })}>Doctrine Upsert</button>
           <button style={chip} onClick={() => runBackendAction("GET:/self-expansion/analyze")}>Self Expansion</button>
+          <button style={chip} onClick={() => runBackendAction("/self-expansion/propose", { goal: "improve runtime observability and safety" })}>Expansion Propose</button>
+          <button style={chip} onClick={() => runBackendAction("/self-expansion/generate-module", { name: "runtime_monitor", purpose: "monitor system health", path: "orchestrator/src/generated/runtime_monitor.ts", confirm: false })}>Generate Module (Preview)</button>
           <button style={chip} onClick={() => runBackendAction("GET:/training/samples?limit=20")}>Training Samples</button>
+          <button style={chip} onClick={() => runBackendAction("/training/feedback", { query: "sample", response: "sample response", rating: "up", tags: ["dashboard"] })}>Training Feedback</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/training/export?limit=100")}>Training Export</button>
           <button style={chip} onClick={() => runBackendAction("GET:/billing/usage")}>Billing Usage</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/storage/state")}>Storage State</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/storage/events?limit=50")}>Storage Events</button>
+          <button style={chip} onClick={() => runBackendAction("/storage/event", { type: "dashboard.event", payload: { source: "founder_console" } })}>Storage Append Event</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/idverse/status")}>IDVerse Status</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/neuroedge/user/identity?userId=u2")}>User Identity</button>
+          <button style={chip} onClick={() => runBackendAction("/neuroedge/liveness-check", { userId: "u2", sessionId: `live-${Date.now()}` })}>Liveness Check</button>
+          <button style={chip} onClick={() => runBackendAction("/neuroedge/biometric-match", { userId: "u2", referenceId: "ref-001" })}>Biometric Match</button>
           <button style={chip} onClick={() => exportOutputTxt("backend_output", backendOutput || "No backend output yet.")}>Export TXT</button>
           <button style={chip} onClick={() => exportOutputWord("backend_output", backendOutput || "No backend output yet.")}>Export Word</button>
           <button style={chip} onClick={() => printOutputPdf("Backend Output", backendOutput || "No backend output yet.")}>Export PDF</button>
           <button style={chip} onClick={() => setBackendOutput(null)}>Clear Output</button>
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <select value={endpointMethod} onChange={(e) => setEndpointMethod(e.target.value as "GET" | "POST")} style={{ ...input, maxWidth: 110 }}>
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+            </select>
+            <input value={endpointPath} onChange={(e) => setEndpointPath(e.target.value)} placeholder="/path" style={input} />
+            <button style={primary} onClick={runEndpointConsole}>Run Endpoint</button>
+          </div>
+          {endpointMethod === "POST" && (
+            <textarea
+              value={endpointBody}
+              onChange={(e) => setEndpointBody(e.target.value)}
+              placeholder='{"key":"value"}'
+              style={{ ...input, minHeight: 90, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+            />
+          )}
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
           {backendOutput ? JSON.stringify(backendOutput, null, 2) : "No backend output yet."}
