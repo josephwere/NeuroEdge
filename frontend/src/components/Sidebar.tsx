@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
+import { useUI } from "@/services/uiStore";
 
 /* -------------------- */
 /* Types */
@@ -45,7 +46,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   user = { name: "Guest User", mode: "local" },
 }) => {
   const { notifications, removeNotification } = useNotifications();
+  const { toggleTheme, logout } = useUI();
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileActions, setShowProfileActions] = useState(false);
   const [profileAvatar, setProfileAvatar] = useState<string>("");
   const [profileName, setProfileName] = useState<string>(user.name);
 
@@ -86,7 +89,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* ---------- Profile ---------- */}
-      <div style={{ ...profileStyle, cursor: "pointer" }} onClick={onOpenProfile}>
+      <div style={{ ...profileStyle, cursor: "pointer", position: "relative" }} onClick={() => setShowProfileActions(v => !v)}>
         <Avatar letter={(profileName || user.name || "G")[0]} src={profileAvatar} />
         <div>
           <div style={{ fontSize: "0.9rem" }}>{profileName || user.name}</div>
@@ -95,6 +98,15 @@ const Sidebar: React.FC<SidebarProps> = ({
             {user.mode === "local" && "Local session"}
             {user.mode === "account" && "Signed in"}
           </div>
+        </div>
+        {!collapsed && <span style={{ marginLeft: "auto", opacity: 0.8 }}>▾</span>}
+        <div style={profileMenuStyle(showProfileActions)}>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onOpenProfile?.(); setShowProfileActions(false); }}>Profile</button>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("settings"); setShowProfileActions(false); }}>Settings</button>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("dashboard"); setShowProfileActions(false); }}>Dashboard</button>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("my_chats"); setShowProfileActions(false); }}>My Chats</button>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); toggleTheme(); setShowProfileActions(false); }}>Toggle Theme</button>
+          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); logout(); onLogin?.(); setShowProfileActions(false); }}>Logout</button>
         </div>
       </div>
 
@@ -248,6 +260,35 @@ const notificationDropdownStyle = (open: boolean, collapsed: boolean): React.CSS
   boxShadow: open ? "0 8px 30px rgba(0,0,0,0.45)" : "none",
   zIndex: 100,
 });
+
+const profileMenuStyle = (open: boolean): React.CSSProperties => ({
+  position: "absolute",
+  left: 8,
+  right: 8,
+  top: "calc(100% + 6px)",
+  maxHeight: open ? 280 : 0,
+  overflow: "hidden",
+  background: "rgba(15, 23, 42, 0.96)",
+  border: open ? "1px solid rgba(148,163,184,0.25)" : "none",
+  borderRadius: 10,
+  boxShadow: open ? "0 10px 24px rgba(0,0,0,0.4)" : "none",
+  transition: "all 0.2s ease",
+  zIndex: 200,
+  display: "grid",
+  gap: 4,
+  padding: open ? 6 : 0,
+});
+
+const profileMenuItemStyle: React.CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.2)",
+  background: "rgba(15,23,42,0.7)",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.42rem 0.55rem",
+  textAlign: "left",
+  cursor: "pointer",
+  fontSize: "0.8rem",
+};
 
 const notificationItemStyle = (type?: string): React.CSSProperties => ({
   display: "flex",

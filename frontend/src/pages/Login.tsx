@@ -1,121 +1,212 @@
-// frontend/src/pages/Login.tsx
-
 import React, { useState } from "react";
 import { useUI } from "@/services/uiStore";
 
-const Login: React.FC = () => {
-  const { setUser } = useUI();
+type AuthMethod = "email" | "google" | "github" | "phone";
 
+interface LoginProps {
+  embedded?: boolean;
+  onSuccess?: () => void;
+}
+
+const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
+  const { setUser } = useUI();
+  const [method, setMethod] = useState<AuthMethod>("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("+1");
   const [error, setError] = useState("");
 
-  /* ------------------ Handlers ------------------ */
-  const handleLogin = () => {
-    if (!email || !password) {
-      setError("Please enter email and password");
+  const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string }) => {
+    const token = `neuroedge-${payload.provider}-token`;
+    setUser({
+      name: payload.name,
+      email: payload.email,
+      token,
+      guest: false,
+      provider: payload.provider,
+      phone: payload.phone,
+      country: "global",
+    });
+    onSuccess?.();
+  };
+
+  const handleAuth = () => {
+    setError("");
+    if (method === "email") {
+      if (!email.trim() || !password.trim()) {
+        setError("Enter both email and password.");
+        return;
+      }
+      completeLogin({ name: email.split("@")[0] || "User", email, provider: "email" });
       return;
     }
 
-    // Simulate API login
-    const token = "dummy-jwt-token"; 
-    setUser({ name: email.split("@")[0], email, token, guest: false });
+    if (method === "phone") {
+      const normalized = `${countryCode}${phone}`.replace(/\s+/g, "");
+      if (!phone.trim()) {
+        setError("Enter a phone number.");
+        return;
+      }
+      completeLogin({
+        name: `PhoneUser-${normalized.slice(-4)}`,
+        email: "",
+        provider: "phone",
+        phone: normalized,
+      });
+      return;
+    }
+
+    if (method === "google") {
+      completeLogin({ name: "Google User", email: "google-user@neuroedge.local", provider: "google" });
+      return;
+    }
+
+    completeLogin({ name: "GitHub User", email: "github-user@neuroedge.local", provider: "github" });
   };
 
   const handleGuest = () => {
-    setUser({ name: "Guest User", email: "", token: "", guest: true });
+    setUser({
+      name: "Guest User",
+      email: "",
+      token: "",
+      guest: true,
+      provider: "guest",
+      country: "global",
+    });
+    onSuccess?.();
   };
 
   return (
-    <div style={containerStyle}>
-      <div style={cardStyle}>
-        <h2 style={{ marginBottom: "1rem" }}>🧠 NeuroEdge Login</h2>
+    <div style={container(embedded)}>
+      <div style={card}>
+        <h2 style={{ margin: 0 }}>NeuroEdge Access</h2>
+        <p style={muted}>
+          Free chat is available without login. Sign in only if you want account sync.
+        </p>
 
-        {error && <p style={{ color: "#ff4d4f" }}>{error}</p>}
+        <div style={methodRow}>
+          {(["email", "google", "github", "phone"] as AuthMethod[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMethod(m)}
+              style={{ ...methodBtn, ...(method === m ? methodBtnActive : {}) }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
 
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          style={inputStyle}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          style={inputStyle}
-        />
+        {method === "email" && (
+          <>
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={input}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={input}
+            />
+          </>
+        )}
 
-        <button onClick={handleLogin} style={loginBtnStyle}>
-          🔐 Login
+        {method === "phone" && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={countryCode}
+              onChange={(e) => setCountryCode(e.target.value)}
+              placeholder="+1"
+              style={{ ...input, maxWidth: 80 }}
+            />
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Phone number (E.164)"
+              style={input}
+            />
+          </div>
+        )}
+
+        {error && <p style={{ color: "#f87171", margin: "0.4rem 0" }}>{error}</p>}
+
+        <button onClick={handleAuth} style={primaryBtn}>
+          Continue with {method}
         </button>
 
-        <hr style={{ margin: "1rem 0" }} />
-
-        <button onClick={handleGuest} style={guestBtnStyle}>
-          👤 Continue as Guest
+        <button onClick={handleGuest} style={secondaryBtn}>
+          Continue Free as Guest
         </button>
 
-        <p style={{ marginTop: "1rem", fontSize: "0.8rem", opacity: 0.7 }}>
-          Guest mode uses local storage only. Full features require login.
+        <p style={footnote}>
+          Phone login supports international E.164 format for all countries.
         </p>
       </div>
     </div>
   );
 };
 
-/* -------------------- */
-/* Styles */
-/* -------------------- */
-const containerStyle: React.CSSProperties = {
+const container = (embedded: boolean): React.CSSProperties => ({
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
-  height: "100vh",
-  background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
-  fontFamily: "'Space Grotesk', system-ui, sans-serif",
+  height: embedded ? "auto" : "100vh",
+  background: embedded ? "transparent" : "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
   color: "#e2e8f0",
-};
+});
 
-const cardStyle: React.CSSProperties = {
-  background: "rgba(15, 23, 42, 0.7)",
-  padding: "2rem",
-  borderRadius: "16px",
+const card: React.CSSProperties = {
+  width: 420,
+  padding: "1.2rem",
+  borderRadius: 16,
   border: "1px solid rgba(148, 163, 184, 0.2)",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.35)",
-  width: "320px",
-  display: "flex",
-  flexDirection: "column",
+  background: "rgba(15, 23, 42, 0.7)",
+  display: "grid",
+  gap: 10,
 };
 
-const inputStyle: React.CSSProperties = {
-  padding: "0.75rem",
-  marginBottom: "0.75rem",
-  borderRadius: "6px",
+const muted: React.CSSProperties = { margin: 0, color: "#94a3b8", fontSize: "0.86rem" };
+const methodRow: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
+const methodBtn: React.CSSProperties = {
   border: "1px solid rgba(148, 163, 184, 0.3)",
-  outline: "none",
-  background: "rgba(15, 23, 42, 0.7)",
+  background: "rgba(15, 23, 42, 0.8)",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+  textTransform: "capitalize",
+};
+const methodBtnActive: React.CSSProperties = { border: "1px solid #60a5fa", background: "rgba(37, 99, 235, 0.25)" };
+const input: React.CSSProperties = {
+  width: "100%",
+  padding: "0.55rem",
+  borderRadius: 8,
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.75)",
   color: "#e2e8f0",
 };
-
-const loginBtnStyle: React.CSSProperties = {
-  padding: "0.75rem",
-  borderRadius: "6px",
+const primaryBtn: React.CSSProperties = {
+  border: "none",
+  borderRadius: 8,
+  padding: "0.55rem 0.7rem",
   background: "#2563eb",
   color: "#fff",
-  border: "none",
+  cursor: "pointer",
+  textTransform: "capitalize",
+};
+const secondaryBtn: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  borderRadius: 8,
+  padding: "0.55rem 0.7rem",
+  background: "rgba(15, 23, 42, 0.8)",
+  color: "#e2e8f0",
   cursor: "pointer",
 };
-
-const guestBtnStyle: React.CSSProperties = {
-  padding: "0.75rem",
-  borderRadius: "6px",
-  background: "rgba(15, 23, 42, 0.9)",
-  color: "#fff",
-  border: "none",
-  cursor: "pointer",
-};
+const footnote: React.CSSProperties = { margin: 0, color: "#94a3b8", fontSize: "0.78rem" };
 
 export default Login;

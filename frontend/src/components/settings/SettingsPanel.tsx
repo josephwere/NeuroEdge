@@ -18,6 +18,15 @@ interface SettingsState {
   voiceAlertsEnabled: boolean;
   preferredVoice: string;
   kernelAutoBalance: boolean;
+  themeMode: "system" | "light" | "dark";
+  notificationEmail: string;
+  emailNotifications: boolean;
+  pushNotifications: boolean;
+  autoSaveDrafts: boolean;
+  twoFactorEnabled: boolean;
+  passkeysEnabled: boolean;
+  reduceMotion: boolean;
+  fontScale: number;
 }
 
 /* =========================================================
@@ -34,6 +43,15 @@ const SettingsPanel: React.FC = () => {
     voiceAlertsEnabled: true,
     preferredVoice: "default",
     kernelAutoBalance: true,
+    themeMode: "system",
+    notificationEmail: "",
+    emailNotifications: true,
+    pushNotifications: true,
+    autoSaveDrafts: true,
+    twoFactorEnabled: false,
+    passkeysEnabled: false,
+    reduceMotion: false,
+    fontScale: 1,
   });
 
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
@@ -47,7 +65,25 @@ const SettingsPanel: React.FC = () => {
 
     detectTTS();
     loadKernelSnapshot();
+    try {
+      const raw = localStorage.getItem("neuroedge_settings_v2");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setSettings((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      // ignore load failures
+    }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("neuroedge_settings_v2", JSON.stringify(settings));
+    if (settings.themeMode === "light" || settings.themeMode === "dark") {
+      document.documentElement.setAttribute("data-theme", settings.themeMode);
+    }
+    document.documentElement.style.fontSize = `${Math.max(0.85, Math.min(1.2, settings.fontScale)) * 16}px`;
+    document.documentElement.style.setProperty("--ne-reduced-motion", settings.reduceMotion ? "1" : "0");
+  }, [settings]);
 
   /* -------------------- TTS Detection -------------------- */
 
@@ -108,6 +144,29 @@ const SettingsPanel: React.FC = () => {
     if (status === "ready") return "#16a34a";
     if (status === "degraded") return "#ca8a04";
     return "#dc2626";
+  };
+
+  const exportLocalSettings = () => {
+    const payload = {
+      settings,
+      profile: JSON.parse(localStorage.getItem("neuroedge_profile_settings") || "{}"),
+      aiPreferences: JSON.parse(localStorage.getItem("neuroedge_ai_preferences") || "{}"),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `neuroedge_settings_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const clearLocalCache = () => {
+    const keep = new Set(["neuroedge_profile_settings", "neuroedge_settings_v2", "neuroedge_theme_pref"]);
+    Object.keys(localStorage).forEach((key) => {
+      if (!keep.has(key)) localStorage.removeItem(key);
+    });
+    alert("Cleared local cache (kept profile + core settings).");
   };
 
   /* -------------------- UI -------------------- */
@@ -282,6 +341,115 @@ const SettingsPanel: React.FC = () => {
           </p>
         </section>
 
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: "1rem",
+          }}
+        >
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Account & Security</h3>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.twoFactorEnabled}
+                onChange={(e) => setSettings({ ...settings, twoFactorEnabled: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Two-factor authentication</span>
+            </label>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.passkeysEnabled}
+                onChange={(e) => setSettings({ ...settings, passkeysEnabled: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Passkeys</span>
+            </label>
+            <p style={mutedStyle}>
+              Login methods supported: guest free mode, email, Google, GitHub, phone (global E.164).
+            </p>
+          </section>
+
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Notifications</h3>
+            <input
+              placeholder="Notification email"
+              value={settings.notificationEmail}
+              onChange={(e) => setSettings({ ...settings, notificationEmail: e.target.value })}
+              style={inputStyle}
+            />
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.emailNotifications}
+                onChange={(e) => setSettings({ ...settings, emailNotifications: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Email notifications</span>
+            </label>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.pushNotifications}
+                onChange={(e) => setSettings({ ...settings, pushNotifications: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Push notifications</span>
+            </label>
+          </section>
+
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Appearance & Accessibility</h3>
+            <select
+              value={settings.themeMode}
+              onChange={(e) => setSettings({ ...settings, themeMode: e.target.value as SettingsState["themeMode"] })}
+              style={inputStyle}
+            >
+              <option value="system">System theme</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.reduceMotion}
+                onChange={(e) => setSettings({ ...settings, reduceMotion: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Reduce motion</span>
+            </label>
+            <label style={{ ...rowStyle, marginTop: "0.6rem" }}>
+              <span style={{ minWidth: 90 }}>Font scale</span>
+              <input
+                type="range"
+                min={0.85}
+                max={1.2}
+                step={0.05}
+                value={settings.fontScale}
+                onChange={(e) => setSettings({ ...settings, fontScale: Number(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </label>
+          </section>
+
+          <section style={cardStyle}>
+            <h3 style={titleStyle}>Data Controls</h3>
+            <label style={rowStyle}>
+              <input
+                type="checkbox"
+                checked={settings.autoSaveDrafts}
+                onChange={(e) => setSettings({ ...settings, autoSaveDrafts: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Auto-save drafts</span>
+            </label>
+            <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.6rem", flexWrap: "wrap" }}>
+              <button onClick={exportLocalSettings} style={actionBtnStyle}>Export Settings</button>
+              <button onClick={clearLocalCache} style={actionBtnStyle}>Clear Local Cache</button>
+            </div>
+            <p style={mutedStyle}>
+              Uses local storage by default; backend services remain available through orchestrator.
+            </p>
+          </section>
+        </div>
+
         <section style={cardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
             <div>
@@ -369,6 +537,25 @@ const mutedStyle: React.CSSProperties = {
 const linkStyle: React.CSSProperties = {
   color: "#e2e8f0",
   textDecoration: "none",
+  fontWeight: 600,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  borderRadius: 10,
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.7)",
+  color: "#e2e8f0",
+  padding: "0.45rem 0.6rem",
+};
+
+const actionBtnStyle: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.7)",
+  color: "#e2e8f0",
+  borderRadius: 10,
+  padding: "0.45rem 0.8rem",
+  cursor: "pointer",
   fontWeight: 600,
 };
 

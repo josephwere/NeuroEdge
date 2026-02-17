@@ -14,6 +14,8 @@ import MyChatsPanel from "@/components/MyChatsPanel";
 import ProjectsPanel from "@/components/ProjectsPanel";
 import FounderAssistant from "@/components/FounderAssistant"; // Founder voice & alerts
 import TutorialGuide from "@/components/TutorialGuide";
+import Login from "@/pages/Login";
+import ProfileSettings from "@/components/ProfileSettings";
 
 import { OrchestratorClient } from "@/services/orchestrator_client";
 import { useChatHistory } from "@/services/chatHistoryStore";
@@ -72,12 +74,14 @@ interface Props {
 
 const HomePage: React.FC<Props> = ({ orchestrator }) => {
   const { allMessages, resetHistory } = useChatHistory();
-  const { toggleTheme } = useUI();
+  const { toggleTheme, user } = useUI();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeView, setActiveView] = useState<
     "chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions"
   >("chat");
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showLoginPage, setShowLoginPage] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   useEffect(() => {
     const seen = localStorage.getItem("neuroedge_tutorial_seen") === "1";
@@ -180,9 +184,9 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onNavigate={setActiveView}
           onNewChat={startNewChat}
-          onLogin={() => setActiveView("settings")}
+          onLogin={() => setShowLoginPage(v => !v)}
           onOpenNotifications={() => setActiveView("history")}
-          onOpenProfile={() => setActiveView("settings")}
+          onOpenProfile={() => setShowProfileModal(true)}
         />
 
         {/* ---------------- Main Area ---------------- */}
@@ -227,6 +231,29 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           </div>
         </div>
       </div>
+      {showLoginPage && (
+        <div style={overlayStyle}>
+          <div style={overlayCardStyle}>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button style={overlayCloseBtn} onClick={() => setShowLoginPage(false)}>Close</button>
+            </div>
+            <Login embedded onSuccess={() => setShowLoginPage(false)} />
+          </div>
+        </div>
+      )}
+      {showProfileModal && (
+        <div style={overlayStyle}>
+          <ProfileSettings
+            session={{
+              name: user?.name,
+              email: user?.email,
+              mode: user?.guest ? "guest" : "account",
+              token: user?.token,
+            }}
+            onClose={() => setShowProfileModal(false)}
+          />
+        </div>
+      )}
       <TutorialGuide
         open={showTutorial}
         onSkip={() => {
@@ -243,3 +270,29 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
 };
 
 export default HomePage;
+
+const overlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(2,6,23,0.6)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 999,
+  padding: "1rem",
+};
+
+const overlayCardStyle: React.CSSProperties = {
+  width: "min(540px, 100%)",
+  maxHeight: "92vh",
+  overflow: "auto",
+};
+
+const overlayCloseBtn: React.CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.35)",
+  borderRadius: 8,
+  background: "rgba(15,23,42,0.88)",
+  color: "#e2e8f0",
+  padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+};
