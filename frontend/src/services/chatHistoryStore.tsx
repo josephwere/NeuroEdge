@@ -34,6 +34,8 @@ interface ChatHistoryContextValue {
   messages: ChatMessage[];
   allMessages: ChatMessage[];
   addMessage: (msg: Omit<ChatMessage, "timestamp">) => void;
+  updateMessage: (id: string, nextText: string) => void;
+  deleteMessage: (id: string) => void;
   loadMore: () => void;
   setSearchQuery: (query: string, filters?: Filters) => void;
   replayMessage: (id: string) => void;
@@ -84,6 +86,16 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
     setAllMessages(prev => [...prev, { ...msg, timestamp: Date.now() }]);
   };
 
+  const updateMessage = (id: string, nextText: string) => {
+    setAllMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, text: nextText.trim() || m.text } : m))
+    );
+  };
+
+  const deleteMessage = (id: string) => {
+    setAllMessages((prev) => prev.filter((m) => m.id !== id));
+  };
+
   const loadMore = () => setVisibleCount(v => v + 50);
 
   const setSearchQuery = (query: string, applied?: Filters) => {
@@ -132,6 +144,8 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         messages,
         allMessages,
         addMessage,
+        updateMessage,
+        deleteMessage,
         loadMore,
         setSearchQuery,
         replayMessage,

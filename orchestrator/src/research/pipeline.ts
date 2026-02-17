@@ -3,6 +3,8 @@ export interface Citation {
   url: string;
   snippet?: string;
   domain?: string;
+  qualityScore?: number;
+  stale?: boolean;
 }
 
 export interface ResearchResult {
@@ -16,6 +18,8 @@ interface SearchCandidate {
   title: string;
   url: string;
 }
+
+const researchCache = new Map<string, { ts: number; value: ResearchResult }>();
 
 function parseList(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -96,6 +100,23 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
   }
 }
 
+function qualityScoreForDomain(domain?: string): number {
+  const d = String(domain || "").toLowerCase();
+  if (!d) return 0.45;
+  if (d.endsWith(".gov") || d.endsWith(".edu")) return 0.95;
+  const trusted = ["wikipedia.org", "reuters.com", "bbc.com", "arxiv.org", "developer.mozilla.org", "stackoverflow.com"];
+  if (trusted.some((t) => d === t || d.endsWith(`.${t}`))) return 0.86;
+  return 0.6;
+}
+
+function staleByYearHeuristic(text: string): boolean {
+  const nowYear = new Date().getFullYear();
+  const years = Array.from(text.matchAll(/\b(19|20)\d{2}\b/g)).map((m) => Number(m[0]));
+  if (years.length === 0) return false;
+  const newest = Math.max(...years);
+  return nowYear - newest >= 3;
+}
+
 async function searchDuckDuckGo(query: string, maxResults: number, timeoutMs: number): Promise<SearchCandidate[]> {
   const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const controller = new AbortController();
@@ -159,6 +180,13 @@ async function searchSerpApi(query: string, maxResults: number, timeoutMs: numbe
 }
 
 export async function runResearch(query: string): Promise<ResearchResult> {
+  const cacheTtlMs = Math.max(1000, Number(process.env.RESEARCH_CACHE_TTL_MS || 300000));
+  const cacheKey = query.trim().toLowerCase();
+  const cached = researchCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < cacheTtlMs) {
+    return cached.value;
+  }
+
   const allowlist = parseList(process.env.RESEARCH_ALLOWLIST);
   const timeoutMs = Number(process.env.RESEARCH_HTTP_TIMEOUT_MS || 7000);
   const maxResults = Math.min(10, Math.max(1, Number(process.env.RESEARCH_MAX_RESULTS || 5)));
@@ -212,11 +240,15 @@ export async function runResearch(query: string): Promise<ResearchResult> {
     evidence.push(...top);
 
     const snippet = top[0]?.sentence || p.text.slice(0, 220);
+    const stale = staleByYearHeuristic(p.text);
+    const qualityScore = qualityScoreForDomain(domain) - (stale ? 0.12 : 0);
     citations.push({
       title: p.title || p.url,
       url: p.url,
       domain,
       snippet,
+      qualityScore,
+      stale,
     });
   });
 
@@ -228,16 +260,18 @@ export async function runResearch(query: string): Promise<ResearchResult> {
     summary = "I could not gather enough reliable sources for this query with current allowlist and connectivity.";
   } else {
     const bullets = topEvidence.map((e) => `- ${e.sentence} [${e.source}]`).join("\n");
-    summary = `## Research Summary\n\n${bullets}\n\n## Citations\n${citations
-      .map((c, i) => `${i + 1}. [${c.title}](${c.url})`)
+    const ranked = [...citations].sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
+    summary = `## Research Summary\n\n${bullets}\n\n## Citations\n${ranked
+      .map((c, i) => `${i + 1}. [${c.title}](${c.url})${c.stale ? " ⚠️ stale-signal" : ""}`)
       .join("\n")}`;
   }
 
-  return {
+  const result = {
     query,
     summary,
     citations,
     pagesFetched: pages.filter((p) => !!p.text).length,
   };
+  researchCache.set(cacheKey, { ts: Date.now(), value: result });
+  return result;
 }
-

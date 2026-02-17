@@ -26,6 +26,10 @@
   - Scope: `training:read`
   - Returns JSONL for fine-tuning datasets.
 
+- `POST /ai/stream`
+  - Scope: `ai:infer`
+  - SSE stream of response tokens and final payload marker.
+
 ## Safety Controls
 
 Configured in `.env`:
@@ -52,6 +56,14 @@ curl -s http://localhost:7070/research \
   -d '{"query":"latest developments in edge AI inference"}'
 ```
 
+## Nightly Eval
+
+Run benchmark batch:
+
+```bash
+pnpm eval:nightly
+```
+
 ```bash
 curl -s http://localhost:7070/training/feedback \
   -H "Content-Type: application/json" \
@@ -60,4 +72,3 @@ curl -s http://localhost:7070/training/feedback \
   -H "x-workspace-id: default" \
   -d '{"query":"what is edge AI","response":"...","rating":"up","tags":["research","qa"]}'
 ```
-

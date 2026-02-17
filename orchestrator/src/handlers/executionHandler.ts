@@ -3,6 +3,20 @@ import { globalKernelManager } from "@services/kernelManager";
 import { KernelCommand } from "@services/kernelComm";
 import { appendEvent } from "@storage/hybrid_db";
 
+function isRiskyCommand(code: string): boolean {
+  const lower = code.toLowerCase();
+  const patterns = [
+    "rm -rf /",
+    "shutdown",
+    "reboot",
+    "mkfs",
+    "dd if=",
+    ":(){:|:&};:",
+    "chmod -r 777 /",
+  ];
+  return patterns.some((p) => lower.includes(p));
+}
+
 /**
  * Handles code/command execution requests
  */
@@ -12,6 +26,19 @@ export async function handleExecution(req: Request, res: Response) {
 
   if (!code) {
     return res.status(400).json({ error: "Missing code or command" });
+  }
+  const policyBlock = String(process.env.POLICY_BLOCK_RISKY_COMMANDS || "true").toLowerCase() === "true";
+  if (policyBlock && isRiskyCommand(code)) {
+    appendEvent({
+      type: "policy.blocked_execution",
+      timestamp: Date.now(),
+      payload: { kernelId, code, actor: req.auth?.sub || "unknown", reason: "risky_command" },
+    });
+    return res.status(403).json({
+      error: "Execution blocked by policy",
+      risk: "high",
+      reason: "risky_command",
+    });
   }
 
   const cmd: KernelCommand = {

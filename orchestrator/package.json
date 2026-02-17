@@ -9,7 +9,8 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "issue-jwt": "node scripts/issue-jwt.js",
-    "issue-jwt:admin": "node scripts/issue-jwt.js --sub admin-local --org neuroedge --workspace core --scopes \"admin:*\" --exp 12h"
+    "issue-jwt:admin": "node scripts/issue-jwt.js --sub admin-local --org neuroedge --workspace core --scopes \"admin:*\" --exp 12h",
+    "eval:nightly": "node scripts/nightly-eval.js"
   },
   "dependencies": {
     "axios": "^1.6.7",

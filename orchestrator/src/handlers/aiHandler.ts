@@ -1,10 +1,11 @@
 // orchestrator/src/handlers/aiHandler.ts
 import { Request, Response } from "express";
 import axios from "axios";
-import { appendEvent } from "@storage/hybrid_db";
+import { appendEvent, listEvents } from "@storage/hybrid_db";
 import { traceLLMCall } from "@observability/tracing";
 import { recordTokenUsage } from "@billing/usage";
 import { trackTokenUsage } from "@observability/metrics";
+import { runResearch } from "@research/pipeline";
 
 function parseSharedPattern(text: string): { total: number; people: number } | null {
   const m = text
@@ -37,6 +38,176 @@ function findLastSharedContext(context: any[]): { total: number; people: number 
     if (parsed) return parsed;
   }
   return null;
+}
+
+interface ToolExecution {
+  name: "research" | "math" | "intent";
+  success: boolean;
+  confidence: number;
+  retries: number;
+  output: Record<string, any>;
+}
+
+const aiCache = new Map<string, { ts: number; data: any }>();
+
+function getCacheTtlMs(): number {
+  return Math.max(1000, Number(process.env.AI_CACHE_TTL_MS || 30000));
+}
+
+function cacheKey(input: string, context: any[]): string {
+  const ctx = JSON.stringify((context || []).slice(-6));
+  return `${input}::${ctx}`;
+}
+
+function isResearchPrompt(text: string): boolean {
+  return /\b(trend|trending|latest|news|research|search|crawl|source|sources|citation|citations|web)\b/i.test(text);
+}
+
+function isFactualPrompt(text: string): boolean {
+  return /\b(today|latest|current|population|price|when|where|who|what is|what are)\b/i.test(text);
+}
+
+function citationModeRequired(text: string): boolean {
+  const strict = String(process.env.CITATION_REQUIRED_MODE || "").toLowerCase() === "true";
+  return strict && isFactualPrompt(text);
+}
+
+function getStyle(req: Request): "concise" | "balanced" | "detailed" {
+  const style = String(req.body?.style || req.body?.preferences?.verbosity || "balanced").toLowerCase();
+  if (style === "concise" || style === "detailed") return style;
+  return "balanced";
+}
+
+function retrieveMemoryHints(text: string): string[] {
+  const terms = text
+    .toLowerCase()
+    .split(/\W+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 3)
+    .slice(0, 6);
+  if (terms.length === 0) return [];
+  const recent = listEvents(600);
+  const scored = recent
+    .map((evt) => {
+      const blob = JSON.stringify(evt.payload || {}).toLowerCase();
+      const score = terms.reduce((acc, t) => (blob.includes(t) ? acc + 1 : acc), 0);
+      return { evt, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  return scored.map((x) => {
+    const payload = x.evt.payload || {};
+    const detail =
+      payload.query || payload.input || payload.command || payload.message || payload.response || payload.summary || "";
+    return String(detail).slice(0, 220);
+  });
+}
+
+async function callInstructionModel(input: string, memoryHints: string[], style: "concise" | "balanced" | "detailed"): Promise<string | null> {
+  const baseUrl = String(process.env.LLM_API_URL || "").trim();
+  if (!baseUrl) return null;
+  const model = String(process.env.LLM_MODEL_NAME || "neuroedge-7b-instruct");
+  const apiKey = String(process.env.LLM_API_KEY || "");
+  const timeoutMs = Math.max(1500, Number(process.env.LLM_TIMEOUT_MS || 12000));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const prompt = [
+      "You are NeuroEdge, a precise and helpful assistant.",
+      `Response style: ${style}.`,
+      memoryHints.length > 0 ? `Useful context:\n- ${memoryHints.join("\n- ")}` : "",
+      `User request: ${input}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+      }),
+    });
+    if (!resp.ok) return null;
+    const data: any = await resp.json();
+    const text = String(data?.choices?.[0]?.message?.content || "").trim();
+    return text || null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function executeResearchTool(query: string): Promise<ToolExecution> {
+  const maxRetries = 2;
+  let retries = 0;
+  while (retries <= maxRetries) {
+    try {
+      const result = await runResearch(query);
+      return {
+        name: "research",
+        success: true,
+        confidence: result.citations.length > 0 ? 0.82 : 0.55,
+        retries,
+        output: result as Record<string, any>,
+      };
+    } catch {
+      retries += 1;
+    }
+  }
+  return {
+    name: "research",
+    success: false,
+    confidence: 0.2,
+    retries,
+    output: {},
+  };
+}
+
+function executeMathTool(text: string, context: any[]): ToolExecution | null {
+  const direct = evalArithmeticExpression(text);
+  if (direct !== null) {
+    return {
+      name: "math",
+      success: true,
+      confidence: 0.95,
+      retries: 0,
+      output: { value: direct, expression: text },
+    };
+  }
+  const shared = parseSharedPattern(text) || findLastSharedContext(context);
+  if (shared && /\b(each|get|share|shared)\b/i.test(text)) {
+    return {
+      name: "math",
+      success: true,
+      confidence: 0.9,
+      retries: 0,
+      output: { value: shared.total / shared.people, total: shared.total, people: shared.people },
+    };
+  }
+  return null;
+}
+
+function verifyResponseQuality(response: string, toolOutputs: ToolExecution[], needsCitation: boolean): { ok: boolean; note?: string } {
+  if (!response || response.trim().length < 8) {
+    return { ok: false, note: "too_short" };
+  }
+  if (needsCitation) {
+    const research = toolOutputs.find((t) => t.name === "research");
+    const cites = Number(research?.output?.citations?.length || 0);
+    if (cites < 1) {
+      return { ok: false, note: "missing_citations" };
+    }
+  }
+  return { ok: true };
 }
 
 function buildAssistantResponse(input: string, action: string, context: any[] = []): string {
@@ -121,6 +292,14 @@ export async function handleAIInference(req: Request, res: Response) {
       : text.includes("test")
         ? "run_tests"
         : "gather_context";
+  const style = getStyle(req);
+  const citationRequired = citationModeRequired(text);
+  const contextArr = Array.isArray(req.body?.context) ? req.body.context : [];
+  const key = cacheKey(String(input || ""), contextArr);
+  const cached = aiCache.get(key);
+  if (cached && Date.now() - cached.ts < getCacheTtlMs()) {
+    return res.json(cached.data);
+  }
 
   try {
     appendEvent({
@@ -192,23 +371,66 @@ export async function handleAIInference(req: Request, res: Response) {
         intent: mlData.action || "unknown",
       },
     });
-    const assistant = String(
-      mlData?.response ||
-        buildAssistantResponse(
-          String(input || ""),
-          String(mlData?.action || fallbackIntent),
-          Array.isArray(req.body?.context) ? req.body.context : []
-        )
-    );
-    res.json({
+    const toolOutputs: ToolExecution[] = [];
+    const mathOutput = executeMathTool(String(input || ""), contextArr);
+    if (mathOutput) toolOutputs.push(mathOutput);
+    if (isResearchPrompt(String(input || "")) || citationRequired) {
+      toolOutputs.push(await executeResearchTool(String(input || "")));
+    }
+
+    const memoryHints = retrieveMemoryHints(String(input || ""));
+    const researchTool = toolOutputs.find((t) => t.name === "research" && t.success);
+    const mathTool = toolOutputs.find((t) => t.name === "math" && t.success);
+
+    let assistant = "";
+    if (researchTool?.output?.summary) {
+      assistant = String(researchTool.output.summary);
+    } else if (mathTool?.output?.value !== undefined) {
+      assistant = `✅ **Math Result**\n\n**${mathTool.output.value}**`;
+    } else {
+      const llmText = await callInstructionModel(String(input || ""), memoryHints, style);
+      assistant = String(
+        llmText ||
+          mlData?.response ||
+          buildAssistantResponse(
+            String(input || ""),
+            String(mlData?.action || fallbackIntent),
+            contextArr
+          )
+      );
+    }
+
+    if (style === "concise") {
+      assistant = assistant.split("\n").slice(0, 4).join("\n");
+    } else if (style === "detailed" && memoryHints.length > 0) {
+      assistant += `\n\n### Related Context\n${memoryHints.map((h) => `- ${h}`).join("\n")}`;
+    }
+
+    const verification = verifyResponseQuality(assistant, toolOutputs, citationRequired);
+    if (!verification.ok) {
+      assistant += "\n\n⚠️ Confidence is limited for this answer. Please refine query or provide source constraints.";
+    }
+
+    const payload = {
       success: true,
       reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,
       intent: mlData.action || "unknown",
       risk: "low",
       response: assistant,
+      confidence: verification.ok ? 0.84 : 0.52,
+      model: process.env.LLM_MODEL_NAME || process.env.ML_MODEL_NAME || "neuroedge-ml",
+      tools: toolOutputs.map((t) => ({
+        name: t.name,
+        success: t.success,
+        confidence: t.confidence,
+        retries: t.retries,
+      })),
+      citations: Array.isArray(researchTool?.output?.citations) ? researchTool?.output?.citations : [],
       ml: { ...mlData, mesh: usedMesh },
       timestamp: new Date().toISOString(),
-    });
+    };
+    aiCache.set(key, { ts: Date.now(), data: payload });
+    res.json(payload);
   } catch (err) {
     console.warn("[aiHandler] ML unavailable, returning fallback intent");
     const inputTokens = Math.max(1, Math.ceil(String(input || "").length / 4));
@@ -242,19 +464,23 @@ export async function handleAIInference(req: Request, res: Response) {
     const assistant = buildAssistantResponse(
       String(input || ""),
       fallbackIntent,
-      Array.isArray(req.body?.context) ? req.body.context : []
+      contextArr
     );
-    res.json({
+    const payload = {
       success: true,
       reasoning: `Fallback inferred action '${fallbackIntent}'`,
       intent: fallbackIntent,
       risk: "low",
       response: assistant,
+      confidence: 0.45,
+      tools: [{ name: "intent", success: true, confidence: 0.45, retries: 0 }],
       ml: {
         status: "fallback",
         action: fallbackIntent,
       },
       timestamp: new Date().toISOString(),
-    });
+    };
+    aiCache.set(key, { ts: Date.now(), data: payload });
+    res.json(payload);
   }
 }

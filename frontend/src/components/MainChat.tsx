@@ -4,7 +4,13 @@ import { chatContext } from "@/services/chatContext";
 import { OrchestratorClient } from "@/services/orchestrator_client";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
+import {
+  saveToCache,
+  getCache,
+  clearCache,
+  updateCachedItemText,
+  deleteCachedItem,
+} from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
@@ -31,12 +37,17 @@ const PAGE_SIZE = 30;
 const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
 
 const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
-  const { addMessage: addHistoryMessage } = useChatHistory();
+  const {
+    addMessage: addHistoryMessage,
+    updateMessage: updateHistoryMessage,
+    deleteMessage: deleteHistoryMessage,
+  } = useChatHistory();
   const [messages, setMessages] = useState<Message[]>([]);
   const [displayed, setDisplayed] = useState<Message[]>([]);
   const [page, setPage] = useState(0);
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+  const longPressTimer = useRef<number | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
   // --- Load cached messages ---
@@ -207,6 +218,70 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
+
+  const applyMessageEdit = (id: string, nextText: string) => {
+    const clean = nextText.trim();
+    if (!clean) return;
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
+    setDisplayed((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
+    updateCachedItemText(id, clean);
+    updateHistoryMessage(id, clean);
+  };
+
+  const applyMessageDelete = (id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    setDisplayed((prev) => prev.filter((m) => m.id !== id));
+    deleteCachedItem(id);
+    deleteHistoryMessage(id);
+  };
+
+  const promptMessageAction = (msg: Message) => {
+    if (msg.role !== "user") return;
+    const action = window.prompt("Type E to edit or D to delete this message:", "E");
+    if (!action) return;
+    const normalized = action.trim().toLowerCase();
+    if (normalized === "d") {
+      if (window.confirm("Delete this message?")) {
+        applyMessageDelete(msg.id);
+      }
+      return;
+    }
+    if (normalized === "e") {
+      const nextText = window.prompt("Edit your message:", msg.text);
+      if (nextText !== null) {
+        applyMessageEdit(msg.id, nextText);
+      }
+    }
+  };
+
+  const startLongPress = (msg: Message) => {
+    if (msg.role !== "user") return;
+    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = window.setTimeout(() => {
+      promptMessageAction(msg);
+      longPressTimer.current = null;
+    }, 550);
+  };
+
+  const endLongPress = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
   const renderRichText = (text: string) => {
     const nodes: React.ReactNode[] = [];
     const regex = /```(\w+)?\n([\s\S]*?)```/g;
@@ -228,6 +303,35 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       const code = m[2] || "";
       nodes.push(
         <div key={`c-${idx++}`} style={{ marginTop: "0.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.25rem 0.4rem",
+              border: "1px solid rgba(148, 163, 184, 0.25)",
+              borderBottom: "none",
+              borderRadius: "8px 8px 0 0",
+              background: "rgba(15, 23, 42, 0.85)",
+              fontSize: "0.72rem",
+              color: "#cbd5e1",
+            }}
+          >
+            <span>{lang}</span>
+            <button
+              onClick={() => copyText(code)}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.3)",
+                background: "transparent",
+                color: "#e2e8f0",
+                borderRadius: 6,
+                padding: "0.1rem 0.45rem",
+                cursor: "pointer",
+              }}
+            >
+              Copy
+            </button>
+          </div>
           <SyntaxHighlighter language={lang} style={okaidia} showLineNumbers>
             {code}
           </SyntaxHighlighter>
@@ -269,6 +373,16 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           boxShadow: "0 8px 22px rgba(15, 23, 42, 0.28)",
         };
 
+    const showActions = msg.role === "assistant";
+    const previousUserText = (() => {
+      const idx = messages.findIndex((m) => m.id === msg.id);
+      if (idx <= 0) return "";
+      for (let i = idx - 1; i >= 0; i -= 1) {
+        if (messages[i].role === "user") return messages[i].text;
+      }
+      return "";
+    })();
+
     return (
       <div key={msg.id} style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginBottom: "0.7rem" }}>
         <div
@@ -281,7 +395,73 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         >
           {isUser ? "You" : "NeuroEdge"}
         </div>
-        <div style={bubbleStyle}>{renderRichText(msg.text)}</div>
+        <div
+          style={bubbleStyle}
+          onDoubleClick={() => promptMessageAction(msg)}
+          onTouchStart={() => startLongPress(msg)}
+          onTouchEnd={endLongPress}
+          onTouchCancel={endLongPress}
+        >
+          {renderRichText(msg.text)}
+        </div>
+        {showActions && (
+          <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.12rem" }}>
+            <button
+              onClick={() => copyText(msg.text)}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background: "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.2rem 0.45rem",
+                cursor: "pointer",
+                fontSize: "0.72rem",
+              }}
+            >
+              Copy
+            </button>
+            <button
+              onClick={() =>
+                orchestrator.submitTrainingFeedback({
+                  query: previousUserText,
+                  response: msg.text,
+                  rating: "up",
+                })
+              }
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background: "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.2rem 0.45rem",
+                cursor: "pointer",
+                fontSize: "0.72rem",
+              }}
+            >
+              👍
+            </button>
+            <button
+              onClick={() =>
+                orchestrator.submitTrainingFeedback({
+                  query: previousUserText,
+                  response: msg.text,
+                  rating: "down",
+                })
+              }
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background: "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.2rem 0.45rem",
+                cursor: "pointer",
+                fontSize: "0.72rem",
+              }}
+            >
+              👎
+            </button>
+          </div>
+        )}
       </div>
     );
   };

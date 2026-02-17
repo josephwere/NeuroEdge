@@ -84,10 +84,12 @@ export class OrchestratorClient {
 
     const chatLike = this.isChatPrompt(command);
     const researchLike = chatLike && this.isResearchPrompt(command);
+    const style = this.resolveStylePreference();
     const aiPromise = this.postJson("/ai", {
       kernelId,
       input: command,
       context: req.context || [],
+      style,
     });
     const researchPromise = researchLike
       ? this.postJson("/research", {
@@ -343,5 +345,18 @@ export class OrchestratorClient {
       orgId: orgId || envOrg || "personal",
       workspaceId: workspaceId || envWorkspace || "default",
     };
+  }
+
+  private resolveStylePreference(): "concise" | "balanced" | "detailed" {
+    try {
+      const raw = localStorage.getItem("neuroedge_profile_settings");
+      if (!raw) return "balanced";
+      const parsed = JSON.parse(raw);
+      const v = String(parsed?.aiVerbosity || parsed?.verbosity || "balanced").toLowerCase();
+      if (v === "concise" || v === "detailed" || v === "balanced") return v as any;
+    } catch {
+      // ignore
+    }
+    return "balanced";
   }
 }

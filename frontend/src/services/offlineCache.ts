@@ -19,3 +19,17 @@ export const getCache = (): CachedItem[] => {
 };
 
 export const clearCache = () => localStorage.removeItem(STORAGE_KEY);
+
+export const updateCachedItemText = (id: string, nextText: string) => {
+  const cached = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as CachedItem[];
+  const updated = cached.map((item) =>
+    item.id === id ? { ...item, payload: { ...(item.payload || {}), text: nextText } } : item
+  );
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+};
+
+export const deleteCachedItem = (id: string) => {
+  const cached = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as CachedItem[];
+  const updated = cached.filter((item) => item.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+};

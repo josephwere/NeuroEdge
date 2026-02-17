@@ -65,6 +65,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(initialPosition || { x: 20, y: 20 });
+  const longPressTimer = useRef<number | null>(null);
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -256,9 +257,60 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     setDisplayed(d => [...d, msg]);
   };
 
-  const extractLanguage = (codeBlock: string) => {
-    const match = codeBlock.match(/```(\w+)?/);
-    return match ? match[1] : "text";
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
+
+  const applyMessageEdit = (id: string, nextText: string) => {
+    const clean = nextText.trim();
+    if (!clean) return;
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
+    setDisplayed((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
+  };
+
+  const applyMessageDelete = (id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    setDisplayed((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const promptMessageAction = (m: LogLine) => {
+    if (m.role !== "user") return;
+    const action = window.prompt("Type E to edit or D to delete this message:", "E");
+    if (!action) return;
+    const normalized = action.trim().toLowerCase();
+    if (normalized === "d") {
+      if (window.confirm("Delete this message?")) applyMessageDelete(m.id);
+      return;
+    }
+    if (normalized === "e") {
+      const next = window.prompt("Edit your message:", m.text);
+      if (next !== null) applyMessageEdit(m.id, next);
+    }
+  };
+
+  const startLongPress = (m: LogLine) => {
+    if (m.role !== "user") return;
+    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = window.setTimeout(() => {
+      promptMessageAction(m);
+      longPressTimer.current = null;
+    }, 550);
+  };
+
+  const endLongPress = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
 
   const renderRichText = (text: string) => {
@@ -280,6 +332,35 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       }
       nodes.push(
         <div key={`c-${idx++}`} style={{ marginTop: "0.45rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.2rem 0.35rem",
+              border: "1px solid rgba(148, 163, 184, 0.28)",
+              borderBottom: "none",
+              borderRadius: "8px 8px 0 0",
+              background: "rgba(15, 23, 42, 0.85)",
+              fontSize: "0.68rem",
+              color: "#cbd5e1",
+            }}
+          >
+            <span>{(m[1] || "text").trim()}</span>
+            <button
+              onClick={() => copyText(m[2] || "")}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.28)",
+                background: "transparent",
+                color: "#e2e8f0",
+                borderRadius: 6,
+                padding: "0.1rem 0.35rem",
+                cursor: "pointer",
+              }}
+            >
+              Copy
+            </button>
+          </div>
           <SyntaxHighlighter language={(m[1] || "text").trim()} style={okaidia} showLineNumbers>
             {m[2] || ""}
           </SyntaxHighlighter>
@@ -320,7 +401,33 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         };
     return (
       <div key={m.id} style={{ marginBottom: "0.55rem" }}>
-        <div style={bubbleStyle}>{renderRichText(m.text)}</div>
+        <div
+          style={bubbleStyle}
+          onDoubleClick={() => promptMessageAction(m)}
+          onTouchStart={() => startLongPress(m)}
+          onTouchEnd={endLongPress}
+          onTouchCancel={endLongPress}
+        >
+          {renderRichText(m.text)}
+        </div>
+        {!isUser && (
+          <div style={{ marginTop: "0.15rem" }}>
+            <button
+              onClick={() => copyText(m.text)}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background: "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.15rem 0.4rem",
+                cursor: "pointer",
+                fontSize: "0.68rem",
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        )}
       </div>
     );
   };

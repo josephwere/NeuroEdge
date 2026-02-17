@@ -137,6 +137,16 @@ export function startServer(
     windowMs: Number(process.env.TRAINING_RATE_LIMIT_WINDOW_MS || 60000),
     maxRequests: Number(process.env.TRAINING_RATE_LIMIT_MAX || 60),
   });
+  const aiLimiter = createRateLimiter({
+    keyPrefix: "ai",
+    windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS || 60000),
+    maxRequests: Number(process.env.AI_RATE_LIMIT_MAX || 120),
+  });
+  const executeLimiter = createRateLimiter({
+    keyPrefix: "execute",
+    windowMs: Number(process.env.EXECUTE_RATE_LIMIT_WINDOW_MS || 60000),
+    maxRequests: Number(process.env.EXECUTE_RATE_LIMIT_MAX || 80),
+  });
 
   app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities } = req.body || {};
@@ -297,9 +307,38 @@ export function startServer(
     res.send(jsonl);
   });
 
-  app.post("/chat", requireWorkspace, requireScope("chat:write"), handleChat);
-  app.post("/execute", requireWorkspace, requireScope("execute:run"), handleExecution);
-  app.post("/ai", requireWorkspace, requireScope("ai:infer"), handleAIInference);
+  app.post("/chat", requireWorkspace, requireScope("chat:write"), aiLimiter, handleChat);
+  app.post("/execute", requireWorkspace, requireScope("execute:run"), executeLimiter, handleExecution);
+  app.post("/ai", requireWorkspace, requireScope("ai:infer"), aiLimiter, handleAIInference);
+  app.post("/ai/stream", requireWorkspace, requireScope("ai:infer"), aiLimiter, async (req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    const auth = req.header("authorization");
+    const apiKey = req.header("x-api-key");
+    const orgId = req.header("x-org-id");
+    const workspaceId = req.header("x-workspace-id");
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (auth) headers.Authorization = auth;
+    if (apiKey) headers["X-API-Key"] = apiKey;
+    if (orgId) headers["X-Org-Id"] = orgId;
+    if (workspaceId) headers["X-Workspace-Id"] = workspaceId;
+
+    try {
+      const aiResp = await axios.post(`http://127.0.0.1:${restPort}/ai`, req.body || {}, { headers });
+      const text = String(aiResp.data?.response || "");
+      const chunks = text.split(/\s+/).filter(Boolean);
+      for (const token of chunks) {
+        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+        await new Promise((r) => setTimeout(r, 18));
+      }
+      res.write(`data: ${JSON.stringify({ done: true, full: text })}\n\n`);
+      res.end();
+    } catch (err: any) {
+      res.write(`data: ${JSON.stringify({ error: err?.message || "stream_failed", done: true })}\n\n`);
+      res.end();
+    }
+  });
 
   app.get("/storage/state", (_req: Request, res: Response) => {
     res.json(readState());
