@@ -424,6 +424,68 @@ const Dashboard: React.FC = () => {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   };
+  const postJson = async (path: string, body: unknown) => {
+    const res = await fetch(`${apiBase}${path}`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+    return data;
+  };
+
+  const applyRemoteDashboard = (remote: any) => {
+    if (!remote || typeof remote !== "object") return;
+    if (Array.isArray(remote.users)) setUsers(remote.users);
+    if (Array.isArray(remote.offers)) setOffers(remote.offers);
+    if (Array.isArray(remote.plans)) setPlans(remote.plans);
+    if (remote.payment && typeof remote.payment === "object") setPayment(remote.payment);
+    if (remote.modelControl && typeof remote.modelControl === "object") setModelControl(remote.modelControl);
+    if (remote.featureFlags && typeof remote.featureFlags === "object") setFeatureFlags(remote.featureFlags);
+    if (Array.isArray(remote.supportTickets)) setSupportTickets(remote.supportTickets);
+    if (Array.isArray(remote.devApiKeys)) setDevApiKeys(remote.devApiKeys);
+    if (Array.isArray(remote.webhooks)) setWebhooks(remote.webhooks);
+    if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
+    if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
+    if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
+    if (remote.ssoConfig && typeof remote.ssoConfig === "object") setSsoConfig(remote.ssoConfig);
+  };
+
+  const callAction = async (path: string, body: any) => {
+    try {
+      const data = await postJson(path, body);
+      if (Array.isArray(data.users)) setUsers(data.users);
+      if (Array.isArray(data.offers)) setOffers(data.offers);
+      if (Array.isArray(data.plans)) setPlans(data.plans);
+      if (data.payment) setPayment(data.payment);
+      if (data.modelControl) setModelControl(data.modelControl);
+      if (data.featureFlags) setFeatureFlags(data.featureFlags);
+      if (Array.isArray(data.supportTickets)) setSupportTickets(data.supportTickets);
+      if (Array.isArray(data.devApiKeys)) setDevApiKeys(data.devApiKeys);
+      if (Array.isArray(data.webhooks)) setWebhooks(data.webhooks);
+      if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
+      if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
+      if (Array.isArray(data.enterpriseDepartments)) setEnterpriseDepartments(data.enterpriseDepartments);
+      if (data.ssoConfig) setSsoConfig(data.ssoConfig);
+      return data;
+    } catch (err: any) {
+      addNotification({ type: "error", message: err?.message || String(err) });
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const loadDashboardState = async () => {
+      try {
+        const data = await getJson("/admin/dashboard/bootstrap");
+        applyRemoteDashboard(data?.dashboard || {});
+      } catch {
+        // fallback to local state
+      }
+    };
+    loadDashboardState();
+  }, []);
 
   useEffect(() => {
     const refresh = async () => {
@@ -502,63 +564,61 @@ const Dashboard: React.FC = () => {
     String(a?.type || "").startsWith("doctrine.") || String(a?.type || "").startsWith("policy.")
   );
 
-  const assignRole = (id: string, role: UserRecord["role"]) => {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role } : u)));
+  const assignRole = async (id: string, role: UserRecord["role"]) => {
+    await callAction("/admin/dashboard/users/role", { id, role });
     addNotification({ type: "success", message: `Role updated for ${id}` });
   };
 
-  const updateUserStatus = (id: string, status: UserRecord["status"]) => {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status } : u)));
+  const updateUserStatus = async (id: string, status: UserRecord["status"]) => {
+    await callAction("/admin/dashboard/users/status", { id, status });
     addNotification({ type: "success", message: `Status updated for ${id}` });
   };
 
-  const savePaymentDetails = () => {
+  const savePaymentDetails = async () => {
     const digits = paymentDraftCard.replace(/\D/g, "");
     if (digits.length < 12) {
       addNotification({ type: "error", message: "Enter a valid payment card number." });
       return;
     }
     const masked = `${"*".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
-    setPayment((prev) => ({ ...prev, cardNumberMasked: masked }));
+    const nextPayment = { ...payment, cardNumberMasked: masked };
+    await callAction("/admin/dashboard/payment/save", { payment: nextPayment });
     setPaymentDraftCard("");
     addNotification({ type: "success", message: "Payment profile saved in dashboard settings." });
   };
 
-  const addOffer = () => {
+  const addOffer = async () => {
     const pct = Number(newOfferPct);
     if (!newOfferName.trim() || !Number.isFinite(pct) || pct <= 0 || pct > 90) {
       addNotification({ type: "error", message: "Enter offer name and discount (1-90)." });
       return;
     }
-    setOffers((prev) => [
-      ...prev,
-      {
-        id: `off-${Date.now()}`,
+    await callAction("/admin/dashboard/offers/upsert", {
+      offer: {
         name: newOfferName.trim(),
         discountPct: pct,
         active: true,
         audience: "all",
       },
-    ]);
+    });
     setNewOfferName("");
     setNewOfferPct("10");
     addNotification({ type: "success", message: "Offer created." });
   };
 
-  const toggleFlag = (k: string) => {
-    setFeatureFlags((prev) => ({ ...prev, [k]: !prev[k] }));
+  const toggleFlag = async (k: string) => {
+    await callAction("/admin/dashboard/flags/toggle", { key: k });
   };
 
-  const addPlan = () => {
+  const addPlan = async () => {
     const name = window.prompt("Plan name:");
     if (!name) return;
     const monthly = Number(window.prompt("Monthly price:", "29"));
     const annual = Number(window.prompt("Annual price:", "290"));
     if (!Number.isFinite(monthly) || !Number.isFinite(annual)) return;
-    setPlans((prev) => [
-      ...prev,
-      { id: `p-${Date.now()}`, name, monthly, annual, active: true, features: ["Custom Plan"] },
-    ]);
+    await callAction("/admin/dashboard/plans/upsert", {
+      plan: { name, monthly, annual, active: true, features: ["Custom Plan"] },
+    });
     addNotification({ type: "success", message: `${name} plan added.` });
   };
 
@@ -572,91 +632,93 @@ const Dashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const saveModelControl = async () => {
+    await callAction("/admin/dashboard/model/save", { modelControl });
+    addNotification({ type: "success", message: "Model control saved." });
+  };
+
   const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
+    const reason = window.prompt(`Reason for restarting ${service}:`, "Emergency maintenance");
+    if (!reason || reason.trim().length < 8) {
+      addNotification({ type: "error", message: "Restart reason is required (min 8 characters)." });
+      return;
+    }
+    const urgencyInput = (window.prompt("Urgency: emergency | high | normal | low", "normal") || "normal").trim().toLowerCase();
+    const urgency = ["emergency", "high", "normal", "low"].includes(urgencyInput) ? urgencyInput : "normal";
     try {
-      const res = await fetch(`${apiBase}/admin/restart`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ service, confirm: true }),
+      const data = await postJson("/admin/restart", {
+        service,
+        confirm: true,
+        reason: reason.trim(),
+        urgency,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "restart request failed");
-      addNotification({ type: "info", message: data?.message || `Restart requested for ${service}` });
+      addNotification({
+        type: "info",
+        message: data?.scheduledAt
+          ? `Restart queued for maintenance window (${new Date(data.scheduledAt).toLocaleString()}).`
+          : (data?.message || `Restart requested for ${service}`),
+      });
     } catch (err: any) {
       addNotification({ type: "error", message: `Restart request failed: ${err?.message || err}` });
     }
   };
 
-  const addDevApiKey = () => {
+  const addDevApiKey = async () => {
     const name = window.prompt("API key name:", "New API Key");
     if (!name) return;
-    const suffix = Math.random().toString(36).slice(-4);
-    setDevApiKeys((prev) => [
-      {
-        id: `k-${Date.now()}`,
-        name: name.trim(),
-        keyMasked: `neur...${suffix}`,
-        createdAt: Date.now(),
-        revoked: false,
-      },
-      ...prev,
-    ]);
+    await callAction("/admin/dashboard/api-keys/create", { name: name.trim() });
     addNotification({ type: "success", message: "API key created." });
   };
 
-  const addWebhook = () => {
+  const addWebhook = async () => {
     if (!devWebhook.trim()) {
       addNotification({ type: "error", message: "Enter a webhook URL first." });
       return;
     }
-    setWebhooks((prev) => [
-      ...prev,
-      { id: `wh-${Date.now()}`, url: devWebhook.trim(), event: webhookEvent, active: true },
-    ]);
+    await callAction("/admin/dashboard/webhooks/upsert", {
+      webhook: { url: devWebhook.trim(), event: webhookEvent, active: true },
+    });
     addNotification({ type: "success", message: "Webhook added." });
   };
 
   const testWebhook = async (id: string) => {
     const hook = webhooks.find((w) => w.id === id);
     if (!hook) return;
+    await callAction("/admin/dashboard/webhooks/test", { id });
     addNotification({ type: "info", message: `Webhook test sent to ${hook.url}` });
   };
 
-  const addSupportTicket = () => {
+  const addSupportTicket = async () => {
     const subject = newTicket.trim();
     if (!subject) return;
-    setSupportTickets((prev) => [
-      { id: `t-${Date.now()}`, subject, priority: "medium", status: "open", assignee: "unassigned" },
-      ...prev,
-    ]);
+    await callAction("/admin/dashboard/tickets/upsert", {
+      ticket: { subject, priority: "medium", status: "open", assignee: "unassigned" },
+    });
     setNewTicket("");
     addNotification({ type: "success", message: "Support ticket created." });
   };
 
-  const addAgentProfile = () => {
+  const addAgentProfile = async () => {
     const name = window.prompt("Agent name:", "New Agent");
     if (!name) return;
-    setAgentsLocal((prev) => [
-      ...prev,
-      {
-        id: `ag-${Date.now()}`,
+    await callAction("/admin/dashboard/agents/upsert", {
+      agent: {
         name: name.trim(),
         memoryDays: 30,
         tools: ["chat"],
         permission: "workspace",
       },
-    ]);
+    });
   };
 
-  const addSavedPrompt = () => {
+  const addSavedPrompt = async () => {
     if (!newPromptTitle.trim() || !newPromptText.trim()) {
       addNotification({ type: "error", message: "Add prompt title and text." });
       return;
     }
-    setSavedPrompts((prev) => [
-      { id: `sp-${Date.now()}`, title: newPromptTitle.trim(), text: newPromptText.trim() },
-      ...prev,
-    ]);
+    await callAction("/admin/dashboard/prompts/upsert", {
+      prompt: { title: newPromptTitle.trim(), text: newPromptText.trim() },
+    });
     setNewPromptTitle("");
     setNewPromptText("");
     addNotification({ type: "success", message: "Prompt saved." });
@@ -664,21 +726,21 @@ const Dashboard: React.FC = () => {
 
   const selectedAgent = agentsLocal.find((a) => a.id === selectedAgentId) || null;
 
-  const updateAgent = (id: string, patch: Partial<AgentProfile>) => {
-    setAgentsLocal((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  const updateAgent = async (id: string, patch: Partial<AgentProfile>) => {
+    const current = agentsLocal.find((a) => a.id === id);
+    if (!current) return;
+    await callAction("/admin/dashboard/agents/upsert", { agent: { ...current, ...patch, id } });
   };
 
-  const toggleAgentTool = (id: string, tool: string) => {
-    setAgentsLocal((prev) =>
-      prev.map((a) => {
-        if (a.id !== id) return a;
-        const has = a.tools.includes(tool);
-        return { ...a, tools: has ? a.tools.filter((t) => t !== tool) : [...a.tools, tool] };
-      })
-    );
+  const toggleAgentTool = async (id: string, tool: string) => {
+    const current = agentsLocal.find((a) => a.id === id);
+    if (!current) return;
+    const has = current.tools.includes(tool);
+    const tools = has ? current.tools.filter((t) => t !== tool) : [...current.tools, tool];
+    await callAction("/admin/dashboard/agents/upsert", { agent: { ...current, tools, id } });
   };
 
-  const addDepartment = () => {
+  const addDepartment = async () => {
     const name = newDepartmentName.trim();
     const members = Number(newDepartmentMembers);
     const tokens = Number(newDepartmentTokens);
@@ -686,10 +748,9 @@ const Dashboard: React.FC = () => {
       addNotification({ type: "error", message: "Enter a valid department, members, and token budget." });
       return;
     }
-    setEnterpriseDepartments((prev) => [
-      ...prev,
-      { id: `d-${Date.now()}`, name, members, tokensPerMonth: tokens },
-    ]);
+    await callAction("/admin/dashboard/enterprise/departments/upsert", {
+      department: { name, members, tokensPerMonth: tokens },
+    });
     setNewDepartmentName("");
     setNewDepartmentMembers("5");
     setNewDepartmentTokens("50000");
@@ -708,7 +769,7 @@ const Dashboard: React.FC = () => {
         {plans.map((p) => (
           <div key={p.id} style={row}>
             <span>{p.name} (${p.monthly}/mo, ${p.annual}/yr)</span>
-            <button style={chip} onClick={() => setPlans((prev) => prev.map((x) => (x.id === p.id ? { ...x, active: !x.active } : x)))}>
+            <button style={chip} onClick={() => callAction("/admin/dashboard/plans/toggle", { id: p.id })}>
               {p.active ? "Disable" : "Enable"}
             </button>
           </div>
@@ -758,6 +819,7 @@ const Dashboard: React.FC = () => {
           <option value="balanced">balanced</option>
           <option value="open">open</option>
         </select>
+        <button style={primary} onClick={saveModelControl}>Save Model Control</button>
       </Card>
       <Card title="Feature Flags">
         {Object.keys(featureFlags).map((k) => (
@@ -826,14 +888,14 @@ const Dashboard: React.FC = () => {
             <div style={{ display: "flex", gap: 6 }}>
               <select
                 value={o.audience}
-                onChange={(e) => setOffers((prev) => prev.map((x) => (x.id === o.id ? { ...x, audience: e.target.value as Offer["audience"] } : x)))}
+                onChange={(e) => callAction("/admin/dashboard/offers/upsert", { offer: { ...o, audience: e.target.value as Offer["audience"] } })}
                 style={{ ...input, width: 120 }}
               >
                 <option value="all">all</option>
                 <option value="new_users">new users</option>
                 <option value="enterprise">enterprise</option>
               </select>
-              <button style={chip} onClick={() => setOffers((prev) => prev.map((x) => (x.id === o.id ? { ...x, active: !x.active } : x)))}>
+              <button style={chip} onClick={() => callAction("/admin/dashboard/offers/toggle", { id: o.id })}>
                 {o.active ? "Disable" : "Enable"}
               </button>
             </div>
@@ -856,14 +918,14 @@ const Dashboard: React.FC = () => {
             <div style={{ display: "flex", gap: 6 }}>
               <select
                 value={t.status}
-                onChange={(e) => setSupportTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: e.target.value as SupportTicket["status"] } : x)))}
+                onChange={(e) => callAction("/admin/dashboard/tickets/upsert", { ticket: { ...t, status: e.target.value as SupportTicket["status"] } })}
                 style={{ ...input, width: 110 }}
               >
                 <option value="open">open</option>
                 <option value="triaged">triaged</option>
                 <option value="resolved">resolved</option>
               </select>
-              <button style={chip} onClick={() => setSupportTickets((prev) => prev.filter((x) => x.id !== t.id))}>Close</button>
+              <button style={chip} onClick={() => callAction("/admin/dashboard/tickets/delete", { id: t.id })}>Close</button>
             </div>
           </div>
         ))}
@@ -886,7 +948,7 @@ const Dashboard: React.FC = () => {
             <span>{k.name} • {k.keyMasked}</span>
             <button
               style={chip}
-              onClick={() => setDevApiKeys((prev) => prev.map((x) => (x.id === k.id ? { ...x, revoked: !x.revoked } : x)))}
+              onClick={() => callAction("/admin/dashboard/api-keys/toggle", { id: k.id })}
             >
               {k.revoked ? "Restore" : "Revoke"}
             </button>
@@ -912,7 +974,7 @@ const Dashboard: React.FC = () => {
             <span>{w.event} → {w.url}</span>
             <div style={{ display: "flex", gap: 6 }}>
               <button style={chip} onClick={() => testWebhook(w.id)}>Test</button>
-              <button style={chip} onClick={() => setWebhooks((prev) => prev.filter((x) => x.id !== w.id))}>Delete</button>
+              <button style={chip} onClick={() => callAction("/admin/dashboard/webhooks/delete", { id: w.id })}>Delete</button>
             </div>
           </div>
         ))}
@@ -943,7 +1005,7 @@ const Dashboard: React.FC = () => {
         {agentsLocal.length === 0 ? <div style={muted}>No agents configured yet.</div> : agentsLocal.map((a) => (
           <div key={a.id} style={{ ...row, ...(selectedAgentId === a.id ? { border: "1px solid rgba(125,211,252,0.55)", borderRadius: 8, padding: 6 } : {}) }}>
             <button style={chip} onClick={() => setSelectedAgentId(a.id)}>{a.name}</button>
-            <button style={chip} onClick={() => setAgentsLocal((prev) => prev.filter((x) => x.id !== a.id))}>Delete</button>
+            <button style={chip} onClick={() => callAction("/admin/dashboard/agents/delete", { id: a.id })}>Delete</button>
           </div>
         ))}
         {adminAgents.length > 0 && (
@@ -1050,7 +1112,7 @@ const Dashboard: React.FC = () => {
             <span>{p.title}</span>
             <div style={{ display: "flex", gap: 6 }}>
               <button style={chip} onClick={() => navigator.clipboard?.writeText(p.text)}>Copy</button>
-              <button style={chip} onClick={() => setSavedPrompts((prev) => prev.filter((x) => x.id !== p.id))}>Delete</button>
+              <button style={chip} onClick={() => callAction("/admin/dashboard/prompts/delete", { id: p.id })}>Delete</button>
             </div>
           </div>
         ))}
@@ -1089,9 +1151,10 @@ const Dashboard: React.FC = () => {
                   type="number"
                   value={d.members}
                   onChange={(e) => setEnterpriseDepartments((prev) => prev.map((x) => (x.id === d.id ? { ...x, members: Number(e.target.value) || 1 } : x)))}
+                  onBlur={(e) => callAction("/admin/dashboard/enterprise/departments/upsert", { department: { ...d, members: Number(e.target.value) || 1 } })}
                   style={{ ...input, width: 80 }}
                 />
-                <button style={chip} onClick={() => setEnterpriseDepartments((prev) => prev.filter((x) => x.id !== d.id))}>Remove</button>
+                <button style={chip} onClick={() => callAction("/admin/dashboard/enterprise/departments/delete", { id: d.id })}>Remove</button>
               </div>
             </div>
           ))}
@@ -1121,7 +1184,7 @@ const Dashboard: React.FC = () => {
         <input value={ssoConfig.domain} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, domain: e.target.value }))} placeholder="Company domain" style={input} />
         <input value={ssoConfig.clientId} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, clientId: e.target.value }))} placeholder="Client ID" style={input} />
         <input value={ssoConfig.metadataUrl} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, metadataUrl: e.target.value }))} placeholder="Metadata URL" style={input} />
-        <button style={primary} onClick={() => addNotification({ type: "success", message: "SSO configuration saved." })}>Save SSO</button>
+        <button style={primary} onClick={() => callAction("/admin/dashboard/enterprise/sso/save", { ssoConfig })}>Save SSO</button>
       </Card>
     </div>
   );
