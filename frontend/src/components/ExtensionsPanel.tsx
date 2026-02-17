@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { isFounderUser } from "@/services/founderAccess";
 
 export interface Extension {
   id: string;
@@ -18,6 +19,89 @@ const ExtensionsPanel: React.FC = () => {
   const [version, setVersion] = useState("1.0.0");
   const [permissionsText, setPermissionsText] = useState("read-chat");
 
+  const authContext = () => {
+    const envToken = String((import.meta.env.VITE_NEUROEDGE_JWT as string) || "").trim();
+    const envApiKey = String((import.meta.env.VITE_NEUROEDGE_API_KEY as string) || "").trim();
+    const envOrg = String((import.meta.env.VITE_DEFAULT_ORG_ID as string) || "personal").trim();
+    const envWorkspace = String((import.meta.env.VITE_DEFAULT_WORKSPACE_ID as string) || "default").trim();
+    let token = "";
+    let orgId = "";
+    let workspaceId = "";
+    let userEmail = "";
+    let userName = "";
+    let userRole = "";
+    let deviceId = "";
+    try {
+      deviceId = localStorage.getItem("neuroedge_device_id") || "";
+      if (!deviceId) {
+        deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem("neuroedge_device_id", deviceId);
+      }
+      const rawUser = localStorage.getItem("neuroedge_user");
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser);
+        token = String(parsed?.token || token);
+        orgId = String(parsed?.orgId || orgId);
+        workspaceId = String(parsed?.workspaceId || workspaceId);
+        userEmail = String(parsed?.email || userEmail);
+        userName = String(parsed?.name || userName);
+        userRole = String(parsed?.role || userRole);
+      }
+      const rawSession = localStorage.getItem("neuroedge_session");
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        token = token || String(parsed?.token || "");
+        orgId = orgId || String(parsed?.orgId || "");
+        workspaceId = workspaceId || String(parsed?.workspaceId || "");
+        userEmail = userEmail || String(parsed?.email || "");
+        userName = userName || String(parsed?.name || "");
+        userRole = userRole || String(parsed?.role || "");
+      }
+      const rawProfile = localStorage.getItem("neuroedge_profile_settings");
+      if (rawProfile) {
+        const parsed = JSON.parse(rawProfile);
+        userEmail = userEmail || String(parsed?.email || "");
+        userName = userName || String(parsed?.name || "");
+        userRole = userRole || String(parsed?.role || "");
+      }
+    } catch {
+      // ignore malformed local storage
+    }
+    if (!userRole && isFounderUser()) userRole = "founder";
+    return {
+      token: envToken || token,
+      apiKey: envApiKey,
+      orgId: orgId || envOrg || "personal",
+      workspaceId: workspaceId || envWorkspace || "default",
+      userEmail,
+      userName,
+      userRole,
+      deviceId,
+    };
+  };
+
+  const headers = () => {
+    const auth = authContext();
+    const h: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-org-id": auth.orgId,
+      "x-workspace-id": auth.workspaceId,
+    };
+    if (auth.userEmail) h["x-user-email"] = auth.userEmail;
+    if (auth.userName) h["x-user-name"] = auth.userName;
+    if (auth.userRole) h["x-user-role"] = auth.userRole;
+    if (auth.deviceId) h["x-device-id"] = auth.deviceId;
+    if (auth.token) h.Authorization = `Bearer ${auth.token}`;
+    if (auth.apiKey) {
+      h["x-api-key"] = auth.apiKey;
+      if (!h.Authorization) h.Authorization = `Bearer ${auth.apiKey}`;
+    }
+    return h;
+  };
+
+  const role = String(authContext().userRole || "user").toLowerCase();
+  const canManage = role === "founder" || role === "admin" || role === "developer";
+
   const baseUrl = useMemo(
     () => String(import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:7070").replace(/\/$/, ""),
     []
@@ -27,12 +111,13 @@ const ExtensionsPanel: React.FC = () => {
     setLoading(true);
     setError("");
     try {
-      const resp = await fetch(`${baseUrl}/admin/dashboard/extensions`);
+      const resp = await fetch(`${baseUrl}/admin/dashboard/extensions`, { headers: headers() });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
       setExtensions(Array.isArray(data.extensions) ? data.extensions : []);
     } catch (err: any) {
-      setError(err?.message || "Failed to load extensions");
+      const msg = String(err?.message || "Failed to load extensions");
+      setError(msg.includes("Unauthorized") ? "Unauthorized: sign in as founder/admin/developer or set valid API key/JWT." : msg);
     } finally {
       setLoading(false);
     }
@@ -46,7 +131,7 @@ const ExtensionsPanel: React.FC = () => {
     setError("");
     const resp = await fetch(`${baseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers(),
       body: JSON.stringify(body),
     });
     const data = await resp.json();
@@ -125,10 +210,11 @@ const ExtensionsPanel: React.FC = () => {
           placeholder="Permissions comma-separated"
           style={inputStyle}
         />
-        <button onClick={handleCreate} style={primaryActionStyle}>➕ Load New Extension</button>
+        <button onClick={handleCreate} style={primaryActionStyle} disabled={!canManage}>➕ Load New Extension</button>
       </div>
 
       {error ? <div style={errorStyle}>{error}</div> : null}
+      {!canManage ? <div style={errorStyle}>Read-only mode: manage actions require founder/admin/developer role.</div> : null}
 
       <div style={listStyle}>
         {extensions.map((ext) => (
@@ -140,10 +226,10 @@ const ExtensionsPanel: React.FC = () => {
             </div>
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <span style={statusPillStyle(ext.active)}>{ext.active ? "Active" : "Inactive"}</span>
-              <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)}>
+              <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)} disabled={!canManage}>
                 {ext.active ? "Deactivate" : "Activate"}
               </button>
-              <button onClick={() => deleteExtension(ext.id)} style={dangerButtonStyle}>
+              <button onClick={() => deleteExtension(ext.id)} style={dangerButtonStyle} disabled={!canManage}>
                 Delete
               </button>
             </div>

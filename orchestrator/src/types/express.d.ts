@@ -7,6 +7,7 @@ declare global {
         sub: string;
         orgId?: string;
         workspaceId?: string;
+        deviceId?: string;
         scopes: string[];
         raw?: Record<string, any>;
       };

@@ -300,6 +300,134 @@ function decodeBase64Safe(data: string): Buffer | null {
 
 type ThreatSeverity = "low" | "medium" | "high" | "critical";
 const AEGIS_SNAPSHOT_DIR = path.join(process.cwd(), "snapshots");
+type TrustedDomain = "medicine" | "agriculture" | "market";
+
+const TRUSTED_BOOTSTRAP_PACKS: Record<TrustedDomain, { core: string[]; secondary: string[] }> = {
+  medicine: {
+    core: [
+      "https://www.who.int/",
+      "https://www.cdc.gov/",
+      "https://medlineplus.gov/",
+      "https://www.nhs.uk/",
+      "https://www.nih.gov/",
+      "https://www.fda.gov/",
+    ],
+    secondary: [
+      "https://www.mayoclinic.org/",
+      "https://www.cochrane.org/",
+      "https://www.ema.europa.eu/",
+    ],
+  },
+  agriculture: {
+    core: [
+      "https://www.fao.org/",
+      "https://www.usda.gov/",
+      "https://www.cgiar.org/",
+      "https://www.cimmyt.org/",
+      "https://www.cabi.org/",
+      "https://www.unep.org/",
+    ],
+    secondary: [
+      "https://www.worldagroforestry.org/",
+      "https://www.ifad.org/",
+      "https://www.ipcc.ch/",
+    ],
+  },
+  market: {
+    core: [
+      "https://www.federalreserve.gov/",
+      "https://fred.stlouisfed.org/",
+      "https://www.imf.org/",
+      "https://www.worldbank.org/",
+      "https://www.sec.gov/",
+      "https://www.bis.org/",
+    ],
+    secondary: [
+      "https://www.oecd.org/",
+      "https://www.cftc.gov/",
+      "https://www.eia.gov/",
+    ],
+  },
+};
+
+function isTrustedDomain(value: string): value is TrustedDomain {
+  return value === "medicine" || value === "agriculture" || value === "market";
+}
+
+function trustedPackUrls(domain: TrustedDomain, includeSecondary = false, limit = 12): string[] {
+  const base = TRUSTED_BOOTSTRAP_PACKS[domain];
+  const merged = [...base.core, ...(includeSecondary ? base.secondary : [])];
+  return merged.slice(0, Math.max(1, Math.min(30, limit)));
+}
+
+function readBootstrapSummary(): Record<string, any> {
+  const state = readState();
+  const summary = (state.summary || {}) as Record<string, any>;
+  return (summary.trainingBootstrap || {}) as Record<string, any>;
+}
+
+function writeBootstrapSummary(next: Record<string, any>) {
+  const current = readState();
+  writeState({
+    ...current,
+    summary: {
+      ...(current.summary || {}),
+      trainingBootstrap: next,
+    },
+  });
+}
+
+function boolEnvDefault(name: string, fallback: boolean): boolean {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return ["1", "true", "yes", "on"].includes(raw);
+}
+
+function getAutoRefreshConfig(): { enabled: boolean; hourUtc: number; minuteUtc: number; staleHours: number; tickMs: number } {
+  const summary = readBootstrapSummary();
+  const saved = (summary.autoRefreshConfig || {}) as Record<string, any>;
+  const enabled =
+    typeof saved.enabled === "boolean" ? saved.enabled : boolEnvDefault("BOOTSTRAP_AUTO_REFRESH_ENABLED", true);
+  const hourUtc = Math.max(
+    0,
+    Math.min(23, Number(saved.hourUtc ?? process.env.BOOTSTRAP_REFRESH_HOUR_UTC ?? 2))
+  );
+  const minuteUtc = Math.max(
+    0,
+    Math.min(59, Number(saved.minuteUtc ?? process.env.BOOTSTRAP_REFRESH_MINUTE_UTC ?? 10))
+  );
+  const staleHours = Math.max(12, Number(saved.staleHours ?? process.env.BOOTSTRAP_STALE_HOURS ?? 36));
+  const tickMs = Math.max(30_000, Number(saved.tickMs ?? process.env.BOOTSTRAP_REFRESH_TICK_MS ?? 120_000));
+  return { enabled, hourUtc, minuteUtc, staleHours, tickMs };
+}
+
+async function probeSourceMetadata(url: string, timeoutMs = 9000): Promise<Record<string, any>> {
+  try {
+    const resp = await axios.request({
+      method: "HEAD",
+      url,
+      timeout: timeoutMs,
+      validateStatus: () => true,
+      maxRedirects: 5,
+    });
+    return {
+      status: Number(resp.status || 0),
+      etag: String(resp.headers?.etag || ""),
+      lastModified: String(resp.headers?.["last-modified"] || ""),
+      checkedAt: Date.now(),
+      ok: resp.status >= 200 && resp.status < 400,
+    };
+  } catch (err: any) {
+    return {
+      status: 0,
+      etag: "",
+      lastModified: "",
+      checkedAt: Date.now(),
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
 
 function stableStringify(input: any): string {
   if (input === null || typeof input !== "object") return JSON.stringify(input);
@@ -2974,6 +3102,307 @@ export function startServer(
     }
   });
 
+  app.post("/intelligence/math", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/math`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence math failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/physics", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/physics`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence physics failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/science", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/science`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence science failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/code", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/code`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence code failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/research", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/research`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence research failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/solve", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/solve`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence solve failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/validate", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/validate`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence validate failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/ask", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/ask`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence ask failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/platform", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/platform`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence platform failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/fullstack", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/fullstack`, req.body || {}, { timeout: 120000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence fullstack failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/medicine", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/medicine`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence medicine failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/agriculture", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/agriculture`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence agriculture failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/market", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/market`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence market failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/visualize", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/visualize`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence visualize failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/intelligence/export", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/intelligence/export`, req.body || {}, { timeout: 120000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence export failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/intelligence/download", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const target = String(req.query.path || "").trim();
+    if (!target) return res.status(400).json({ error: "Missing path query" });
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/creator/download`, {
+        params: { path: target },
+        responseType: "stream",
+        timeout: 120000,
+      });
+      const contentType = String(resp.headers["content-type"] || "application/octet-stream");
+      const contentDisposition = String(resp.headers["content-disposition"] || "");
+      res.setHeader("content-type", contentType);
+      if (contentDisposition) res.setHeader("content-disposition", contentDisposition);
+      resp.data.pipe(res);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence download failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/intelligence/languages", requireWorkspace, requireScope("chat:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/intelligence/languages`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence languages failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/intelligence/subjects", requireWorkspace, requireScope("chat:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/intelligence/subjects`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Intelligence subjects failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/rag/ingest", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/ingest`, req.body || {}, { timeout: 180000 });
+      appendEvent({
+        type: "rag.ingest",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          created: resp.data?.created_chunks || 0,
+          urlsFetched: resp.data?.urls_fetched || 0,
+        },
+      });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG ingest failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/rag/reindex", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/reindex`, {}, { timeout: 180000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG reindex failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/rag/search", requireWorkspace, requireScope("training:read"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/search`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG search failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/rag/answer", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/answer`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG answer failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/rag/feedback", requireWorkspace, requireScope("training:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/feedback`, req.body || {}, { timeout: 60000 });
+      const body = req.body || {};
+      if (body.query && body.answer) {
+        recordTrainingSample({
+          query: String(body.query),
+          response: String(body.answer),
+          rating: (String(body.rating || "neutral").toLowerCase() === "up" ? "up" : String(body.rating || "neutral").toLowerCase() === "down" ? "down" : "neutral"),
+          orgId: req.auth?.orgId,
+          workspaceId: req.auth?.workspaceId,
+          actor: req.auth?.sub,
+          tags: Array.isArray(body.tags) ? body.tags : ["rag", "feedback"],
+          citations: Array.isArray(body.citations) ? body.citations : [],
+        });
+      }
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG feedback failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/rag/stats", requireWorkspace, requireScope("training:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/rag/stats`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG stats failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/admin/training/rag/bootstrap", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (req: Request, res: Response) => {
+    const limit = Math.max(100, Math.min(10000, Number(req.body?.limit) || 2500));
+    const domain = String(req.body?.domain || "general").trim().toLowerCase();
+    const samples = listTrainingSamples(limit) as Array<Record<string, any>>;
+    const docs = samples
+      .map((s, idx) => ({
+        title: `training_sample_${idx + 1}`,
+        text: `Q: ${String(s.query || "")}\nA: ${String(s.response || "")}`,
+        domain: domain || "general",
+        tags: Array.isArray(s.tags) ? s.tags : ["training", "bootstrap"],
+        source: "training_samples",
+      }))
+      .filter((d) => d.text.length > 6);
+
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(
+        `${mlBase.replace(/\/$/, "")}/rag/ingest`,
+        { docs, domain: domain || "general", source: "training_samples_bootstrap", rebuild_index: true },
+        { timeout: 240000 }
+      );
+      res.json({ success: true, sourceSamples: samples.length, sentDocs: docs.length, rag: resp.data });
+    } catch (err: any) {
+      res.status(502).json({ error: "RAG bootstrap failed", detail: err?.message || String(err) });
+    }
+  });
+
   /* ---------------- Mesh Inference Registry ---------------- */
   const meshRegistry = new InferenceRegistry();
   const fedAggregator = new FedAggregator();
@@ -3180,6 +3609,240 @@ export function startServer(
         orgId: req.auth?.orgId || "personal",
         workspaceId: req.auth?.workspaceId || "default",
       });
+    }
+  );
+
+  const runTrustedBootstrapPack = async (opts: {
+    domain: TrustedDomain;
+    includeSecondary: boolean;
+    limit: number;
+    reason: string;
+    actor: string;
+    orgId: string;
+    workspaceId: string;
+  }): Promise<Record<string, any>> => {
+    const urls = trustedPackUrls(opts.domain, opts.includeSecondary, opts.limit);
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const startedAt = Date.now();
+    const ragResp = await axios.post(
+      `${mlBase.replace(/\/$/, "")}/rag/ingest`,
+      {
+        urls,
+        domain: opts.domain,
+        tags: ["bootstrap_pack", opts.domain, opts.includeSecondary ? "secondary" : "core", "nightly_refresh"],
+        source: "trusted_seed_pack",
+        rebuild_index: true,
+      },
+      { timeout: 300000 }
+    );
+
+    let sourceProbe: Record<string, any> = {};
+    for (const url of urls) {
+      sourceProbe[url] = await probeSourceMetadata(url, Math.max(3000, Number(process.env.BOOTSTRAP_SOURCE_PROBE_TIMEOUT_MS || 9000)));
+    }
+
+    appendEvent({
+      type: "training.bootstrap_pack.run",
+      timestamp: Date.now(),
+      payload: {
+        domain: opts.domain,
+        includeSecondary: opts.includeSecondary,
+        attemptedUrls: urls.length,
+        actor: opts.actor,
+        orgId: opts.orgId,
+        workspaceId: opts.workspaceId,
+        reason: opts.reason,
+        durationMs: Date.now() - startedAt,
+        sourceProbe,
+        result: ragResp.data,
+      },
+    });
+    const previous = readBootstrapSummary();
+    writeBootstrapSummary({
+      ...previous,
+      domains: {
+        ...(previous.domains || {}),
+        [opts.domain]: {
+          domain: opts.domain,
+          includeSecondary: opts.includeSecondary,
+          limit: opts.limit,
+          urls,
+          lastRunAt: Date.now(),
+          lastSuccessAt: Date.now(),
+          lastReason: opts.reason,
+          lastActor: opts.actor,
+          sourceProbe,
+          lastResult: ragResp.data,
+        },
+      },
+      lastRunAt: Date.now(),
+    });
+    return { domain: opts.domain, urls, result: ragResp.data, sourceProbe };
+  };
+
+  const staleCheckForDomain = async (domain: TrustedDomain): Promise<Record<string, any>> => {
+    const summary = readBootstrapSummary();
+    const cfg = ((summary.domains || {})[domain] || {}) as Record<string, any>;
+    const staleHours = getAutoRefreshConfig().staleHours;
+    const lastSuccessAt = Number(cfg.lastSuccessAt || 0);
+    const staleByAge = !lastSuccessAt || Date.now() - lastSuccessAt > staleHours * 3600 * 1000;
+    const urls = trustedPackUrls(domain, Boolean(cfg.includeSecondary), Number(cfg.limit || 12));
+    const previousProbe = (cfg.sourceProbe || {}) as Record<string, any>;
+    const checks: Array<Record<string, any>> = [];
+    let changedSources = 0;
+    for (const url of urls) {
+      const nowMeta = await probeSourceMetadata(url, Math.max(3000, Number(process.env.BOOTSTRAP_SOURCE_PROBE_TIMEOUT_MS || 9000)));
+      const prevMeta = (previousProbe[url] || {}) as Record<string, any>;
+      const changed =
+        Boolean(nowMeta.ok) &&
+        Boolean(prevMeta.checkedAt) &&
+        ((nowMeta.etag && prevMeta.etag && nowMeta.etag !== prevMeta.etag) ||
+          (nowMeta.lastModified && prevMeta.lastModified && nowMeta.lastModified !== prevMeta.lastModified));
+      if (changed) changedSources += 1;
+      checks.push({ url, ...nowMeta, changed });
+    }
+    return {
+      domain,
+      staleByAge,
+      changedSources,
+      checks,
+      shouldRefresh: staleByAge || changedSources > 0,
+    };
+  };
+
+  app.get(
+    "/admin/training/bootstrap-pack/list",
+    requireWorkspace,
+    requireScope("training:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({ success: true, packs: TRUSTED_BOOTSTRAP_PACKS });
+    }
+  );
+
+  app.get(
+    "/admin/training/bootstrap-pack/auto-refresh/status",
+    requireWorkspace,
+    requireScope("training:read"),
+    requireRole(["founder", "admin"]),
+    async (_req: Request, res: Response) => {
+      const summary = readBootstrapSummary();
+      const domains: TrustedDomain[] = ["medicine", "agriculture", "market"];
+      const staleChecks = [];
+      for (const d of domains) {
+        staleChecks.push(await staleCheckForDomain(d));
+      }
+      res.json({
+        success: true,
+        config: getAutoRefreshConfig(),
+        summary,
+        staleChecks,
+      });
+    }
+  );
+
+  app.post(
+    "/admin/training/bootstrap-pack/auto-refresh/config",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const currentSummary = readBootstrapSummary();
+      const currentCfg = getAutoRefreshConfig();
+      const enabled =
+        typeof req.body?.enabled === "boolean" ? req.body.enabled : currentCfg.enabled;
+      const hourUtc = Math.max(
+        0,
+        Math.min(23, Number(req.body?.hourUtc ?? currentCfg.hourUtc))
+      );
+      const minuteUtc = Math.max(
+        0,
+        Math.min(59, Number(req.body?.minuteUtc ?? currentCfg.minuteUtc))
+      );
+      const staleHours = Math.max(
+        12,
+        Number(req.body?.staleHours ?? currentCfg.staleHours)
+      );
+      const tickMs = Math.max(
+        30_000,
+        Number(req.body?.tickMs ?? currentCfg.tickMs)
+      );
+      const nextCfg = { enabled, hourUtc, minuteUtc, staleHours, tickMs };
+      writeBootstrapSummary({
+        ...currentSummary,
+        autoRefreshConfig: nextCfg,
+        updatedAt: Date.now(),
+      });
+      appendEvent({
+        type: "training.bootstrap_pack.auto_refresh.config",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          config: nextCfg,
+        },
+      });
+      res.json({ success: true, config: nextCfg });
+    }
+  );
+
+  app.post(
+    "/admin/training/bootstrap-pack/auto-refresh/run",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const domainRaw = String(req.body?.domain || "").trim().toLowerCase();
+      const includeSecondary = Boolean(req.body?.includeSecondary);
+      const limit = Math.max(1, Math.min(30, Number(req.body?.limit) || 12));
+      const domains: TrustedDomain[] = domainRaw && isTrustedDomain(domainRaw) ? [domainRaw] : ["medicine", "agriculture", "market"];
+      const results: Array<Record<string, any>> = [];
+      for (const domain of domains) {
+        const stale = await staleCheckForDomain(domain);
+        const result = await runTrustedBootstrapPack({
+          domain,
+          includeSecondary: includeSecondary || stale.changedSources > 0,
+          limit,
+          reason: "manual_auto_refresh",
+          actor: req.auth?.sub || "manual",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+        });
+        results.push({ ...result, stale });
+      }
+      res.json({ success: true, results });
+    }
+  );
+
+  app.post(
+    "/admin/training/bootstrap-pack/run",
+    requireWorkspace,
+    requireScope("training:write"),
+    requireRole(["founder", "admin"]),
+    trainingLimiter,
+    async (req: Request, res: Response) => {
+      const domainRaw = String(req.body?.domain || "medicine").trim().toLowerCase();
+      const includeSecondary = Boolean(req.body?.includeSecondary);
+      const limit = Math.max(1, Math.min(30, Number(req.body?.limit) || 12));
+      if (!isTrustedDomain(domainRaw)) {
+        return res.status(400).json({ error: "Invalid domain. Use medicine|agriculture|market." });
+      }
+      const domain: TrustedDomain = domainRaw;
+      try {
+        const out = await runTrustedBootstrapPack({
+          domain,
+          includeSecondary,
+          limit,
+          reason: "manual_run",
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+        });
+        res.json({ success: true, ...out });
+      } catch (err: any) {
+        res.status(502).json({ error: "Bootstrap pack ingestion failed", detail: err?.message || String(err) });
+      }
     }
   );
 
@@ -3432,7 +4095,7 @@ export function startServer(
     requireWorkspace,
     requireScope("training:write"),
     requireRole(["founder", "admin"]),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const body = req.body || {};
       const mode = String(body.mode || "incremental");
       const evalSuite = String(body.evalSuite || "core");
@@ -3452,15 +4115,83 @@ export function startServer(
           options: body.options || {},
         },
       });
-      res.json({
-        success: true,
-        job: {
+      const startedAt = Date.now();
+      const mlBase = process.env.ML_URL || "http://localhost:8090";
+      let ragReindex: any = null;
+      let ragStats: any = null;
+      let bootstrap: any = null;
+      let status = "completed";
+      let detail = "Training pipeline executed";
+      try {
+        if (mode === "full") {
+          const limit = Math.max(100, Math.min(10000, Number(body?.bootstrapLimit) || 3000));
+          const samples = listTrainingSamples(limit) as Array<Record<string, any>>;
+          const docs = samples
+            .map((s, idx) => ({
+              title: `training_sample_${idx + 1}`,
+              text: `Q: ${String(s.query || "")}\nA: ${String(s.response || "")}`,
+              domain: String(body?.domain || "general").trim().toLowerCase() || "general",
+              tags: Array.isArray(s.tags) ? s.tags : ["training", "full_bootstrap"],
+              source: "training_jobs_full",
+            }))
+            .filter((d) => d.text.length > 6);
+          const b = await axios.post(
+            `${mlBase.replace(/\/$/, "")}/rag/ingest`,
+            {
+              docs,
+              domain: String(body?.domain || "general").trim().toLowerCase() || "general",
+              source: "training_jobs_full",
+              rebuild_index: true,
+            },
+            { timeout: 240000 }
+          );
+          bootstrap = { samples: samples.length, docs: docs.length, result: b.data };
+        } else if (mode !== "eval_only") {
+          const r = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/reindex`, {}, { timeout: 180000 });
+          ragReindex = r.data;
+        }
+        const s = await axios.get(`${mlBase.replace(/\/$/, "")}/rag/stats`, { timeout: 45000 });
+        ragStats = s.data;
+      } catch (err: any) {
+        status = "failed";
+        detail = err?.message || String(err);
+      }
+
+      const completedAt = Date.now();
+      appendEvent({
+        type: "training.job.completed",
+        timestamp: completedAt,
+        payload: {
           id,
-          status: "queued",
           mode,
           evalSuite,
           targetModel,
-          queuedAt: Date.now(),
+          status,
+          durationMs: completedAt - startedAt,
+          detail,
+          ragReindex,
+          ragStats,
+          bootstrap,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+        },
+      });
+      res.json({
+        success: status !== "failed",
+        job: {
+          id,
+          status,
+          mode,
+          evalSuite,
+          targetModel,
+          startedAt,
+          completedAt,
+          durationMs: completedAt - startedAt,
+          detail,
+          ragReindex,
+          ragStats,
+          bootstrap,
         },
       });
     }
@@ -3555,6 +4286,79 @@ export function startServer(
     }
     next(err);
   });
+
+  let autoRefreshRunning = false;
+  let lastTickAt = 0;
+
+  const runNightlyAutoRefresh = async () => {
+    const cfg = getAutoRefreshConfig();
+    if (!cfg.enabled || autoRefreshRunning) return;
+    const nowMs = Date.now();
+    if (nowMs - lastTickAt < cfg.tickMs) return;
+    lastTickAt = nowMs;
+    const now = new Date();
+    if (now.getUTCHours() !== cfg.hourUtc || now.getUTCMinutes() < cfg.minuteUtc) return;
+
+    const dayKey = now.toISOString().slice(0, 10);
+    const summary = readBootstrapSummary();
+    if (String(summary.lastAutoRefreshDay || "") === dayKey) return;
+
+    autoRefreshRunning = true;
+    try {
+      const domains: TrustedDomain[] = ["medicine", "agriculture", "market"];
+      const results: Array<Record<string, any>> = [];
+      for (const domain of domains) {
+        const stale = await staleCheckForDomain(domain);
+        if (!stale.shouldRefresh) {
+          results.push({ domain, skipped: true, stale });
+          continue;
+        }
+        const result = await runTrustedBootstrapPack({
+          domain,
+          includeSecondary: stale.changedSources > 0,
+          limit: stale.changedSources > 0 ? 18 : 12,
+          reason: stale.changedSources > 0 ? "nightly_source_change" : "nightly_stale_age",
+          actor: "system:auto_refresh",
+          orgId: "personal",
+          workspaceId: "default",
+        });
+        results.push({ ...result, stale });
+      }
+      const after = readBootstrapSummary();
+      writeBootstrapSummary({
+        ...after,
+        lastAutoRefreshDay: dayKey,
+        lastAutoRefreshAt: Date.now(),
+        lastAutoRefreshResults: results,
+      });
+      appendEvent({
+        type: "training.bootstrap_pack.auto_refresh",
+        timestamp: Date.now(),
+        payload: {
+          dayKey,
+          hourUtc: cfg.hourUtc,
+          minuteUtc: cfg.minuteUtc,
+          results,
+        },
+      });
+    } catch (err: any) {
+      appendEvent({
+        type: "training.bootstrap_pack.auto_refresh.error",
+        timestamp: Date.now(),
+        payload: {
+          error: err?.message || String(err),
+          hourUtc: cfg.hourUtc,
+          minuteUtc: cfg.minuteUtc,
+        },
+      });
+    } finally {
+      autoRefreshRunning = false;
+    }
+  };
+
+  setInterval(() => {
+    void runNightlyAutoRefresh();
+  }, 30_000);
 
   app.listen(restPort, () => {
     logger.info(

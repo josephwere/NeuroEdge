@@ -72,6 +72,38 @@ function citationModeRequired(text: string): boolean {
   return strict && isFactualPrompt(text);
 }
 
+type CortexDomain = "medicine" | "agriculture" | "market" | "general";
+
+function detectCortexDomain(text: string): CortexDomain {
+  const t = String(text || "").toLowerCase();
+  if (
+    /\b(disease|symptom|diagnosis|virus|bacteria|surgery|clinical|medical|medicine|doctor|hospital|treatment|cure)\b/.test(
+      t
+    )
+  ) {
+    return "medicine";
+  }
+  if (
+    /\b(agriculture|farm|farming|crop|crops|soil|yield|forestry|forest|timber|irrigation|harvest|fertilizer|pest|plant disease)\b/.test(
+      t
+    )
+  ) {
+    return "agriculture";
+  }
+  if (
+    /\b(market|business|stock|stocks|crypto|bitcoin|gold|commodity|commodities|asset|portfolio|trading|equity|forex)\b/.test(
+      t
+    )
+  ) {
+    return "market";
+  }
+  return "general";
+}
+
+function domainNeedsRag(domain: CortexDomain): boolean {
+  return domain === "medicine" || domain === "agriculture" || domain === "market";
+}
+
 function getStyle(req: Request): "concise" | "balanced" | "detailed" {
   const style = String(req.body?.style || req.body?.preferences?.verbosity || "balanced").toLowerCase();
   if (style === "concise" || style === "detailed") return style;
@@ -381,13 +413,57 @@ export async function handleAIInference(req: Request, res: Response) {
     const memoryHints = retrieveMemoryHints(String(input || ""));
     const researchTool = toolOutputs.find((t) => t.name === "research" && t.success);
     const mathTool = toolOutputs.find((t) => t.name === "math" && t.success);
+    const domain = detectCortexDomain(String(input || ""));
+    const cortexMode =
+      style === "concise" ? "fast" : style === "detailed" ? "deep_research" : "step_by_step";
 
     let assistant = "";
     if (researchTool?.output?.summary) {
       assistant = String(researchTool.output.summary);
     } else if (mathTool?.output?.value !== undefined) {
       assistant = `✅ **Math Result**\n\n**${mathTool.output.value}**`;
-    } else {
+    } else if (domainNeedsRag(domain)) {
+      try {
+        const ragResp = await axios.post(`${mlUrl}/rag/answer`, {
+          question: String(input || ""),
+          domain,
+          top_k: style === "detailed" ? 8 : 5,
+          mode: style === "concise" ? "concise" : "balanced",
+          require_citations: true,
+        });
+        const ragData = ragResp?.data || {};
+        const ragAnswer = String(ragData?.answer || "").trim();
+        const ragCitations = Array.isArray(ragData?.citations) ? ragData.citations : [];
+        if (ragAnswer) {
+          assistant = ragAnswer;
+          if (ragCitations.length > 0) {
+            assistant += `\n\nSources:\n${ragCitations
+              .slice(0, 5)
+              .map((c: any, i: number) => `${i + 1}. ${String(c?.title || c?.url || "source")} ${c?.url ? `(${c.url})` : ""}`)
+              .join("\n")}`;
+          }
+        }
+      } catch {
+        assistant = "";
+      }
+    } else if (domain !== "general") {
+      try {
+        const cortexResp = await axios.post(`${mlUrl}/intelligence/ask`, {
+          question: String(input || ""),
+          mode: cortexMode,
+          payload: req.body?.payload || {},
+        });
+        const data = cortexResp?.data || {};
+        const cortexAnswer = String(data?.final || data?.answer?.final_answer || data?.answer?.result || "").trim();
+        if (cortexAnswer) {
+          assistant = cortexAnswer;
+        }
+      } catch {
+        assistant = "";
+      }
+    }
+
+    if (!assistant) {
       const llmText = await callInstructionModel(String(input || ""), memoryHints, style);
       assistant = String(
         llmText ||

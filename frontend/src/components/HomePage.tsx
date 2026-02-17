@@ -33,6 +33,49 @@ interface WindowShellProps {
   modal?: boolean;
 }
 
+class PanelErrorBoundary extends React.Component<
+  { title: string; children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { title: string; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || "Unknown render error" };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`[NeuroEdge] ${this.props.title} render failed`, error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: "1rem", color: "#e2e8f0" }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>{this.props.title} crashed</div>
+          <div style={{ marginBottom: 10, color: "#fca5a5" }}>{this.state.message}</div>
+          <button
+            style={{
+              border: "1px solid rgba(148,163,184,0.45)",
+              background: "rgba(15,23,42,0.85)",
+              color: "#e2e8f0",
+              borderRadius: 10,
+              padding: "0.42rem 0.75rem",
+              cursor: "pointer",
+            }}
+            onClick={() => this.setState({ hasError: false, message: "" })}
+          >
+            Retry Panel
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const WindowShell: React.FC<WindowShellProps> = ({ title, children, onClose, modal = false }) => {
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -276,7 +319,9 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
             )}
             {activeView === "dashboard" && (
               <WindowShell title="Dashboard" onClose={() => setActiveView("chat")}>
-                <Dashboard />
+                <PanelErrorBoundary title="Dashboard">
+                  <Dashboard />
+                </PanelErrorBoundary>
               </WindowShell>
             )}
             {activeView === "settings" && (

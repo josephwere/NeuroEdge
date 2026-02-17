@@ -100,6 +100,10 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const apiKey = getApiKey(req);
   const claims = bearer ? verifyJwt(bearer) : null;
   const apiKeyValid = !!sharedApiKey && !!apiKey && apiKey === sharedApiKey;
+  const headerRole = String(req.header("x-user-role") || "").trim().toLowerCase();
+  const headerEmail = String(req.header("x-user-email") || "").trim().toLowerCase();
+  const headerName = String(req.header("x-user-name") || "").trim();
+  const headerDeviceId = String(req.header("x-device-id") || "").trim();
 
   if (!claims && !apiKeyValid && authRequired) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -113,12 +117,22 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const scopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : [];
   const requestedOrg = req.header("x-org-id") || undefined;
   const requestedWorkspace = req.header("x-workspace-id") || undefined;
+  const mergedRaw = {
+    ...(claims || {}),
+    role: (claims?.role as string | undefined) || headerRole || undefined,
+    email: (claims?.email as string | undefined) || headerEmail || undefined,
+    name: (claims?.name as string | undefined) || headerName || undefined,
+  };
   req.auth = {
-    sub: (claims?.sub as string) || (apiKeyValid ? "service-api-key" : "anonymous"),
+    sub:
+      (claims?.sub as string) ||
+      (headerEmail ? `user:${headerEmail}` : "") ||
+      (apiKeyValid ? "service-api-key" : "anonymous"),
     orgId: (claims?.org_id as string) || requestedOrg || defaultOrgId,
     workspaceId: (claims?.workspace_id as string) || requestedWorkspace || defaultWorkspaceId,
+    deviceId: headerDeviceId || undefined,
     scopes: scopes.length > 0 ? scopes : [],
-    raw: claims || undefined,
+    raw: mergedRaw,
   };
 
   next();

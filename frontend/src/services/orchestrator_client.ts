@@ -355,6 +355,10 @@ export class OrchestratorClient {
       "x-org-id": auth.orgId,
       "x-workspace-id": auth.workspaceId,
     };
+    if (auth.userEmail) headers["x-user-email"] = auth.userEmail;
+    if (auth.userName) headers["x-user-name"] = auth.userName;
+    if (auth.userRole) headers["x-user-role"] = auth.userRole;
+    if (auth.deviceId) headers["x-device-id"] = auth.deviceId;
     if (auth.token) {
       headers.Authorization = `Bearer ${auth.token}`;
     }
@@ -382,6 +386,10 @@ export class OrchestratorClient {
     apiKey: string;
     orgId: string;
     workspaceId: string;
+    userEmail: string;
+    userName: string;
+    userRole: string;
+    deviceId: string;
   } {
     const envToken = String((import.meta.env.VITE_NEUROEDGE_JWT as string) || "").trim();
     const envApiKey = String((import.meta.env.VITE_NEUROEDGE_API_KEY as string) || "").trim();
@@ -392,13 +400,25 @@ export class OrchestratorClient {
     let sessionToken = "";
     let orgId = "";
     let workspaceId = "";
+    let userEmail = "";
+    let userName = "";
+    let userRole = "";
+    let deviceId = "";
     try {
+      deviceId = localStorage.getItem("neuroedge_device_id") || "";
+      if (!deviceId) {
+        deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem("neuroedge_device_id", deviceId);
+      }
       const rawUser = localStorage.getItem("neuroedge_user");
       if (rawUser) {
         const parsed = JSON.parse(rawUser);
         userToken = String(parsed?.token || "");
         orgId = String(parsed?.orgId || "");
         workspaceId = String(parsed?.workspaceId || "");
+        userEmail = String(parsed?.email || "");
+        userName = String(parsed?.name || "");
+        userRole = String(parsed?.role || "");
       }
       const rawSession = localStorage.getItem("neuroedge_session");
       if (rawSession) {
@@ -406,6 +426,9 @@ export class OrchestratorClient {
         sessionToken = String(parsed?.token || "");
         orgId = orgId || String(parsed?.orgId || "");
         workspaceId = workspaceId || String(parsed?.workspaceId || "");
+        userEmail = userEmail || String(parsed?.email || "");
+        userName = userName || String(parsed?.name || "");
+        userRole = userRole || String(parsed?.role || "");
       }
     } catch {
       // Ignore malformed local storage values.
@@ -417,6 +440,10 @@ export class OrchestratorClient {
       apiKey: envApiKey,
       orgId: orgId || envOrg || "personal",
       workspaceId: workspaceId || envWorkspace || "default",
+      userEmail,
+      userName,
+      userRole,
+      deviceId,
     };
   }
 

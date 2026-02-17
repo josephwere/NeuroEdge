@@ -401,6 +401,7 @@ const Dashboard: React.FC = () => {
   const [twinIncludeAnalyze, setTwinIncludeAnalyze] = useState(true);
   const [twinIncludeReport, setTwinIncludeReport] = useState(true);
   const [dashboardRole, setDashboardRole] = useState<DashboardRole>("user");
+  const [dashboardAssistantQuery, setDashboardAssistantQuery] = useState("");
 
   const twinUploadTier = useMemo<UploadTier>(() => {
     if (isFounderUser()) return "founder";
@@ -824,6 +825,13 @@ const Dashboard: React.FC = () => {
   const [trainingResearchQuery, setTrainingResearchQuery] = useState("");
   const [trainingUploadFiles, setTrainingUploadFiles] = useState<Array<{ name: string; type: string; textContent?: string; base64?: string }>>([]);
   const [trainingOverview, setTrainingOverview] = useState<any>(null);
+  const [ragDomain, setRagDomain] = useState<"medicine" | "agriculture" | "market" | "general">("general");
+  const [ragQuery, setRagQuery] = useState("");
+  const [bootstrapIncludeSecondary, setBootstrapIncludeSecondary] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [autoRefreshHourUtc, setAutoRefreshHourUtc] = useState("2");
+  const [autoRefreshMinuteUtc, setAutoRefreshMinuteUtc] = useState("10");
+  const [autoRefreshStaleHours, setAutoRefreshStaleHours] = useState("36");
   const [trainingJobMode, setTrainingJobMode] = useState<"incremental" | "full" | "eval_only">("incremental");
   const [trainingEvalSuite, setTrainingEvalSuite] = useState<"core" | "math" | "code" | "research" | "all">("core");
   const [endpointMethod, setEndpointMethod] = useState<"GET" | "POST">("GET");
@@ -968,7 +976,11 @@ const Dashboard: React.FC = () => {
   const [creatorJob, setCreatorJob] = useState<CreatorJobState | null>(null);
   const [creatorHistory, setCreatorHistory] = useState<any[]>([]);
   const [creatorBusy, setCreatorBusy] = useState(false);
-  const [dashboardAssistantQuery, setDashboardAssistantQuery] = useState("");
+  const [intelligenceQuestion, setIntelligenceQuestion] = useState("");
+  const [intelligenceMode, setIntelligenceMode] = useState("step_by_step");
+  const [intelligenceOutput, setIntelligenceOutput] = useState<any>(null);
+  const [intelligenceSvg, setIntelligenceSvg] = useState("");
+  const [intelligenceExportPath, setIntelligenceExportPath] = useState("");
   const [aegisOutput, setAegisOutput] = useState<any>(null);
   const [aegisMalwareInput, setAegisMalwareInput] = useState("");
   const [aegisPromptInput, setAegisPromptInput] = useState("");
@@ -1260,7 +1272,9 @@ const Dashboard: React.FC = () => {
 
   const callAction = async (path: string, body: any) => {
     try {
-      const data = await postJson(path, body);
+      const isGet = path.startsWith("GET:");
+      const target = isGet ? path.replace("GET:", "") : path;
+      const data = isGet ? await getJson(target) : await postJson(target, body);
       if (Array.isArray(data.users)) setUsers(data.users);
       if (Array.isArray(data.offers)) setOffers(data.offers);
       if (Array.isArray(data.plans)) setPlans(data.plans);
@@ -1382,6 +1396,23 @@ const Dashboard: React.FC = () => {
     refresh();
     const t = setInterval(refresh, 15000);
     return () => clearInterval(t);
+  }, [canAccessAdminOps]);
+
+  useEffect(() => {
+    if (!canAccessAdminOps) return;
+    (async () => {
+      try {
+        const data = await getJson("/admin/training/bootstrap-pack/auto-refresh/status");
+        if (data?.config) {
+          setAutoRefreshEnabled(Boolean(data.config.enabled));
+          setAutoRefreshHourUtc(String(data.config.hourUtc ?? "2"));
+          setAutoRefreshMinuteUtc(String(data.config.minuteUtc ?? "10"));
+          setAutoRefreshStaleHours(String(data.config.staleHours ?? "36"));
+        }
+      } catch {
+        // ignore if not authorized
+      }
+    })();
   }, [canAccessAdminOps]);
 
   const localMsgStats = useMemo(() => {
@@ -2027,6 +2058,142 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const ragBootstrapFromTraining = async () => {
+    const data = await callAction("/admin/training/rag/bootstrap", {
+      limit: 3000,
+      domain: ragDomain,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `RAG bootstrapped from training samples (${data.sentDocs || 0} docs).` });
+      setBackendOutput(data);
+    }
+  };
+
+  const ragIngestQuick = async () => {
+    const docs: Array<Record<string, any>> = [];
+    if (trainingText.trim()) {
+      docs.push({
+        title: trainingTitle.trim() || "manual_rag_note",
+        text: trainingText.trim(),
+        domain: ragDomain,
+        tags: parseTags(),
+        source: "dashboard_training_studio",
+      });
+    }
+    const urls = trainingUrls
+      .split(/\n+/)
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (docs.length === 0 && urls.length === 0) {
+      addNotification({ type: "warn", message: "Add training text or URLs first for RAG ingest." });
+      return;
+    }
+    const data = await callAction("/rag/ingest", {
+      docs,
+      urls,
+      domain: ragDomain,
+      tags: parseTags(),
+      source: "dashboard",
+      rebuild_index: true,
+    });
+    if (data?.ok) {
+      addNotification({ type: "success", message: `RAG ingest complete (${data.created_chunks || 0} chunks).` });
+      setBackendOutput(data);
+    }
+  };
+
+  const ragAsk = async () => {
+    const q = ragQuery.trim() || trainingResearchQuery.trim();
+    if (!q) {
+      addNotification({ type: "warn", message: "Enter a RAG question first." });
+      return;
+    }
+    const data = await callAction("/rag/answer", {
+      question: q,
+      domain: ragDomain,
+      top_k: 6,
+      mode: "balanced",
+      require_citations: true,
+    });
+    if (data?.ok) {
+      addNotification({ type: "success", message: `RAG answer ready (${data.evidence_count || 0} evidence chunks).` });
+      setBackendOutput(data);
+    }
+  };
+
+  const runTrustedBootstrapPack = async () => {
+    if (ragDomain === "general") {
+      addNotification({ type: "warn", message: "Select medicine, agriculture, or market domain for trusted bootstrap pack." });
+      return;
+    }
+    const data = await callAction("/admin/training/bootstrap-pack/run", {
+      domain: ragDomain,
+      includeSecondary: bootstrapIncludeSecondary,
+      limit: bootstrapIncludeSecondary ? 18 : 10,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Trusted seed pack ingested for ${ragDomain}.` });
+      setBackendOutput(data);
+    }
+  };
+
+  const runNightlyRefreshNow = async () => {
+    const data = await callAction("/admin/training/bootstrap-pack/auto-refresh/run", {
+      domain: ragDomain === "general" ? "" : ragDomain,
+      includeSecondary: bootstrapIncludeSecondary,
+      limit: bootstrapIncludeSecondary ? 18 : 12,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Nightly auto-refresh run executed." });
+      setBackendOutput(data);
+    }
+  };
+
+  const loadAutoRefreshStatus = async () => {
+    const data = await callAction("GET:/admin/training/bootstrap-pack/auto-refresh/status", {});
+    if (data?.success && data?.config) {
+      setAutoRefreshEnabled(Boolean(data.config.enabled));
+      setAutoRefreshHourUtc(String(data.config.hourUtc ?? "2"));
+      setAutoRefreshMinuteUtc(String(data.config.minuteUtc ?? "10"));
+      setAutoRefreshStaleHours(String(data.config.staleHours ?? "36"));
+      setBackendOutput(data);
+    }
+  };
+
+  const saveAutoRefreshConfig = async () => {
+    const hourUtc = Math.max(0, Math.min(23, Number(autoRefreshHourUtc || 2)));
+    const minuteUtc = Math.max(0, Math.min(59, Number(autoRefreshMinuteUtc || 10)));
+    const staleHours = Math.max(12, Number(autoRefreshStaleHours || 36));
+    const data = await callAction("/admin/training/bootstrap-pack/auto-refresh/config", {
+      enabled: autoRefreshEnabled,
+      hourUtc,
+      minuteUtc,
+      staleHours,
+    });
+    if (data?.success) {
+      setAutoRefreshHourUtc(String(hourUtc));
+      setAutoRefreshMinuteUtc(String(minuteUtc));
+      setAutoRefreshStaleHours(String(staleHours));
+      addNotification({ type: "success", message: "Auto-refresh config saved." });
+      setBackendOutput(data);
+    }
+  };
+
+  const autoRefreshLocalLabel = useMemo(() => {
+    const hourUtc = Math.max(0, Math.min(23, Number(autoRefreshHourUtc || 0)));
+    const minuteUtc = Math.max(0, Math.min(59, Number(autoRefreshMinuteUtc || 0)));
+    const utcDate = new Date(Date.UTC(2026, 0, 1, hourUtc, minuteUtc, 0, 0));
+    const local = utcDate.toLocaleString(undefined, {
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    const hh = String(hourUtc).padStart(2, "0");
+    const mm = String(minuteUtc).padStart(2, "0");
+    return `UTC ${hh}:${mm} → Local ${local}`;
+  }, [autoRefreshHourUtc, autoRefreshMinuteUtc]);
+
   const trainingStudioCard = (
     <Card title="NeuroEdge Training Studio (Founder/Admin)">
       <div style={{ display: "grid", gap: 8 }}>
@@ -2070,6 +2237,62 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, semanticChunking: !p.semanticChunking }))}>Chunking: {trainingOptions.semanticChunking ? "on" : "off"}</button>
           <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, crawlLinks: !p.crawlLinks }))}>Crawl Links: {trainingOptions.crawlLinks ? "on" : "off"}</button>
           <button style={chip} onClick={() => setTrainingOptions((p) => ({ ...p, citationMode: !p.citationMode }))}>Citation Mode: {trainingOptions.citationMode ? "on" : "off"}</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={ragDomain} onChange={(e) => setRagDomain(e.target.value as any)} style={input}>
+            <option value="general">RAG domain: general</option>
+            <option value="medicine">RAG domain: medicine</option>
+            <option value="agriculture">RAG domain: agriculture</option>
+            <option value="market">RAG domain: market</option>
+          </select>
+          <input value={ragQuery} onChange={(e) => setRagQuery(e.target.value)} placeholder="Ask indexed RAG knowledge..." style={{ ...input, minWidth: 260 }} />
+          <button style={primary} onClick={ragIngestQuick}>Ingest to RAG</button>
+          <button style={chip} onClick={ragBootstrapFromTraining}>Bootstrap RAG from Training</button>
+          <button style={chip} onClick={runTrustedBootstrapPack}>Trusted Seed Pack (One-Click)</button>
+          <button style={chip} onClick={() => setBootstrapIncludeSecondary((v) => !v)}>
+            Secondary Sources: {bootstrapIncludeSecondary ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={runNightlyRefreshNow}>Run Nightly Refresh Now</button>
+          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/auto-refresh/status").then((d) => setBackendOutput(d))}>
+            Auto-Refresh Status
+          </button>
+          <button style={chip} onClick={ragAsk}>Ask RAG</button>
+          <button style={chip} onClick={() => callAction("/rag/reindex", {}).then((d) => setBackendOutput(d))}>Reindex RAG</button>
+          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/list").then((d) => setBackendOutput(d))}>View Trusted Sources</button>
+          <button style={chip} onClick={() => callAction("GET:/rag/stats").then((d) => setBackendOutput(d))}>RAG Stats</button>
+        </div>
+
+        <div style={{ border: "1px solid rgba(148,163,184,0.2)", borderRadius: 12, padding: 10, display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 600 }}>Auto-Refresh Config</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button style={chip} onClick={() => setAutoRefreshEnabled((v) => !v)}>
+              Enabled: {autoRefreshEnabled ? "on" : "off"}
+            </button>
+            <input
+              value={autoRefreshHourUtc}
+              onChange={(e) => setAutoRefreshHourUtc(e.target.value.replace(/[^\d]/g, ""))}
+              placeholder="Hour UTC (0-23)"
+              style={{ ...input, width: 140 }}
+            />
+            <input
+              value={autoRefreshMinuteUtc}
+              onChange={(e) => setAutoRefreshMinuteUtc(e.target.value.replace(/[^\d]/g, ""))}
+              placeholder="Minute UTC (0-59)"
+              style={{ ...input, width: 150 }}
+            />
+            <input
+              value={autoRefreshStaleHours}
+              onChange={(e) => setAutoRefreshStaleHours(e.target.value.replace(/[^\d]/g, ""))}
+              placeholder="Stale hours (>=12)"
+              style={{ ...input, width: 150 }}
+            />
+            <button style={primary} onClick={saveAutoRefreshConfig}>Save Config</button>
+            <button style={chip} onClick={loadAutoRefreshStatus}>Load Status</button>
+          </div>
+          <div style={{ color: "rgba(148,163,184,0.95)", fontSize: 12 }}>
+            Timezone helper: {autoRefreshLocalLabel}
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -3135,6 +3358,177 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const cortexCoreCard = (
+    <Card title="CortexCore Intelligence Engine">
+      <div style={{ ...muted, marginBottom: 8 }}>
+        Math/Physics/Science/Code/Research solving, graph/equation visualization, and academic exports (PDF/Word/ZIP).
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={intelligenceQuestion}
+          onChange={(e) => setIntelligenceQuestion(e.target.value)}
+          placeholder="Ask CortexCore (e.g. differentiate x^2 + 2x, solve ohm law i=2 r=5, compare transformers vs rnns)"
+          style={input}
+        />
+        <select value={intelligenceMode} onChange={(e) => setIntelligenceMode(e.target.value)} style={input}>
+          <option value="step_by_step">step-by-step mode</option>
+          <option value="fast">fast answer mode</option>
+          <option value="deep_research">deep research mode</option>
+          <option value="beginner">beginner explanation</option>
+          <option value="advanced">advanced explanation</option>
+          <option value="exam">exam mode (concise)</option>
+        </select>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/ask", { question: intelligenceQuestion, mode: intelligenceMode, payload: {} });
+                setIntelligenceOutput(data);
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "Intelligence ask failed" });
+              }
+            }}
+          >
+            Ask Intelligence
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/platform", {
+                  question: intelligenceQuestion || "Build full platform architecture for websites, databases, APIs, cloud and security.",
+                  mode: intelligenceMode,
+                  payload: { node_types: ["laptop", "desktop", "mobile"] },
+                });
+                setIntelligenceOutput(data);
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "Platform intelligence failed" });
+              }
+            }}
+          >
+            Platform Intelligence
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/fullstack", {
+                  question: intelligenceQuestion || "NeuroEdge full stack internet + offline mesh architecture",
+                  mode: intelligenceMode,
+                  payload: { include_mesh: true },
+                });
+                setIntelligenceOutput(data);
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "Fullstack blueprint failed" });
+              }
+            }}
+          >
+            Build Fullstack + Mesh
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/visualize", {
+                  question: intelligenceQuestion,
+                  payload: { type: intelligenceQuestion.includes("=") ? "equation" : "graph", x_min: -10, x_max: 10 },
+                });
+                setIntelligenceOutput(data);
+                const svg = String(data?.visualization?.svg || "");
+                setIntelligenceSvg(svg);
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "Visualization failed" });
+              }
+            }}
+          >
+            Visualize Graph/Equation
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/export", {
+                  question: intelligenceQuestion,
+                  payload: {
+                    format: "pdf",
+                    title: "NeuroEdge Academic Report",
+                    content: JSON.stringify(intelligenceOutput || { question: intelligenceQuestion }, null, 2),
+                  },
+                });
+                setIntelligenceOutput(data);
+                setIntelligenceExportPath(String(data?.export?.path || ""));
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "PDF export failed" });
+              }
+            }}
+          >
+            Export PDF
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/export", {
+                  question: intelligenceQuestion,
+                  payload: {
+                    format: "word",
+                    title: "NeuroEdge Academic Report",
+                    content: JSON.stringify(intelligenceOutput || { question: intelligenceQuestion }, null, 2),
+                  },
+                });
+                setIntelligenceOutput(data);
+                setIntelligenceExportPath(String(data?.export?.path || ""));
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "Word export failed" });
+              }
+            }}
+          >
+            Export Word
+          </button>
+          <button
+            style={chip}
+            onClick={async () => {
+              try {
+                const data = await postJson("/intelligence/export", {
+                  question: intelligenceQuestion,
+                  payload: {
+                    format: "zip",
+                    title: "NeuroEdge Academic Report",
+                    content: JSON.stringify(intelligenceOutput || { question: intelligenceQuestion }, null, 2),
+                  },
+                });
+                setIntelligenceOutput(data);
+                setIntelligenceExportPath(String(data?.export?.path || ""));
+              } catch (err: any) {
+                addNotification({ type: "error", message: err?.message || "ZIP export failed" });
+              }
+            }}
+          >
+            Export ZIP
+          </button>
+          {intelligenceExportPath ? (
+            <button
+              style={primary}
+              onClick={() => window.open(`${apiBase}/intelligence/download?path=${encodeURIComponent(intelligenceExportPath)}`, "_blank")}
+            >
+              Download Export
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {intelligenceSvg ? (
+        <div
+          style={{ ...log, marginTop: 8 }}
+          dangerouslySetInnerHTML={{ __html: intelligenceSvg }}
+        />
+      ) : null}
+      <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", marginTop: 8 }}>
+        {intelligenceOutput ? JSON.stringify(intelligenceOutput, null, 2) : "No intelligence output yet."}
+      </pre>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
       {trainingStudioCard}
@@ -3143,6 +3537,7 @@ const Dashboard: React.FC = () => {
       {deviceProtectionCard}
       {aegisShieldCard}
       {creatorEngineCard}
+      {cortexCoreCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -3903,6 +4298,7 @@ const Dashboard: React.FC = () => {
       {deviceProtectionCard}
       {aegisShieldCard}
       {creatorEngineCard}
+      {cortexCoreCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -3998,6 +4394,7 @@ const Dashboard: React.FC = () => {
   const developerView = (
     <div style={grid}>
       {creatorEngineCard}
+      {cortexCoreCard}
       <Card title="API Keys">
         <div style={log}>Primary key: {maskKey(String(import.meta.env.VITE_NEUROEDGE_API_KEY || ""))}</div>
         <button style={chip} onClick={addDevApiKey}>+ Create Key</button>
@@ -4169,6 +4566,7 @@ const Dashboard: React.FC = () => {
   const userView = (
     <div style={grid}>
       {creatorEngineCard}
+      {cortexCoreCard}
       <Card title="Chat & Prompt Workspace">
         <Stat label="Chats" value={String(conversationStats.chats)} />
         <Stat label="Messages" value={String(conversationStats.messages)} />
@@ -4214,6 +4612,7 @@ const Dashboard: React.FC = () => {
       {deviceProtectionCard}
       {aegisShieldCard}
       {creatorEngineCard}
+      {cortexCoreCard}
       <Card title="Team Roles & Department Controls">
         {users.map((u) => (
           <div key={u.id} style={row}>
