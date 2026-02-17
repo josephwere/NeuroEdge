@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
 
 /* -------------------- */
@@ -46,6 +46,29 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { notifications, removeNotification } = useNotifications();
   const [showNotifications, setShowNotifications] = useState(false);
+  const [profileAvatar, setProfileAvatar] = useState<string>("");
+  const [profileName, setProfileName] = useState<string>(user.name);
+
+  useEffect(() => {
+    const readProfile = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_profile_settings");
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        setProfileAvatar(String(parsed?.avatarUrl || ""));
+        if (parsed?.name) setProfileName(String(parsed.name));
+      } catch {
+        // ignore profile parse errors
+      }
+    };
+    readProfile();
+    window.addEventListener("neuroedge:profileUpdated", readProfile as EventListener);
+    window.addEventListener("storage", readProfile);
+    return () => {
+      window.removeEventListener("neuroedge:profileUpdated", readProfile as EventListener);
+      window.removeEventListener("storage", readProfile);
+    };
+  }, [user.name]);
 
   return (
     <div style={sidebarStyle(collapsed)}>
@@ -64,9 +87,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ---------- Profile ---------- */}
       <div style={{ ...profileStyle, cursor: "pointer" }} onClick={onOpenProfile}>
-        <Avatar letter={user.name[0]} />
+        <Avatar letter={(profileName || user.name || "G")[0]} src={profileAvatar} />
         <div>
-          <div style={{ fontSize: "0.9rem" }}>{user.name}</div>
+          <div style={{ fontSize: "0.9rem" }}>{profileName || user.name}</div>
           <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
             {user.mode === "guest" && "Guest mode"}
             {user.mode === "local" && "Local session"}
@@ -158,8 +181,8 @@ const NavItem: React.FC<any> = ({ icon, label, collapsed, onClick, disabled, bad
   </div>
 );
 
-const Avatar: React.FC<{ letter: string }> = ({ letter }) => (
-  <div style={avatarStyle}>{letter.toUpperCase()}</div>
+const Avatar: React.FC<{ letter: string; src?: string }> = ({ letter, src }) => (
+  src ? <img src={src} alt="avatar" style={avatarImageStyle} /> : <div style={avatarStyle}>{letter.toUpperCase()}</div>
 );
 
 /* ================= STYLES ================= */
@@ -202,6 +225,14 @@ const avatarStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   fontWeight: "bold",
+};
+
+const avatarImageStyle: React.CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: "50%",
+  objectFit: "cover",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
 };
 
 const notificationDropdownStyle = (open: boolean, collapsed: boolean): React.CSSProperties => ({

@@ -13,6 +13,7 @@ interface ProfileSettingsState {
   name: string;
   email: string;
   mode: "guest" | "local" | "account";
+  avatarUrl: string;
 
   theme: ThemeMode;
 
@@ -22,6 +23,10 @@ interface ProfileSettingsState {
 
   memoryEnabled: boolean;
   localOnly: boolean;
+
+  authMethod: "guest" | "email" | "google" | "github" | "phone";
+  phone: string;
+  country: string;
 }
 
 /* -------------------- */
@@ -32,6 +37,7 @@ const DEFAULT_SETTINGS: ProfileSettingsState = {
   name: "Guest User",
   email: "",
   mode: "guest",
+  avatarUrl: "",
 
   theme: "system",
 
@@ -41,13 +47,21 @@ const DEFAULT_SETTINGS: ProfileSettingsState = {
 
   memoryEnabled: true,
   localOnly: true,
+  authMethod: "guest",
+  phone: "",
+  country: "global",
 };
 
 /* -------------------- */
 /* Component */
 /* -------------------- */
 
-const ProfileSettings: React.FC = () => {
+interface ProfileSettingsProps {
+  session?: { name?: string; email?: string; mode?: "guest" | "account"; token?: string };
+  onClose?: () => void;
+}
+
+const ProfileSettings: React.FC<ProfileSettingsProps> = ({ session, onClose }) => {
   const [settings, setSettings] =
     useState<ProfileSettingsState>(DEFAULT_SETTINGS);
 
@@ -56,8 +70,16 @@ const ProfileSettings: React.FC = () => {
     const saved = localStorage.getItem("neuroedge_profile_settings");
     if (saved) {
       setSettings(JSON.parse(saved));
+    } else if (session) {
+      setSettings((prev) => ({
+        ...prev,
+        name: session.name || prev.name,
+        email: session.email || prev.email,
+        mode: session.mode === "account" ? "account" : "guest",
+        authMethod: session.mode === "account" ? "email" : "guest",
+      }));
     }
-  }, []);
+  }, [session]);
 
   /* ---------------- Save ---------------- */
   useEffect(() => {
@@ -65,6 +87,7 @@ const ProfileSettings: React.FC = () => {
       "neuroedge_profile_settings",
       JSON.stringify(settings)
     );
+    window.dispatchEvent(new CustomEvent("neuroedge:profileUpdated"));
   }, [settings]);
 
   /* ---------------- Helpers ---------------- */
@@ -81,13 +104,52 @@ const ProfileSettings: React.FC = () => {
     alert("Local NeuroEdge memory cleared.");
   };
 
+  const handleAvatarUpload = (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      update("avatarUrl", result);
+    };
+    reader.readAsDataURL(file);
+  };
+
   /* ---------------- UI ---------------- */
   return (
     <div style={container}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
       <h2 style={title}>Profile & Settings</h2>
+        {onClose && <button style={closeButton} onClick={onClose}>Close</button>}
+      </div>
 
       {/* ---------- Profile ---------- */}
       <Section title="Profile">
+        <Row label="Avatar">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {settings.avatarUrl ? (
+              <img src={settings.avatarUrl} alt="Avatar" style={avatarPreview} />
+            ) : (
+              <div style={avatarFallback}>{(settings.name || "G")[0].toUpperCase()}</div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <label style={uploadButton}>
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={e => handleAvatarUpload(e.target.files?.[0] || null)}
+                />
+              </label>
+              <button style={secondaryButton} onClick={() => update("avatarUrl", "")}>Remove</button>
+            </div>
+          </div>
+        </Row>
+
         <Row label="Name">
           <input
             value={settings.name}
@@ -109,6 +171,43 @@ const ProfileSettings: React.FC = () => {
             {settings.mode.toUpperCase()}
           </span>
         </Row>
+
+        <Row label="Authentication">
+          <select
+            value={settings.authMethod}
+            onChange={e => update("authMethod", e.target.value as ProfileSettingsState["authMethod"])}
+            style={input}
+          >
+            <option value="guest">Guest (free, no login)</option>
+            <option value="email">Email</option>
+            <option value="google">Google</option>
+            <option value="github">GitHub</option>
+            <option value="phone">Phone (all countries)</option>
+          </select>
+        </Row>
+        {settings.authMethod === "phone" && (
+          <>
+            <Row label="Phone (E.164)">
+              <input
+                value={settings.phone}
+                onChange={e => update("phone", e.target.value)}
+                style={input}
+                placeholder="+2567..."
+              />
+            </Row>
+            <Row label="Country / Region">
+              <input
+                value={settings.country}
+                onChange={e => update("country", e.target.value)}
+                style={input}
+                placeholder="Uganda / US / Global"
+              />
+            </Row>
+          </>
+        )}
+        <p style={warning}>
+          NeuroEdge remains free to use in Guest mode without login, similar to ChatGPT guest access.
+        </p>
       </Section>
 
       {/* ---------- Appearance ---------- */}
@@ -295,4 +394,53 @@ const warning: React.CSSProperties = {
   marginTop: "0.5rem",
   fontSize: "0.75rem",
   color: "#94a3b8",
+};
+
+const closeButton: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.8)",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+};
+
+const avatarPreview: React.CSSProperties = {
+  width: 56,
+  height: 56,
+  borderRadius: "50%",
+  objectFit: "cover",
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+};
+
+const avatarFallback: React.CSSProperties = {
+  width: 56,
+  height: 56,
+  borderRadius: "50%",
+  background: "#2563eb",
+  color: "#fff",
+  fontWeight: 700,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const uploadButton: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.8)",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+  fontSize: "0.82rem",
+};
+
+const secondaryButton: React.CSSProperties = {
+  border: "1px solid rgba(148, 163, 184, 0.3)",
+  background: "rgba(15, 23, 42, 0.8)",
+  color: "#e2e8f0",
+  borderRadius: 8,
+  padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+  fontSize: "0.82rem",
 };
