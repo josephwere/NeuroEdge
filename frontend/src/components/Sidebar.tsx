@@ -75,30 +75,30 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div style={sidebarStyle(collapsed)}>
-      {!collapsed && (
-        <>
       {/* ---------- Header ---------- */}
       <div style={headerStyle(collapsed)}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
           <img src="/logo.png" alt="NeuroEdge" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
-          <strong style={{ fontSize: "1.1rem" }}>NeuroEdge</strong>
+          {!collapsed && <strong style={{ fontSize: "1.1rem" }}>NeuroEdge</strong>}
         </div>
         <button onClick={onToggle} style={iconButton}>
-          ⬅️
+          {collapsed ? "➡️" : "⬅️"}
         </button>
       </div>
 
       {/* ---------- Profile ---------- */}
-      <div style={{ ...profileStyle, cursor: "pointer", position: "relative" }} onClick={() => setShowProfileActions(v => !v)}>
+      <div style={{ ...profileStyle(collapsed), cursor: "pointer", position: "relative" }} onClick={() => setShowProfileActions(v => !v)}>
         <Avatar letter={(profileName || user.name || "G")[0]} src={profileAvatar} />
-        <div>
-          <div style={{ fontSize: "0.9rem" }}>{profileName || user.name}</div>
-          <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
-            {user.mode === "guest" && "Guest mode"}
-            {user.mode === "local" && "Local session"}
-            {user.mode === "account" && "Signed in"}
+        {!collapsed && (
+          <div>
+            <div style={{ fontSize: "0.9rem" }}>{profileName || user.name}</div>
+            <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+              {user.mode === "guest" && "Guest mode"}
+              {user.mode === "local" && "Local session"}
+              {user.mode === "account" && "Signed in"}
+            </div>
           </div>
-        </div>
+        )}
         {!collapsed && <span style={{ marginLeft: "auto", opacity: 0.8 }}>▾</span>}
         <div style={profileMenuStyle(showProfileActions)}>
           <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onOpenProfile?.(); setShowProfileActions(false); }}>Profile</button>
@@ -125,7 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <NavItem
             icon="🔔"
             label="Notifications"
-            collapsed={false}
+            collapsed={collapsed}
             badge={notifications.length}
             onClick={() => {
               setShowNotifications(v => !v);
@@ -152,16 +152,14 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <NavItem icon="✅" label="Approvals" collapsed={false} badge={pendingApprovals} onClick={() => onNavigate("history")} />
+        <NavItem icon="✅" label="Approvals" collapsed={collapsed} badge={pendingApprovals} onClick={() => onNavigate("history")} />
       </div>
 
       {/* ---------- Quick Actions ---------- */}
       <div style={quickActions}>
-        <button style={primaryAction} onClick={onNewChat}>➕ New Chat</button>
-        <button style={secondaryAction} onClick={onLogin}>🔐 Login / Get Started</button>
+        <button style={primaryAction(collapsed)} onClick={onNewChat}>{collapsed ? "➕" : "➕ New Chat"}</button>
+        {!collapsed && <button style={secondaryAction} onClick={onLogin}>🔐 Login / Get Started</button>}
       </div>
-        </>
-      )}
     </div>
   );
 };
@@ -200,8 +198,8 @@ const Avatar: React.FC<{ letter: string; src?: string }> = ({ letter, src }) => 
 /* ================= STYLES ================= */
 
 const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
-  width: collapsed ? "0px" : "260px",
-  minWidth: collapsed ? "0px" : "260px",
+  width: collapsed ? "72px" : "260px",
+  minWidth: collapsed ? "72px" : "260px",
   flexShrink: 0,
   background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
   color: "#e2e8f0",
@@ -210,7 +208,7 @@ const sidebarStyle = (collapsed: boolean): React.CSSProperties => ({
   flexDirection: "column",
   overflowY: "auto",
   transition: "width 0.25s ease",
-  borderRight: collapsed ? "none" : "1px solid rgba(148, 163, 184, 0.2)",
+  borderRight: "1px solid rgba(148, 163, 184, 0.2)",
 });
 
 const headerStyle = (collapsed: boolean): React.CSSProperties => ({
@@ -221,12 +219,13 @@ const headerStyle = (collapsed: boolean): React.CSSProperties => ({
   borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
 });
 
-const profileStyle: React.CSSProperties = {
+const profileStyle = (collapsed: boolean): React.CSSProperties => ({
   padding: "1rem",
   display: "flex",
-  gap: "0.75rem",
+  gap: collapsed ? 0 : "0.75rem",
+  justifyContent: collapsed ? "center" : "flex-start",
   borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
-};
+});
 
 const avatarStyle: React.CSSProperties = {
   width: 36,
@@ -249,9 +248,9 @@ const avatarImageStyle: React.CSSProperties = {
 
 const notificationDropdownStyle = (open: boolean, collapsed: boolean): React.CSSProperties => ({
   position: "absolute",
-  right: 0,
+  right: collapsed ? -168 : 0,
   top: "42px",
-  width: collapsed ? 0 : 240,
+  width: 240,
   maxHeight: open ? 280 : 0,
   overflow: "hidden",
   background: "rgba(15, 23, 42, 0.8)",
@@ -331,7 +330,7 @@ const iconButton: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const primaryAction: React.CSSProperties = {
+const primaryAction = (collapsed: boolean): React.CSSProperties => ({
   width: "100%",
   padding: "0.6rem",
   background: "#3a3aff",
@@ -342,7 +341,8 @@ const primaryAction: React.CSSProperties = {
   cursor: "pointer",
   marginBottom: "0.5rem",
   transition: "all 0.25s ease",
-};
+  fontSize: collapsed ? "1rem" : "0.82rem",
+});
 
 const secondaryAction: React.CSSProperties = {
   ...primaryAction,

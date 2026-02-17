@@ -70,6 +70,9 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const sendRunRef = useRef(0);
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -206,8 +209,11 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
   // --- Send Command ---
   const send = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isSending) return;
     setSuggestions([]);
+    setIsSending(true);
+    const runId = Date.now();
+    sendRunRef.current = runId;
     const context = chatContext.getAll();
     const commandId = Date.now().toString();
 
@@ -220,6 +226,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
     try {
       const res = await orchestrator.execute({ command: userInput, context });
+      if (runId !== sendRunRef.current) return;
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
       if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
@@ -247,8 +254,17 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       if (res.approvals) res.approvals.forEach(addApproval);
 
     } catch (err: any) {
+      if (runId !== sendRunRef.current) return;
       addMessage(`❌ Error: ${err.message || err}`, "error");
+    } finally {
+      if (runId === sendRunRef.current) setIsSending(false);
     }
+  };
+
+  const cancelSend = () => {
+    sendRunRef.current = Date.now() + 1;
+    setIsSending(false);
+    addMessage("⛔ Request canceled by user.", "warn");
   };
 
   // --- Helpers ---
@@ -319,6 +335,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     if (!files || files.length === 0) return;
     const names = Array.from(files).map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(", ");
     setInput((prev) => `${prev}${prev ? "\n" : ""}[Attached] ${names}`);
+  };
+
+  const onDropFiles = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    onUploadFiles(e.dataTransfer?.files || null);
   };
 
   const toggleVoiceInput = () => {
@@ -584,7 +607,22 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             </InfiniteScroll>
           </div>
 
-          <div style={{ position: "relative", display: "flex" }}>
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              borderTop: "1px solid rgba(148,163,184,0.2)",
+              padding: 8,
+              gap: 6,
+              background: dragActive ? "rgba(56,189,248,0.08)" : "transparent",
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={onDropFiles}
+          >
             <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
             <input
               ref={fileInputRef}
@@ -627,10 +665,27 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             >
               {isListening ? "◼" : "🎙"}
             </button>
-            <button onClick={send} style={{ padding: "10px", background: "#2563eb", border: "none", color: "#fff", borderRadius: 8, marginLeft: 6 }}>▶</button>
+            <button
+              onClick={isSending ? cancelSend : send}
+              style={{
+                width: 38,
+                height: 38,
+                background: isSending ? "#dc2626" : "#2563eb",
+                border: "none",
+                color: "#fff",
+                borderRadius: 999,
+                marginLeft: 6,
+                fontWeight: 700,
+                animation: isSending ? "neSpin 1s linear infinite" : "none",
+              }}
+              title={isSending ? "Cancel" : "Send"}
+            >
+              {isSending ? "■" : "↑"}
+            </button>
           </div>
         </>
       )}
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

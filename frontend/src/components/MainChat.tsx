@@ -68,6 +68,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const sendRunRef = useRef(0);
 
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
@@ -213,7 +216,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   }, [orchestrator]);
 
   // --- Send message / command ---
-  const executeWithContext = async (userInput: string, contextMessages: Message[]) => {
+  const executeWithContext = async (userInput: string, contextMessages: Message[], runId: number) => {
     try {
       const currentContext = contextMessages.map((m) => ({
         role: m.role,
@@ -223,6 +226,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         command: userInput,
         context: currentContext.slice(-25),
       });
+      if (runId !== sendRunRef.current) return;
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
       if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
@@ -247,13 +251,19 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         });
       }
     } catch (err: any) {
+      if (runId !== sendRunRef.current) return;
       addMessage(`❌ Error: ${err.message || err}`, "error");
+    } finally {
+      if (runId === sendRunRef.current) setIsSending(false);
     }
   };
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isSending) return;
     setSuggestions([]);
+    setIsSending(true);
+    const runId = Date.now();
+    sendRunRef.current = runId;
 
     const id = Date.now().toString();
     const userMsg: Message = { id, role: "user", text: input, type: "info" };
@@ -276,7 +286,13 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     const userInput = input;
     setInput("");
 
-    await executeWithContext(userInput, [...messages, userMsg]);
+    await executeWithContext(userInput, [...messages, userMsg], runId);
+  };
+
+  const cancelSend = () => {
+    sendRunRef.current = Date.now() + 1;
+    setIsSending(false);
+    addMessage("⛔ Request canceled by user.", "warn");
   };
 
   // --- Helpers ---
@@ -423,6 +439,13 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     if (!files || files.length === 0) return;
     const names = Array.from(files).map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(", ");
     setInput((prev) => `${prev}${prev ? "\n" : ""}[Attached] ${names}`);
+  };
+
+  const onDropFiles = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    onUploadFiles(e.dataTransfer?.files || null);
   };
 
   const toggleVoiceInput = () => {
@@ -884,84 +907,109 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           position: "relative",
           display: "flex",
           alignItems: "center",
-          gap: "0.45rem",
+          justifyContent: "center",
           padding: "0.6rem",
           background: "rgba(15, 23, 42, 0.9)",
           borderTop: "1px solid rgba(148, 163, 184, 0.2)",
         }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={onDropFiles}
       >
-        <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="*/*"
-          style={{ display: "none" }}
-          onChange={(e) => onUploadFiles(e.target.files)}
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            padding: "0.55rem 0.7rem",
-            background: "#0ea5e9",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontWeight: 700,
-          }}
-          title="Upload files"
-        >
-          ＋
-        </button>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === "Enter") handleSend();
-            if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
-            if (e.key === "Escape") setSuggestions([]);
-          }}
-          placeholder="Ask, debug, code, research…"
-          style={{
-            flex: 1,
-            padding: "0.6rem 0.75rem",
-            background: "rgba(15, 23, 42, 0.6)",
-            color: "#e2e8f0",
-            border: "1px solid rgba(148, 163, 184, 0.3)",
-            borderRadius: 8,
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={toggleVoiceInput}
-          style={{
-            padding: "0.55rem 0.7rem",
-            background: isListening ? "#f59e0b" : "#475569",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontWeight: 700,
-          }}
-          title={isListening ? "Stop voice input" : "Start voice input"}
-        >
-          {isListening ? "◼" : "🎙"}
-        </button>
-        <button
-          onClick={handleSend}
-          style={{
-            padding: "0.55rem 1rem",
-            background: "#2563eb",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-        >
-          Send
-        </button>
+        <div style={{
+          width: "min(920px, 100%)",
+          border: dragActive ? "1px solid #38bdf8" : "1px solid rgba(148,163,184,0.3)",
+          borderRadius: 14,
+          background: "rgba(15,23,42,0.78)",
+          padding: "0.45rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.45rem",
+          boxShadow: dragActive ? "0 0 0 2px rgba(56,189,248,0.25)" : "none",
+        }}>
+          <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="*/*"
+            style={{ display: "none" }}
+            onChange={(e) => onUploadFiles(e.target.files)}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: "0.55rem 0.7rem",
+              background: "#0ea5e9",
+              color: "#fff",
+              border: "none",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+            title="Upload files (or drag and drop)"
+          >
+            +
+          </button>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") handleSend();
+              if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
+              if (e.key === "Escape") setSuggestions([]);
+            }}
+            placeholder="Message NeuroEdge..."
+            style={{
+              flex: 1,
+              padding: "0.64rem 0.75rem",
+              background: "rgba(15, 23, 42, 0.4)",
+              color: "#e2e8f0",
+              border: "none",
+              borderRadius: 10,
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={toggleVoiceInput}
+            style={{
+              padding: "0.55rem 0.7rem",
+              background: isListening ? "#f59e0b" : "#475569",
+              color: "#fff",
+              border: "none",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+            title={isListening ? "Stop voice input" : "Start voice input"}
+          >
+            {isListening ? "◼" : "🎙"}
+          </button>
+          <button
+            onClick={isSending ? cancelSend : handleSend}
+            style={{
+              width: 38,
+              height: 38,
+              background: isSending ? "#dc2626" : "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 999,
+              cursor: "pointer",
+              fontWeight: 700,
+              display: "grid",
+              placeItems: "center",
+              animation: isSending ? "neSpin 1s linear infinite" : "none",
+            }}
+            title={isSending ? "Cancel" : "Send"}
+          >
+            {isSending ? "■" : "↑"}
+          </button>
+        </div>
       </div>
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
