@@ -65,6 +65,19 @@ interface PaymentProfile {
   saveForAutoRenew: boolean;
 }
 
+interface CryptoRewardsConfig {
+  enabled: boolean;
+  chain: string;
+  token: string;
+  founderWalletAddress: string;
+  rewardPerComputeUnit: string;
+  minPayout: string;
+  payoutSchedule: "hourly" | "daily" | "weekly" | "monthly";
+  donorBonusEnabled: boolean;
+  treasuryAllocationPct: number;
+  notes: string;
+}
+
 interface ModelControl {
   model: string;
   temperature: number;
@@ -238,6 +251,38 @@ const Dashboard: React.FC = () => {
   });
 
   const [paymentDraftCard, setPaymentDraftCard] = useState("");
+  const [cryptoRewards, setCryptoRewards] = useState<CryptoRewardsConfig>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_dashboard_crypto_rewards_v1");
+      return raw
+        ? JSON.parse(raw)
+        : {
+            enabled: false,
+            chain: "NeuroChain",
+            token: "WDC",
+            founderWalletAddress: "",
+            rewardPerComputeUnit: "0.0001",
+            minPayout: "1.0",
+            payoutSchedule: "weekly",
+            donorBonusEnabled: true,
+            treasuryAllocationPct: 10,
+            notes: "Compute-donation rewards config",
+          };
+    } catch {
+      return {
+        enabled: false,
+        chain: "NeuroChain",
+        token: "WDC",
+        founderWalletAddress: "",
+        rewardPerComputeUnit: "0.0001",
+        minPayout: "1.0",
+        payoutSchedule: "weekly",
+        donorBonusEnabled: true,
+        treasuryAllocationPct: 10,
+        notes: "Compute-donation rewards config",
+      };
+    }
+  });
   const [modelControl, setModelControl] = useState<ModelControl>(() => {
     try {
       const raw = localStorage.getItem("neuroedge_model_control_v2");
@@ -398,6 +443,9 @@ const Dashboard: React.FC = () => {
     localStorage.setItem("neuroedge_dashboard_payment_v1", JSON.stringify(payment));
   }, [payment]);
   useEffect(() => {
+    localStorage.setItem("neuroedge_dashboard_crypto_rewards_v1", JSON.stringify(cryptoRewards));
+  }, [cryptoRewards]);
+  useEffect(() => {
     localStorage.setItem("neuroedge_feature_flags_v2", JSON.stringify(featureFlags));
   }, [featureFlags]);
   useEffect(() => {
@@ -516,6 +564,7 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.offers)) setOffers(remote.offers);
     if (Array.isArray(remote.plans)) setPlans(remote.plans);
     if (remote.payment && typeof remote.payment === "object") setPayment(remote.payment);
+    if (remote.cryptoRewards && typeof remote.cryptoRewards === "object") setCryptoRewards(remote.cryptoRewards);
     if (remote.modelControl && typeof remote.modelControl === "object") setModelControl(remote.modelControl);
     if (remote.featureFlags && typeof remote.featureFlags === "object") setFeatureFlags(remote.featureFlags);
     if (Array.isArray(remote.supportTickets)) setSupportTickets(remote.supportTickets);
@@ -534,6 +583,7 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.offers)) setOffers(data.offers);
       if (Array.isArray(data.plans)) setPlans(data.plans);
       if (data.payment) setPayment(data.payment);
+      if (data.cryptoRewards) setCryptoRewards(data.cryptoRewards);
       if (data.modelControl) setModelControl(data.modelControl);
       if (data.featureFlags) setFeatureFlags(data.featureFlags);
       if (Array.isArray(data.supportTickets)) setSupportTickets(data.supportTickets);
@@ -761,6 +811,11 @@ const Dashboard: React.FC = () => {
   const saveModelControl = async () => {
     await callAction("/admin/dashboard/model/save", { modelControl });
     addNotification({ type: "success", message: "Model control saved." });
+  };
+
+  const saveCryptoRewards = async () => {
+    await callAction("/admin/dashboard/crypto/save", { cryptoRewards });
+    addNotification({ type: "success", message: "Crypto rewards configuration saved." });
   };
 
   const runTwinAction = async (path: string, body: any = {}) => {
@@ -1111,6 +1166,89 @@ const Dashboard: React.FC = () => {
         <input placeholder="Tax ID (optional)" value={payment.taxId} onChange={(e) => setPayment((p) => ({ ...p, taxId: e.target.value }))} style={input} />
         <div style={muted}>Stored card: {payment.cardNumberMasked || "not set"}</div>
         <button style={primary} onClick={savePaymentDetails}>Save Payment Details</button>
+      </Card>
+      <Card title="Compute Donation Rewards (Crypto Wallet)">
+        <div style={row}>
+          <span>Enable rewards</span>
+          <button
+            style={chip}
+            onClick={() => setCryptoRewards((p) => ({ ...p, enabled: !p.enabled }))}
+          >
+            {cryptoRewards.enabled ? "Enabled" : "Disabled"}
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={cryptoRewards.chain}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, chain: e.target.value }))}
+            placeholder="Chain"
+            style={input}
+          />
+          <input
+            value={cryptoRewards.token}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, token: e.target.value }))}
+            placeholder="Token"
+            style={input}
+          />
+        </div>
+        <input
+          value={cryptoRewards.founderWalletAddress}
+          onChange={(e) => setCryptoRewards((p) => ({ ...p, founderWalletAddress: e.target.value }))}
+          placeholder="Founder wallet address"
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={cryptoRewards.rewardPerComputeUnit}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, rewardPerComputeUnit: e.target.value }))}
+            placeholder="Reward per compute unit"
+            style={input}
+          />
+          <input
+            value={cryptoRewards.minPayout}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, minPayout: e.target.value }))}
+            placeholder="Minimum payout"
+            style={input}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            value={cryptoRewards.payoutSchedule}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, payoutSchedule: e.target.value as CryptoRewardsConfig["payoutSchedule"] }))}
+            style={input}
+          >
+            <option value="hourly">hourly</option>
+            <option value="daily">daily</option>
+            <option value="weekly">weekly</option>
+            <option value="monthly">monthly</option>
+          </select>
+          <input
+            type="number"
+            value={cryptoRewards.treasuryAllocationPct}
+            onChange={(e) => setCryptoRewards((p) => ({ ...p, treasuryAllocationPct: Number(e.target.value) || 0 }))}
+            placeholder="Treasury %"
+            style={input}
+          />
+        </div>
+        <div style={row}>
+          <span>Donor bonus</span>
+          <button
+            style={chip}
+            onClick={() => setCryptoRewards((p) => ({ ...p, donorBonusEnabled: !p.donorBonusEnabled }))}
+          >
+            {cryptoRewards.donorBonusEnabled ? "Enabled" : "Disabled"}
+          </button>
+        </div>
+        <textarea
+          value={cryptoRewards.notes}
+          onChange={(e) => setCryptoRewards((p) => ({ ...p, notes: e.target.value }))}
+          placeholder="Notes and payout policy"
+          style={{ ...input, minHeight: 80 }}
+        />
+        <div style={muted}>
+          Ready state: stores compute donation reward policy and payout wallet config for transparent reward accounting.
+        </div>
+        <button style={primary} onClick={saveCryptoRewards}>Save Crypto Rewards</button>
       </Card>
       <Card title="Role Governance">
         {users.map((u) => (

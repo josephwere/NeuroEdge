@@ -268,6 +268,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     const outbound = brainstormMode && !lower.startsWith("/brainstorm")
       ? `/brainstorm ${trimmed}`
       : trimmed;
+    if (brainstormMode) setBrainstormMode(false);
 
     try {
       const res = await orchestrator.execute({ command: outbound, context });
@@ -308,6 +309,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
 
   const send = async () => {
     await sendText(input);
+  };
+
+  const startBrainstormChat = () => {
+    if (messages.length > 0) {
+      window.dispatchEvent(new CustomEvent("neuroedge:newChat"));
+    }
+    setBrainstormMode(true);
   };
 
   const cancelSend = () => {
@@ -718,22 +726,24 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             >
               ＋
             </button>
-            <button
-              onClick={() => setBrainstormMode((v) => !v)}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
-                border: "1px solid rgba(148,163,184,0.3)",
-                background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
-                color: "#e2e8f0",
-                cursor: "pointer",
-                fontSize: "0.85rem",
-              }}
-              title="Brainstorm mode"
-            >
-              🧠
-            </button>
+            {messages.length === 0 && (
+              <button
+                onClick={startBrainstormChat}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 8,
+                  border: "1px solid rgba(148,163,184,0.3)",
+                  background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
+                  color: "#e2e8f0",
+                  cursor: "pointer",
+                  fontSize: "0.85rem",
+                }}
+                title="Start brainstorm chat"
+              >
+                🧠
+              </button>
+            )}
             <div style={{ flex: 1, position: "relative" }}>
               <input
                 value={input}

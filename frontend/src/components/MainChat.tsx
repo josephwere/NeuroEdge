@@ -119,6 +119,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setPage(1);
     setInput("");
     syncContextFromMessages(logs);
+    if (logs.length > 0) setBrainstormMode(false);
   };
 
   useEffect(() => {
@@ -327,11 +328,21 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     const outbound = brainstormMode && !lower.startsWith("/brainstorm")
       ? `/brainstorm ${trimmed}`
       : trimmed;
+    if (brainstormMode) setBrainstormMode(false);
     await executeWithContext(outbound, [...messages, userMsg], runId);
   };
 
   const handleSend = async () => {
     await sendText(input);
+  };
+
+  const startBrainstormChat = () => {
+    const hasMessages = messages.length > 0;
+    if (hasMessages) {
+      window.dispatchEvent(new CustomEvent("neuroedge:newChat"));
+    }
+    setBrainstormMode(true);
+    setInput((prev) => (prev.trim() ? prev : ""));
   };
 
   const cancelSend = () => {
@@ -1036,22 +1047,24 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           >
             +
           </button>
-          <button
-            onClick={() => setBrainstormMode((v) => !v)}
-            style={{
-              padding: "0.46rem 0.62rem",
-              background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
-              color: "#e2e8f0",
-              border: "1px solid rgba(148,163,184,0.28)",
-              borderRadius: 10,
-              cursor: "pointer",
-              fontSize: "0.75rem",
-              fontWeight: 700,
-            }}
-            title="Brainstorm mode (sends to /brainstorm)"
-          >
-            🧠
-          </button>
+          {messages.length === 0 && (
+            <button
+              onClick={startBrainstormChat}
+              style={{
+                padding: "0.46rem 0.62rem",
+                background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
+                color: "#e2e8f0",
+                border: "1px solid rgba(148,163,184,0.28)",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontSize: "0.75rem",
+                fontWeight: 700,
+              }}
+              title="Start brainstorm chat"
+            >
+              🧠
+            </button>
+          )}
           <div style={{ flex: 1, position: "relative" }}>
             <input
               value={input}

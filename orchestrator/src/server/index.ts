@@ -131,6 +131,18 @@ function readDashboardSummary() {
       taxId: "",
       saveForAutoRenew: true,
     },
+    cryptoRewards: {
+      enabled: false,
+      chain: "NeuroChain",
+      token: "WDC",
+      founderWalletAddress: "",
+      rewardPerComputeUnit: "0.0001",
+      minPayout: "1.0",
+      payoutSchedule: "weekly",
+      donorBonusEnabled: true,
+      treasuryAllocationPct: 10,
+      notes: "Compute-donation rewards config",
+    },
     modelControl: {
       model: "neuroedge-13b-instruct",
       temperature: 0.3,
@@ -437,6 +449,17 @@ export function startServer(
     mergeDashboardSection("payment", payment);
     auditDashboardAction(req, "payment", "save", {});
     res.json({ success: true, payment });
+  });
+
+  app.post("/admin/dashboard/crypto/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const cryptoRewards = req.body?.cryptoRewards || {};
+    mergeDashboardSection("cryptoRewards", cryptoRewards);
+    auditDashboardAction(req, "crypto_rewards", "save", {
+      chain: String(cryptoRewards?.chain || ""),
+      token: String(cryptoRewards?.token || ""),
+      enabled: Boolean(cryptoRewards?.enabled),
+    });
+    res.json({ success: true, cryptoRewards });
   });
 
   app.post("/admin/dashboard/model/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder"]), (req: Request, res: Response) => {
