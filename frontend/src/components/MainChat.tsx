@@ -6,8 +6,6 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
 import {
   saveToCache,
-  getCache,
-  clearCache,
   updateCachedItemText,
   deleteCachedItem,
 } from "@/services/offlineCache";
@@ -16,6 +14,17 @@ import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { isFounderUser } from "@/services/founderAccess";
+import {
+  appendConversationMessage,
+  ConversationMessage,
+  ensureActiveConversation,
+  getConversation,
+  importLegacyCacheOnce,
+  setActiveConversation,
+  updateConversationMessage,
+  deleteConversationMessage,
+  createConversation,
+} from "@/services/conversationStore";
 
 interface Message {
   id: string;
@@ -42,6 +51,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     updateMessage: updateHistoryMessage,
     deleteMessage: deleteHistoryMessage,
   } = useChatHistory();
+  const [activeConversationId, setActiveConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [displayed, setDisplayed] = useState<Message[]>([]);
   const [page, setPage] = useState(0);
@@ -50,44 +60,73 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const longPressTimer = useRef<number | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
-  // --- Load cached messages ---
+  const syncContextFromMessages = (nextMessages: Message[]) => {
+    chatContext.clear();
+    nextMessages.forEach((m) => {
+      chatContext.add({
+        role: m.role,
+        content: m.text,
+      });
+    });
+  };
+
+  const loadConversation = (conversationId: string) => {
+    const conversation = getConversation(conversationId);
+    if (!conversation) return;
+    const logs: Message[] = conversation.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      text: m.text,
+      type: m.type,
+      timestamp: m.timestamp,
+      isCode: m.isCode,
+      collapsible: m.isCode,
+      collapsibleOpen: true,
+      codeLanguage: m.codeLanguage,
+    }));
+    setActiveConversationId(conversationId);
+    setMessages(logs);
+    setDisplayed(logs.slice(-PAGE_SIZE));
+    setPage(1);
+    setInput("");
+    syncContextFromMessages(logs);
+  };
+
   useEffect(() => {
-    const cached = getCache();
-    if (cached.length) {
-      const logs: Message[] = cached.map(c => ({
-        id: c.id,
-        role: c.payload.role || "assistant",
-        text: c.payload.text,
-        type: c.payload.type,
-        timestamp: c.timestamp,
-        isCode: c.payload.isCode,
-        collapsible: c.payload.isCode,
-        collapsibleOpen: true,
-        codeLanguage: c.payload.codeLanguage
-      }));
-      setMessages(logs);
-      setDisplayed(logs.slice(-PAGE_SIZE));
-      setPage(1);
-    }
+    importLegacyCacheOnce();
+    const active = ensureActiveConversation();
+    loadConversation(active.id);
   }, []);
 
   useEffect(() => {
     const clearForNewChat = () => {
-      setMessages([]);
-      setDisplayed([]);
-      setPage(0);
-      setInput("");
+      const thread = createConversation();
+      loadConversation(thread.id);
       setSuggestions([]);
-      chatContext.clear();
-      clearCache();
+    };
+    const openConversation = (evt: Event) => {
+      const id = (evt as CustomEvent).detail?.id as string | undefined;
+      if (!id) return;
+      setActiveConversation(id);
+      loadConversation(id);
     };
 
     window.addEventListener("neuroedge:newChat", clearForNewChat as EventListener);
+    window.addEventListener(
+      "neuroedge:openConversation",
+      openConversation as EventListener
+    );
     return () =>
-      window.removeEventListener(
-        "neuroedge:newChat",
-        clearForNewChat as EventListener
-      );
+      {
+        window.removeEventListener(
+          "neuroedge:newChat",
+          clearForNewChat as EventListener
+        );
+        window.removeEventListener(
+          "neuroedge:openConversation",
+          openConversation as EventListener
+        );
+      };
   }, []);
 
   // --- Infinite scroll ---
@@ -163,6 +202,15 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setDisplayed(d => [...d, userMsg]);
     chatContext.add({ role: "user", content: input });
     addHistoryMessage({ id, role: "user", text: input, type: "info" });
+    if (activeConversationId) {
+      appendConversationMessage(activeConversationId, {
+        id,
+        role: "user",
+        text: input,
+        type: "info",
+        timestamp: Date.now(),
+      });
+    }
 
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
 
@@ -170,7 +218,14 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setInput("");
 
     try {
-      const res = await orchestrator.execute({ command: userInput, context: chatContext.getAll() });
+      const currentContext = [...messages, userMsg].map((m) => ({
+        role: m.role,
+        content: m.text,
+      }));
+      const res = await orchestrator.execute({
+        command: userInput,
+        context: currentContext.slice(-25),
+      });
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
       if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
@@ -207,6 +262,18 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setDisplayed(d => [...d, msg]);
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "assistant", text, type, codeLanguage, isCode } });
     addHistoryMessage({ id, role: "assistant", text, type, isCode, codeLanguage });
+    if (activeConversationId) {
+      const threadMessage: ConversationMessage = {
+        id,
+        role: "assistant",
+        text,
+        type,
+        isCode,
+        codeLanguage,
+        timestamp: Date.now(),
+      };
+      appendConversationMessage(activeConversationId, threadMessage);
+    }
   };
 
   const speak = (text: string) => {
@@ -238,6 +305,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setDisplayed((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
     updateCachedItemText(id, clean);
     updateHistoryMessage(id, clean);
+    if (activeConversationId) {
+      updateConversationMessage(activeConversationId, id, clean);
+    }
   };
 
   const applyMessageDelete = (id: string) => {
@@ -245,6 +315,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setDisplayed((prev) => prev.filter((m) => m.id !== id));
     deleteCachedItem(id);
     deleteHistoryMessage(id);
+    if (activeConversationId) {
+      deleteConversationMessage(activeConversationId, id);
+    }
   };
 
   const promptMessageAction = (msg: Message) => {
@@ -469,6 +542,51 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   // --- Render ---
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", color: "#e2e8f0" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.6rem",
+          padding: "0.55rem 0.85rem",
+          borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+          background: "rgba(15, 23, 42, 0.66)",
+        }}
+      >
+        <div style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
+          Active Chat: <span style={{ color: "#e2e8f0" }}>{activeConversationId ? "Saved thread" : "Unsaved"}</span>
+        </div>
+        <div style={{ display: "flex", gap: "0.45rem" }}>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "my_chats" }))}
+            style={{
+              border: "1px solid rgba(148,163,184,0.35)",
+              background: "transparent",
+              color: "#e2e8f0",
+              borderRadius: 8,
+              padding: "0.28rem 0.55rem",
+              cursor: "pointer",
+              fontSize: "0.72rem",
+            }}
+          >
+            My Chats
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:newChat"))}
+            style={{
+              border: "none",
+              background: "#2563eb",
+              color: "#fff",
+              borderRadius: 8,
+              padding: "0.28rem 0.55rem",
+              cursor: "pointer",
+              fontSize: "0.72rem",
+            }}
+          >
+            New Chat
+          </button>
+        </div>
+      </div>
       <div
         id="chatScroll"
         style={{

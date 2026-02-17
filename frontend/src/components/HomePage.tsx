@@ -10,6 +10,8 @@ import CommandPalette from "@/components/CommandPalette";
 import ChatHistoryPanel from "@/components/ChatHistoryPanel";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import ExtensionsPanel from "@/components/ExtensionsPanel";
+import MyChatsPanel from "@/components/MyChatsPanel";
+import ProjectsPanel from "@/components/ProjectsPanel";
 import FounderAssistant from "@/components/FounderAssistant"; // Founder voice & alerts
 import TutorialGuide from "@/components/TutorialGuide";
 
@@ -73,7 +75,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
   const { toggleTheme } = useUI();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeView, setActiveView] = useState<
-    "chat" | "dashboard" | "settings" | "history" | "extensions"
+    "chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions"
   >("chat");
   const [showTutorial, setShowTutorial] = useState(false);
 
@@ -102,6 +104,8 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
     const handler = (evt: Event) => {
       const view = (evt as CustomEvent).detail as
         | "chat"
+        | "my_chats"
+        | "projects"
         | "dashboard"
         | "settings"
         | "history"
@@ -125,6 +129,14 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
     }
     if (normalized === "open settings") {
       setActiveView("settings");
+      return;
+    }
+    if (normalized === "my chats") {
+      setActiveView("my_chats");
+      return;
+    }
+    if (normalized === "projects") {
+      setActiveView("projects");
       return;
     }
     if (normalized === "neuroedge diagnostics") {
@@ -206,6 +218,8 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
             }}
           >
             {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}
+            {activeView === "my_chats" && <MyChatsPanel />}
+            {activeView === "projects" && <ProjectsPanel />}
             {activeView === "dashboard" && <Dashboard />}
             {activeView === "settings" && <SettingsPanel />}
             {activeView === "extensions" && <ExtensionsPanel />}

@@ -7,7 +7,7 @@ interface TopbarProps {
   onSearch?: (query: string) => void;
   onCommand?: (command: string) => void;
   onToggleSidebar?: () => void;
-  onNavigate?: (view: "chat" | "dashboard" | "settings" | "history" | "extensions") => void;
+  onNavigate?: (view: "chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions") => void;
   onNewChat?: () => void;
 }
 
@@ -216,6 +216,8 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const commands = [
     "New Chat",
+    "My Chats",
+    "Projects",
     "Open Settings",
     "Toggle Theme",
     "Export Chat",

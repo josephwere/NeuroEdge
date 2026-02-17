@@ -6,6 +6,8 @@ import { useNotifications } from "@/services/notificationStore";
 /* -------------------- */
 export type ViewType =
   | "chat"
+  | "my_chats"
+  | "projects"
   | "dashboard"
   | "settings"
   | "history"
@@ -76,6 +78,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* ---------- Navigation ---------- */}
       <div style={{ flex: 1, position: "relative" }}>
         <NavItem icon="💬" label="Chat" collapsed={collapsed} badge={unreadChats} onClick={() => onNavigate("chat")} />
+        <NavItem icon="🗂️" label="My Chats" collapsed={collapsed} onClick={() => onNavigate("my_chats")} />
+        <NavItem icon="📁" label="Projects" collapsed={collapsed} onClick={() => onNavigate("projects")} />
         <NavItem icon="📊" label="Dashboard" collapsed={collapsed} onClick={() => onNavigate("dashboard")} />
         <NavItem icon="⚙️" label="Settings" collapsed={collapsed} onClick={() => onNavigate("settings")} />
         <NavItem icon="🕘" label="History" collapsed={collapsed} onClick={() => onNavigate("history")} />

@@ -48,6 +48,9 @@ const ChatHistoryPanel: React.FC = () => {
           <h2 style={titleStyle}>History & Governance</h2>
         </div>
         <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "my_chats" }))} style={secondaryActionStyle}>
+            My Chats
+          </button>
           <button onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "chat" }))} style={secondaryActionStyle}>
             Back to Chat
           </button>
