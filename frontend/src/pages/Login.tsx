@@ -18,6 +18,8 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   const [countryCode, setCountryCode] = useState("+1");
   const [error, setError] = useState("");
   const [branding, setBranding] = useState(() => loadBranding());
+  const devFounderEmail = String(import.meta.env.VITE_DEV_FOUNDER_EMAIL || "founder@neuroedge.ai").trim().toLowerCase();
+  const devFounderPassword = String(import.meta.env.VITE_DEV_FOUNDER_PASSWORD || "Josboy@254");
 
   React.useEffect(() => {
     const refreshBranding = () => setBranding(loadBranding());
@@ -29,7 +31,7 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
     };
   }, []);
 
-  const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string }) => {
+  const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string; role?: "user" | "founder"; plan?: "free" | "pro" | "enterprise" }) => {
     const token = `neuroedge-${payload.provider}-token`;
     setUser({
       name: payload.name,
@@ -39,6 +41,8 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
       provider: payload.provider,
       phone: payload.phone,
       country: "global",
+      role: payload.role || "user",
+      plan: payload.plan || "free",
     });
     onSuccess?.();
   };
@@ -50,7 +54,22 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
         setError("Enter both email and password.");
         return;
       }
-      completeLogin({ name: email.split("@")[0] || "User", email, provider: "email" });
+      const normalizedEmail = email.trim().toLowerCase();
+      const isDevFounder =
+        Boolean(import.meta.env.DEV) &&
+        normalizedEmail === devFounderEmail &&
+        password === devFounderPassword;
+      if (isDevFounder) {
+        completeLogin({
+          name: "Joseph Were",
+          email: devFounderEmail,
+          provider: "email",
+          role: "founder",
+          plan: "enterprise",
+        });
+        return;
+      }
+      completeLogin({ name: email.split("@")[0] || "User", email, provider: "email", role: "user", plan: "free" });
       return;
     }
 

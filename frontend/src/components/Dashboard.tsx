@@ -3116,14 +3116,23 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      <div style={serviceGrid}>
-        {services.map((s) => (
-          <div key={s.name} style={serviceChip(s.status)}>
-            <strong>{s.name}</strong>
-            <span>{s.detail}</span>
+      {canAccessAdminOps ? (
+        <div style={serviceGrid}>
+          {services.map((s) => (
+            <div key={s.name} style={serviceChip(s.status)}>
+              <strong>{s.name}</strong>
+              <span>{s.detail}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={serviceGrid}>
+          <div style={serviceChip("online")}>
+            <strong>NeuroEdge</strong>
+            <span>Ready</span>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       <div style={tabs}>
         {[
@@ -3150,11 +3159,17 @@ const Dashboard: React.FC = () => {
       {view === "enterprise" && enterpriseView}
 
       <div style={{ marginTop: 14, color: "#94a3b8", fontSize: "0.8rem" }}>
-        Kernel Snapshot: {kernels.map((k) => `${k.name}:${k.status}`).join(" | ") || "none"}
-        {" • "}
-        Messages: {localMsgStats.total} (errors {localMsgStats.errors}, warnings {localMsgStats.warnings})
-        {" • "}
-        Version: {adminVersion.orchestratorVersion || "unknown"} / Doctrine v{String(adminVersion.doctrineVersion || "-")}
+        {canAccessAdminOps ? (
+          <>
+            Kernel Snapshot: {kernels.map((k) => `${k.name}:${k.status}`).join(" | ") || "none"}
+            {" • "}
+            Messages: {localMsgStats.total} (errors {localMsgStats.errors}, warnings {localMsgStats.warnings})
+            {" • "}
+            Version: {adminVersion.orchestratorVersion || "unknown"} / Doctrine v{String(adminVersion.doctrineVersion || "-")}
+          </>
+        ) : (
+          <>NeuroEdge workspace active</>
+        )}
       </div>
     </div>
   );

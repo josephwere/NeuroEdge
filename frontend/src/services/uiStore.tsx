@@ -14,6 +14,8 @@ export interface User {
   provider?: "email" | "google" | "github" | "phone" | "guest";
   phone?: string;
   country?: string;
+  role?: "user" | "moderator" | "admin" | "founder" | "developer" | "enterprise";
+  plan?: "free" | "pro" | "enterprise";
 }
 
 interface UIState {
