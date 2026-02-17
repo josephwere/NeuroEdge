@@ -212,9 +212,25 @@ export class OrchestratorClient {
   }
 
   private async postJson(path: string, body: Record<string, unknown>) {
+    const auth = this.resolveAuthContext();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-org-id": auth.orgId,
+      "x-workspace-id": auth.workspaceId,
+    };
+    if (auth.token) {
+      headers.Authorization = `Bearer ${auth.token}`;
+    }
+    if (auth.apiKey) {
+      headers["x-api-key"] = auth.apiKey;
+      if (!headers.Authorization) {
+        headers.Authorization = `Bearer ${auth.apiKey}`;
+      }
+    }
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -222,5 +238,48 @@ export class OrchestratorClient {
       throw new Error(text || `${path} failed with status ${response.status}`);
     }
     return response.json();
+  }
+
+  private resolveAuthContext(): {
+    token: string;
+    apiKey: string;
+    orgId: string;
+    workspaceId: string;
+  } {
+    const envToken = String((import.meta.env.VITE_NEUROEDGE_JWT as string) || "").trim();
+    const envApiKey = String((import.meta.env.VITE_NEUROEDGE_API_KEY as string) || "").trim();
+    const envOrg = String((import.meta.env.VITE_DEFAULT_ORG_ID as string) || "").trim();
+    const envWorkspace = String((import.meta.env.VITE_DEFAULT_WORKSPACE_ID as string) || "").trim();
+
+    let userToken = "";
+    let sessionToken = "";
+    let orgId = "";
+    let workspaceId = "";
+    try {
+      const rawUser = localStorage.getItem("neuroedge_user");
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser);
+        userToken = String(parsed?.token || "");
+        orgId = String(parsed?.orgId || "");
+        workspaceId = String(parsed?.workspaceId || "");
+      }
+      const rawSession = localStorage.getItem("neuroedge_session");
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        sessionToken = String(parsed?.token || "");
+        orgId = orgId || String(parsed?.orgId || "");
+        workspaceId = workspaceId || String(parsed?.workspaceId || "");
+      }
+    } catch {
+      // Ignore malformed local storage values.
+    }
+
+    const token = envToken || userToken || sessionToken;
+    return {
+      token,
+      apiKey: envApiKey,
+      orgId: orgId || envOrg || "personal",
+      workspaceId: workspaceId || envWorkspace || "default",
+    };
   }
 }
