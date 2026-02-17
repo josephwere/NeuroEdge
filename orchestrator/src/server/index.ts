@@ -2863,6 +2863,117 @@ export function startServer(
     }
   });
 
+  app.post("/creator/image", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/image`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator image failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/image/edit", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/image/edit`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator image edit failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/video", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/video`, req.body || {}, { timeout: 120000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator video failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/script-video", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/script-video`, req.body || {}, { timeout: 120000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator script-video failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/thumbnail", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/thumbnail`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator thumbnail failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/subtitles", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/subtitles`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator subtitles failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/creator/background-remove", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/background-remove`, req.body || {}, { timeout: 90000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator background remove failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/creator/job-status/:id", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/creator/job-status/${encodeURIComponent(String(req.params.id || ""))}`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator job status failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/creator/history", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 100)));
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/creator/history`, { params: { limit }, timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator history failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/creator/download", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const target = String(req.query.path || "").trim();
+    if (!target) return res.status(400).json({ error: "Missing path query" });
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/creator/download`, {
+        params: { path: target },
+        responseType: "stream",
+        timeout: 120000,
+      });
+      const contentType = String(resp.headers["content-type"] || "application/octet-stream");
+      const contentDisposition = String(resp.headers["content-disposition"] || "");
+      res.setHeader("content-type", contentType);
+      if (contentDisposition) res.setHeader("content-disposition", contentDisposition);
+      resp.data.pipe(res);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator download failed", detail: err?.message || String(err) });
+    }
+  });
+
   /* ---------------- Mesh Inference Registry ---------------- */
   const meshRegistry = new InferenceRegistry();
   const fedAggregator = new FedAggregator();

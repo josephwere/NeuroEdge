@@ -20,40 +20,96 @@ const STEPS: TutorialStep[] = [
     title: "Welcome to NeuroEdge",
     subtitle: "Your AI-first workspace is ready.",
     detail:
-      "NeuroEdge blends command execution, diagnostics, and AI reasoning in one unified interface.",
+      "NeuroEdge blends chat, orchestration, security operations, media creation, and governance in one unified platform.",
     tip: "Tip: Keep this guide open and click through once. You can skip anytime.",
   },
   {
     icon: "💬",
-    title: "Use Main Chat",
-    subtitle: "Ask, debug, run, and reason.",
+    title: "Use Main Chat + Floating Chat",
+    subtitle: "Ask, debug, run, and reason from either surface.",
     detail:
-      "Type natural requests in chat. NeuroEdge routes to orchestrator, kernel, and ML while showing reasoning and results.",
-    tip: "Tip: Press Enter to send. Use concise commands for faster outputs.",
+      "Use the main chat for deep sessions and floating chat for quick context. Both support modern input patterns, attachments, and guided responses.",
+    tip: "Tip: Press Enter to send. Use concise requests for faster execution.",
   },
   {
-    icon: "🪟",
-    title: "Open Floating Assistant",
-    subtitle: "Quick side panel, on demand.",
+    icon: "🧭",
+    title: "Dashboard Search Assistant",
+    subtitle: "Find anything instantly across all dashboards.",
     detail:
-      "Click the floating launcher icon to open the assistant panel. Keep it hidden when you want a clean workspace.",
-    tip: "Tip: Use close/minimize controls in the floating header.",
+      "Inside Dashboard, use Search Assistant to ask where a feature lives. It routes Founder/Admin/Dev/User/Enterprise to the exact section.",
+    tip: "Tip: Try queries like: rollback, api key, twin report, billing, sso, creator.",
+  },
+  {
+    icon: "👑",
+    title: "Role-Aware Dashboards",
+    subtitle: "Each role sees what is relevant.",
+    detail:
+      "Founder has full command center access. Admin handles moderation and operations. Developer focuses API/tools. User gets clean product flow. Enterprise gets governance and compliance controls.",
+    tip: "Tip: Founder can switch and test all role dashboards from one account.",
+  },
+  {
+    icon: "🛡",
+    title: "Aegis Shield System",
+    subtitle: "Security, resilience, and recovery controls.",
+    detail:
+      "Use Aegis for anti-theft flags, loan restricted mode, malware scanning, prompt-shield checks, integrity baseline/check, safe mode, snapshots, rollback, backup, and zero-trust key rotation.",
+    tip: "Tip: Always create a snapshot before major changes or rollback tests.",
+  },
+  {
+    icon: "🧠",
+    title: "Twin Systems + NeuroTwin",
+    subtitle: "System intelligence and founder digital twin.",
+    detail:
+      "Twin Scan/Analyze/Evolve/Report helps inspect and improve architecture safely. NeuroTwin stores founder profile/modes and provides strategic support summaries.",
+    tip: "Tip: Use Ask Twin for “where is this file/feature” questions.",
+  },
+  {
+    icon: "🎬",
+    title: "VisionForge Creator Engine",
+    subtitle: "Create images, videos, subtitles, and thumbnails.",
+    detail:
+      "Use Create Media to queue AI creator jobs: image generation/editing, text-to-video, script-to-video, caption generation, and background removal with job progress + history.",
+    tip: "Tip: Watch render status and download generated artifacts from job output.",
+  },
+  {
+    icon: "🧪",
+    title: "Training Studio",
+    subtitle: "Ingest and curate training inputs.",
+    detail:
+      "Upload text/files/URLs and build training datasets with filters and options. Use feedback and exports to improve quality over time.",
+    tip: "Tip: Keep datasets clean with dedupe + tagging for better model iterations.",
+  },
+  {
+    icon: "💳",
+    title: "Billing, Rewards, and Integrations",
+    subtitle: "Monetization and external app connection.",
+    detail:
+      "Manage plans, payment profiles, rewards wallets, crypto reward policies, API keys, and integration app credentials from dashboard controls.",
+    tip: "Tip: Create keys per app/environment and rotate regularly.",
+  },
+  {
+    icon: "🏢",
+    title: "Enterprise Governance",
+    subtitle: "Department usage, audit, and SSO.",
+    detail:
+      "Control team roles, token budgets per department, compliance exports, and SSO settings for enterprise-ready governance.",
+    tip: "Tip: Review usage and audit exports weekly for governance hygiene.",
   },
   {
     icon: "⚙️",
-    title: "Tune Settings",
-    subtitle: "Founder mode and voice controls.",
+    title: "Settings and Profile",
+    subtitle: "Personal controls and account preferences.",
     detail:
-      "In Settings, manage Founder Mode, TTS alerts, and kernel orchestration options to fit your workflow.",
-    tip: "Tip: Run a voice test after enabling TTS.",
+      "Use profile and settings to manage identity, theme, notifications, and experience controls. Theme supports system/light/dark modes.",
+    tip: "Tip: Keep system mode default and switch only when needed.",
   },
   {
     icon: "📊",
-    title: "Monitor Runtime",
-    subtitle: "Track health and performance.",
+    title: "Operational Awareness",
+    subtitle: "Track service health and key events.",
     detail:
-      "Use Dashboard and notifications to watch system status, execution quality, and critical alerts in real time.",
-    tip: "Tip: Keep notifications focused by avoiding repeated demo alerts.",
+      "Monitor status chips, logs, audits, approvals, and runtime summaries to keep NeuroEdge stable and accountable.",
+    tip: "Tip: For incidents, enable safe mode first, then run diagnosis and rollback if required.",
   },
 ];
 

@@ -355,6 +355,27 @@ interface EnterpriseDepartment {
   tokensPerMonth: number;
 }
 
+interface CreatorJobState {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "completed" | "failed" | string;
+  progress: number;
+  error?: string;
+  result?: Record<string, any>;
+  created_at?: number;
+  started_at?: number;
+  finished_at?: number;
+}
+
+interface DashboardGuideItem {
+  id: string;
+  title: string;
+  view: View;
+  roleScope: Array<"founder" | "admin" | "developer" | "enterprise" | "user" | "all">;
+  summary: string;
+  keywords: string[];
+}
+
 type UploadTier = "founder" | "admin" | "paid" | "free";
 type DashboardRole = "founder" | "admin" | "developer" | "enterprise" | "user";
 
@@ -463,6 +484,133 @@ const Dashboard: React.FC = () => {
     () => dashboardRole === "founder" || dashboardRole === "admin",
     [dashboardRole]
   );
+
+  const dashboardGuideCatalog = useMemo<DashboardGuideItem[]>(
+    () => [
+      {
+        id: "founder-aegis",
+        title: "Aegis Shield Controls",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "Device protection, anti-theft, safe mode, integrity checks, rollback, and zero-trust controls.",
+        keywords: ["aegis", "shield", "safe mode", "rollback", "integrity", "security", "antitheft", "backup"],
+      },
+      {
+        id: "founder-twin",
+        title: "Twin Systems",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "Twin Scan, Analyze, Evolve, Report, Ask Twin, and NeuroTwin profile controls.",
+        keywords: ["twin", "neurotwin", "scan", "analyze", "evolve", "report", "ask twin"],
+      },
+      {
+        id: "founder-training",
+        title: "Training Studio",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "Ingest text/files/urls and run training jobs for system learning.",
+        keywords: ["training", "ingest", "dataset", "feedback", "crawl", "urls", "zip"],
+      },
+      {
+        id: "founder-branding",
+        title: "Branding Studio",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "Upload logos/backgrounds and configure product visual identity.",
+        keywords: ["branding", "logo", "favicon", "theme", "background"],
+      },
+      {
+        id: "founder-links",
+        title: "Domain & Link Registry",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "Register domains, classify audience, verify reachability, and manage link lifecycle.",
+        keywords: ["domain", "links", "url", "registry", "verify", "audience"],
+      },
+      {
+        id: "admin-moderation",
+        title: "Admin Moderation",
+        view: "admin",
+        roleScope: ["founder", "admin"],
+        summary: "Manage users, content reviews, support tickets, and moderation actions.",
+        keywords: ["moderation", "tickets", "support", "users", "reports", "review"],
+      },
+      {
+        id: "developer-api",
+        title: "Developer API Workspace",
+        view: "developer",
+        roleScope: ["founder", "admin", "developer"],
+        summary: "Create API keys, manage webhooks, model/env settings, and debug logs.",
+        keywords: ["api", "keys", "webhook", "sdk", "debug", "environment", "dev"],
+      },
+      {
+        id: "agents-studio",
+        title: "AI Agent Studio",
+        view: "agents",
+        roleScope: ["all"],
+        summary: "Create/edit agents, configure tools, permissions, and memory settings.",
+        keywords: ["agent", "studio", "tools", "memory", "permissions"],
+      },
+      {
+        id: "user-chat",
+        title: "User Chat Workspace",
+        view: "user",
+        roleScope: ["all"],
+        summary: "Main chat, saved prompts, usage visibility, and personal workspace controls.",
+        keywords: ["chat", "prompt", "history", "workspace", "new chat"],
+      },
+      {
+        id: "enterprise-governance",
+        title: "Enterprise Governance",
+        view: "enterprise",
+        roleScope: ["founder", "admin", "enterprise"],
+        summary: "Department usage, team roles, compliance exports, and SSO controls.",
+        keywords: ["enterprise", "department", "sso", "compliance", "audit", "roles"],
+      },
+      {
+        id: "visionforge-media",
+        title: "Create Media (VisionForge)",
+        view: "developer",
+        roleScope: ["all"],
+        summary: "Generate/edit images and videos, script-to-video, captions, and creator history.",
+        keywords: ["visionforge", "creator", "media", "image", "video", "thumbnail", "subtitles", "background remove"],
+      },
+      {
+        id: "payments-subscriptions",
+        title: "Subscriptions, Billing, and Rewards",
+        view: "founder",
+        roleScope: ["founder", "admin", "enterprise", "user"],
+        summary: "Manage plans, payment profile, reward wallets, and crypto reward settings.",
+        keywords: ["billing", "subscription", "payment", "revenue", "wallet", "rewards", "crypto"],
+      },
+    ],
+    []
+  );
+
+  const dashboardAssistantResults = useMemo(() => {
+    const q = dashboardAssistantQuery.trim().toLowerCase();
+    const role = dashboardRole;
+    const visible = dashboardGuideCatalog.filter((item) => {
+      if (item.roleScope.includes("all")) return true;
+      return item.roleScope.includes(role);
+    });
+    if (!q) return visible.slice(0, 8);
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const scored = visible
+      .map((item) => {
+        const blob = `${item.title} ${item.summary} ${item.keywords.join(" ")}`.toLowerCase();
+        let score = 0;
+        for (const t of tokens) {
+          if (blob.includes(t)) score += 2;
+          if (item.keywords.some((k) => k.includes(t))) score += 1;
+          if (String(item.view).includes(t)) score += 1;
+        }
+        return { item, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.item).slice(0, 10);
+  }, [dashboardAssistantQuery, dashboardGuideCatalog, dashboardRole]);
 
   useEffect(() => {
     if (!allowedViews.includes(view)) {
@@ -813,6 +961,14 @@ const Dashboard: React.FC = () => {
     companyOwned: true,
     antiVirusVersion: "",
   });
+  const [creatorPrompt, setCreatorPrompt] = useState("");
+  const [creatorScript, setCreatorScript] = useState("");
+  const [creatorImagePath, setCreatorImagePath] = useState("");
+  const [creatorJobId, setCreatorJobId] = useState("");
+  const [creatorJob, setCreatorJob] = useState<CreatorJobState | null>(null);
+  const [creatorHistory, setCreatorHistory] = useState<any[]>([]);
+  const [creatorBusy, setCreatorBusy] = useState(false);
+  const [dashboardAssistantQuery, setDashboardAssistantQuery] = useState("");
   const [aegisOutput, setAegisOutput] = useState<any>(null);
   const [aegisMalwareInput, setAegisMalwareInput] = useState("");
   const [aegisPromptInput, setAegisPromptInput] = useState("");
@@ -1171,6 +1327,7 @@ const Dashboard: React.FC = () => {
       }
     };
     loadDashboardState();
+    loadCreatorHistory();
   }, []);
 
   useEffect(() => {
@@ -1678,6 +1835,59 @@ const Dashboard: React.FC = () => {
       }
     }
     await runBackendAction(path, payload);
+  };
+
+  const loadCreatorHistory = async () => {
+    try {
+      const data = await getJson("/creator/history?limit=50");
+      setCreatorHistory(Array.isArray(data?.history) ? data.history : []);
+    } catch (err: any) {
+      addNotification({ type: "error", message: err?.message || "Failed to load creator history" });
+    }
+  };
+
+  const pollCreatorJob = async (id: string) => {
+    if (!id) return;
+    setCreatorJobId(id);
+    let attempts = 0;
+    const maxAttempts = 120;
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      try {
+        const data = await getJson(`/creator/job-status/${encodeURIComponent(id)}`);
+        const job = data?.job || null;
+        if (job) {
+          setCreatorJob(job);
+          if (job.status === "completed" || job.status === "failed") {
+            setCreatorBusy(false);
+            await loadCreatorHistory();
+            return;
+          }
+        }
+      } catch {
+        // keep polling
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    setCreatorBusy(false);
+  };
+
+  const submitCreatorJob = async (path: string, payload: Record<string, any>) => {
+    try {
+      setCreatorBusy(true);
+      const data = await postJson(path, payload);
+      const id = String(data?.job_id || "");
+      if (!id) {
+        setCreatorBusy(false);
+        addNotification({ type: "error", message: "Creator job did not return job ID" });
+        return;
+      }
+      addNotification({ type: "success", message: `Creator job queued: ${id}` });
+      await pollCreatorJob(id);
+    } catch (err: any) {
+      setCreatorBusy(false);
+      addNotification({ type: "error", message: err?.message || "Creator job failed" });
+    }
   };
 
   const parseTags = () =>
@@ -2829,6 +3039,102 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const creatorEngineCard = (
+    <Card title="Create Media (VisionForge)">
+      <div style={{ ...muted, marginBottom: 8 }}>
+        AI Image/Video generation, script-to-video, thumbnails, captions, background removal, job queue, history, and downloadable artifacts.
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={creatorPrompt}
+          onChange={(e) => setCreatorPrompt(e.target.value)}
+          placeholder="Prompt (image/video/thumbnail)"
+          style={input}
+        />
+        <textarea
+          value={creatorScript}
+          onChange={(e) => setCreatorScript(e.target.value)}
+          placeholder="Script input (for Script -> Video and Subtitles)"
+          style={{ ...input, minHeight: 90 }}
+        />
+        <input
+          value={creatorImagePath}
+          onChange={(e) => setCreatorImagePath(e.target.value)}
+          placeholder="Existing image path (for edit/background remove)"
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/image", { prompt: creatorPrompt, style: "cinematic", resolution: "1024x1024", aspect_ratio: "1:1", batch: 1 })}>Generate Image</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/image/edit", { image_path: creatorImagePath, instructions: creatorPrompt || "enhance details" })}>Edit Image</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/video", { prompt: creatorPrompt, duration: 8, resolution: "1080p", aspect_ratio: "16:9" })}>Generate Video</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/script-video", { script: creatorScript || creatorPrompt, voice_style: "neutral", aspect_ratio: "16:9" })}>Script to Video</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/thumbnail", { topic: creatorPrompt || "NeuroEdge", text: creatorPrompt })}>Create Thumbnail</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/subtitles", { transcript: creatorScript || creatorPrompt })}>Generate Captions</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/background-remove", { image_path: creatorImagePath })}>Remove Background</button>
+          <button style={chip} onClick={loadCreatorHistory}>Refresh History</button>
+        </div>
+
+        <div style={{ ...log, padding: 10 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Render Status</div>
+          <div style={{ width: "100%", height: 10, background: "rgba(148,163,184,0.25)", borderRadius: 999 }}>
+            <div
+              style={{
+                width: `${Math.max(0, Math.min(100, Number(creatorJob?.progress || 0)))}%`,
+                height: "100%",
+                borderRadius: 999,
+                background: "linear-gradient(90deg,#22c55e,#3b82f6)",
+                transition: "width 0.25s ease",
+              }}
+            />
+          </div>
+          <div style={{ ...muted, marginTop: 6 }}>
+            Job: {creatorJobId || "none"} • Status: {creatorJob?.status || (creatorBusy ? "running" : "idle")}
+          </div>
+          {creatorJob?.error ? <div style={{ color: "#ef4444", marginTop: 6 }}>{creatorJob.error}</div> : null}
+        </div>
+
+        <div style={{ ...log, maxHeight: 220, overflow: "auto" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Latest Job Output</div>
+          <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+            {creatorJob?.result ? JSON.stringify(creatorJob.result, null, 2) : "No output yet."}
+          </pre>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {creatorJob?.result &&
+              Object.values(creatorJob.result)
+                .flatMap((v: any) => (Array.isArray(v) ? v : [v]))
+                .filter((v: any) => v && typeof v === "object" && typeof v.path === "string")
+                .slice(0, 8)
+                .map((asset: any, idx: number) => (
+                  <button
+                    key={`${asset.path}-${idx}`}
+                    style={chip}
+                    onClick={() =>
+                      window.open(`${apiBase}/creator/download?path=${encodeURIComponent(String(asset.path))}`, "_blank")
+                    }
+                  >
+                    Download {asset.name || `asset ${idx + 1}`}
+                  </button>
+                ))}
+          </div>
+        </div>
+
+        <div style={{ ...log, maxHeight: 220, overflow: "auto" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>History</div>
+          {creatorHistory.length === 0 ? (
+            <div style={muted}>No creator history yet.</div>
+          ) : (
+            creatorHistory.slice(0, 40).map((h, i) => (
+              <div key={`${h?.timestamp || i}-${i}`} style={{ borderBottom: "1px solid rgba(148,163,184,0.15)", padding: "6px 0" }}>
+                <strong>{String(h?.type || "event")}</strong> • {new Date(Number(h?.timestamp || Date.now()) * 1000).toLocaleString()}
+                {h?.job_id ? <div style={muted}>job: {h.job_id}</div> : null}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
       {trainingStudioCard}
@@ -2836,6 +3142,7 @@ const Dashboard: React.FC = () => {
       {accessControlCard}
       {deviceProtectionCard}
       {aegisShieldCard}
+      {creatorEngineCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -3595,6 +3902,7 @@ const Dashboard: React.FC = () => {
       {accessControlCard}
       {deviceProtectionCard}
       {aegisShieldCard}
+      {creatorEngineCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -3689,6 +3997,7 @@ const Dashboard: React.FC = () => {
 
   const developerView = (
     <div style={grid}>
+      {creatorEngineCard}
       <Card title="API Keys">
         <div style={log}>Primary key: {maskKey(String(import.meta.env.VITE_NEUROEDGE_API_KEY || ""))}</div>
         <button style={chip} onClick={addDevApiKey}>+ Create Key</button>
@@ -3859,6 +4168,7 @@ const Dashboard: React.FC = () => {
 
   const userView = (
     <div style={grid}>
+      {creatorEngineCard}
       <Card title="Chat & Prompt Workspace">
         <Stat label="Chats" value={String(conversationStats.chats)} />
         <Stat label="Messages" value={String(conversationStats.messages)} />
@@ -3903,6 +4213,7 @@ const Dashboard: React.FC = () => {
     <div style={grid}>
       {deviceProtectionCard}
       {aegisShieldCard}
+      {creatorEngineCard}
       <Card title="Team Roles & Department Controls">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -4022,6 +4333,48 @@ const Dashboard: React.FC = () => {
             {label}
           </button>
           ))}
+      </div>
+
+      <div style={{ ...card, marginBottom: 10 }}>
+        <div style={{ ...cardHeader }}>
+          <h3 style={{ margin: 0 }}>Dashboard Search Assistant</h3>
+        </div>
+        <div style={{ padding: "0.8rem", display: "grid", gap: 8 }}>
+          <input
+            value={dashboardAssistantQuery}
+            onChange={(e) => setDashboardAssistantQuery(e.target.value)}
+            placeholder="Ask where to find something: e.g. rollback, api key, twin report, media generation, billing..."
+            style={input}
+          />
+          <div style={{ ...muted, fontSize: "0.84rem" }}>
+            Assistant scope: {dashboardRole}. It surfaces pages and sections you can access, then guides you directly.
+          </div>
+          <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+            {dashboardAssistantResults.length === 0 ? (
+              <div style={muted}>No match. Try words like: security, twin, creator, billing, links, api, sso.</div>
+            ) : (
+              dashboardAssistantResults.map((item) => (
+                <div key={item.id} style={{ ...log, margin: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{item.title}</div>
+                      <div style={muted}>{item.summary}</div>
+                    </div>
+                    <button
+                      style={chip}
+                      onClick={() => {
+                        setView(item.view);
+                        addNotification({ type: "info", message: `Opened ${item.view} dashboard for ${item.title}.` });
+                      }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       {view === "founder" && founderView}

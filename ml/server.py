@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sklearn.linear_model import SGDClassifier
 import numpy as np
 import httpx
+from creator_engine import router as creator_router
 
 try:
     import uvicorn
@@ -63,6 +64,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(creator_router)
 
 FED_URL = os.getenv("NEUROEDGE_FED_URL", "http://localhost:7070")
 FED_KEY = os.getenv("NEUROEDGE_FED_KEY", "")
