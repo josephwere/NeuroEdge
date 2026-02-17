@@ -18,6 +18,7 @@ import { handleExecution } from "@handlers/executionHandler";
 import { handleAIInference } from "@handlers/aiHandler";
 import { appendEvent, listEvents, readState, writeState } from "@storage/hybrid_db";
 import { InferenceRegistry, InferenceNode } from "@mesh/inference_registry";
+import { FedAggregator, verifyPayload, signPayload } from "@federation/fed_aggregator";
 
 export function startServer(
   restPort: number,
@@ -93,6 +94,8 @@ export function startServer(
 
   /* ---------------- Mesh Inference Registry ---------------- */
   const meshRegistry = new InferenceRegistry();
+  const fedAggregator = new FedAggregator();
+  const fedKey = process.env.NEUROEDGE_FED_KEY || "";
 
   app.post("/mesh/register", (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities } = req.body || {};
@@ -135,6 +138,33 @@ export function startServer(
       payload: { id, signal },
     });
     res.json({ status: "ok" });
+  });
+
+  /* ---------------- Federated Training ---------------- */
+  app.get("/fed/model", (_req: Request, res: Response) => {
+    res.json({ model: fedAggregator.getGlobal() });
+  });
+
+  app.post("/fed/update", (req: Request, res: Response) => {
+    const { update, sig } = req.body || {};
+    if (!update) return res.status(400).json({ error: "Missing update" });
+    if (!verifyPayload(update, sig || "", fedKey)) {
+      return res.status(401).json({ error: "Invalid signature" });
+    }
+    fedAggregator.addUpdate(update);
+    appendEvent({
+      type: "fed.update",
+      timestamp: Date.now(),
+      payload: { id: update.id, n_features: update.n_features, classes: update.classes },
+    });
+    res.json({ status: "ok" });
+  });
+
+  app.post("/fed/sign", (req: Request, res: Response) => {
+    const { payload } = req.body || {};
+    if (!payload) return res.status(400).json({ error: "Missing payload" });
+    if (!fedKey) return res.status(400).json({ error: "Missing NEUROEDGE_FED_KEY" });
+    res.json({ sig: signPayload(payload, fedKey) });
   });
 
   app.get("/mesh/nodes", (_req: Request, res: Response) => {
@@ -231,7 +261,7 @@ export function startServer(
   const devAgent = new DevExecutionAgent(eventBus, logger, permissions);
   devAgent.start();
 
-  new GitHubAgent(); // placeholder, safe init
+  new GitHubAgent();
 
   /* ---------------- Kernel ---------------- */
   const kernelUrl = process.env.KERNEL_URL || "http://localhost:8080";

@@ -1,11 +1,16 @@
 # ml/server.py
 import os
 import subprocess
+import time
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sklearn.linear_model import SGDClassifier
+import numpy as np
+import httpx
 
 try:
     import uvicorn
@@ -26,6 +31,108 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+FED_URL = os.getenv("NEUROEDGE_FED_URL", "http://localhost:7070")
+FED_KEY = os.getenv("NEUROEDGE_FED_KEY", "")
+NODE_ID = os.getenv("NEUROEDGE_NODE_ID", "node-local-1")
+FED_SYNC_INTERVAL = float(os.getenv("NEUROEDGE_FED_SYNC_INTERVAL", "20"))
+
+_labels = [
+    "gather_context",
+    "analyze_logs",
+    "run_tests",
+    "run_build_checks",
+    "prepare_deploy_plan",
+]
+_label_to_idx = {k: i for i, k in enumerate(_labels)}
+
+_clf = SGDClassifier(loss="log_loss", max_iter=1, learning_rate="optimal")
+_clf.partial_fit(np.zeros((1, 3)), [0], classes=list(range(len(_labels))))
+_local_samples = 0
+_global_version = 0
+
+
+def _featurize(text: str) -> np.ndarray:
+    text = text.lower()
+    return np.array([
+        len(text),
+        sum(1 for c in text if c.isdigit()),
+        sum(1 for c in text if c in "aeiou"),
+    ], dtype=np.float32).reshape(1, -1)
+
+
+def _sign_payload(payload: Dict[str, Any]) -> Optional[str]:
+    if not FED_KEY:
+        return None
+    try:
+        resp = httpx.post(f"{FED_URL}/fed/sign", json={"payload": payload}, timeout=10.0)
+        return resp.json().get("sig")
+    except Exception:
+        return None
+
+
+def _apply_global_model(model: Dict[str, Any]) -> None:
+    global _global_version
+    coef = model.get("coef")
+    intercept = model.get("intercept")
+    classes = model.get("classes")
+    n_features = int(model.get("n_features", 3))
+    version = int(model.get("version", 0))
+    if not coef or not intercept or not classes:
+        return
+    if version <= _global_version:
+        return
+    _clf.classes_ = np.array(list(range(len(classes))))
+    _clf.coef_ = np.array(coef, dtype=np.float64)
+    _clf.intercept_ = np.array(intercept, dtype=np.float64)
+    _clf.n_features_in_ = n_features
+    _global_version = version
+
+
+def _push_local_update() -> None:
+    global _local_samples
+    if _local_samples <= 0:
+        return
+    update = {
+        "id": NODE_ID,
+        "ts": time.time(),
+        "n_features": 3,
+        "classes": _labels,
+        "coef": _clf.coef_.tolist(),
+        "intercept": _clf.intercept_.tolist(),
+        "samples": _local_samples,
+    }
+    sig = _sign_payload(update)
+    if not sig:
+        return
+    try:
+        httpx.post(f"{FED_URL}/fed/update", json={"update": update, "sig": sig}, timeout=10.0)
+        _local_samples = 0
+    except Exception:
+        pass
+
+
+def _pull_global_update() -> None:
+    try:
+        resp = httpx.get(f"{FED_URL}/fed/model", timeout=10.0)
+        model = (resp.json() or {}).get("model")
+        if model:
+            _apply_global_model(model)
+    except Exception:
+        pass
+
+
+def _federated_loop() -> None:
+    while True:
+        _push_local_update()
+        _pull_global_update()
+        time.sleep(FED_SYNC_INTERVAL)
+
+
+@app.on_event("startup")
+def _startup_fed() -> None:
+    t = threading.Thread(target=_federated_loop, daemon=True)
+    t.start()
 
 
 class CommandRequest(BaseModel):
@@ -133,7 +240,28 @@ def ready() -> Dict[str, Any]:
         "service": "ml",
         "model_loaded": ml_agent is not None,
         "mode": os.getenv("NEUROEDGE_MODE", "sovereign"),
+        "fed_version": _global_version,
     }
+
+
+@app.get("/federated/status")
+def federated_status() -> Dict[str, Any]:
+    return {
+        "node_id": NODE_ID,
+        "fed_url": FED_URL,
+        "fed_enabled": bool(FED_KEY),
+        "fed_version": _global_version,
+        "pending_local_samples": _local_samples,
+        "sync_interval_sec": FED_SYNC_INTERVAL,
+    }
+
+
+@app.post("/federated/flush")
+def federated_flush() -> Dict[str, Any]:
+    before = _local_samples
+    _push_local_update()
+    _pull_global_update()
+    return {"status": "ok", "pushed_samples": before, "fed_version": _global_version}
 
 
 @app.post("/infer")
@@ -153,11 +281,22 @@ def infer(req: Any = Body(default=None)) -> Dict[str, Any]:
     if not action:
         action = _fallback_action(text)
 
+    # local online training signal (weak label)
+    try:
+        global _local_samples
+        x = _featurize(text)
+        y = _label_to_idx.get(action, 0)
+        _clf.partial_fit(x, [y])
+        _local_samples += 1
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "action": action,
         "input": text,
         "source": "model" if ml_agent is not None else "fallback",
+        "fed_version": _global_version,
     }
 
 

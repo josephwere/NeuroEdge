@@ -2,6 +2,10 @@ import json
 import os
 import time
 import threading
+import hashlib
+import tempfile
+import urllib.request
+import subprocess
 from typing import Any, Dict, Optional
 
 import httpx
@@ -167,15 +171,41 @@ def infer(payload: Any = Body(default=None)) -> Dict[str, Any]:
 
 @app.post("/update")
 def update(payload: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-    """
-    Secure update placeholder. Requires NEUROEDGE_NODE_UPDATE_TOKEN.
-    """
     token = payload.get("token") if payload else None
     if NODE_UPDATE_TOKEN and token != NODE_UPDATE_TOKEN:
         return {"status": "error", "error": "unauthorized"}
+    if not payload:
+        return {"status": "error", "error": "missing payload"}
     try:
+        download_url = payload.get("download_url")
+        sha256_hex = payload.get("sha256")
+        apply_command = payload.get("apply_command")
+
+        if download_url and sha256_hex:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                urllib.request.urlretrieve(download_url, tmp.name)
+                data = open(tmp.name, "rb").read()
+                digest = hashlib.sha256(data).hexdigest()
+                if digest != sha256_hex:
+                    return {"status": "error", "error": "checksum mismatch"}
+
+        if apply_command:
+            # allowlist safe update commands only
+            allowed_prefixes = ("pip install", "pnpm install", "npm install", "uv pip install")
+            if not any(str(apply_command).startswith(p) for p in allowed_prefixes):
+                return {"status": "error", "error": "apply_command not allowed"}
+            proc = subprocess.run(
+                str(apply_command),
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if proc.returncode != 0:
+                return {"status": "error", "error": proc.stderr or "apply failed"}
+
         with open("update_manifest.json", "w", encoding="utf-8") as f:
-            json.dump(payload or {}, f, indent=2)
-        return {"status": "ok"}
+            json.dump(payload, f, indent=2)
+        return {"status": "ok", "applied": bool(apply_command)}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
