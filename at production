@@ -1,0 +1,14 @@
+Production switch (recommended)
+
+Set these to true in orchestrator/.env when ready:
+
+AUTH_REQUIRED=true
+AUTHZ_ENFORCE_SCOPES=true
+AUTHZ_REQUIRE_WORKSPACE=true
+Then configure:
+
+JWT_SECRET (or JWT_PUBLIC_KEY)
+JWT_ISSUER
+JWT_AUDIENCE
+Optional tracing: LANGFUSE_* / HELICONE_*
+Optional billing: STRIPE_SECRET_KEY
