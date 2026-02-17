@@ -6,6 +6,7 @@ Thumbs.db
 
 # Dependencies
 **/node_modules/
+**/.pnpm-store/
 frontend/src-tauri/target/
 frontend/src-tauri/icons/.idea/
 
