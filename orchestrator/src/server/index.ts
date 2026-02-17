@@ -340,6 +340,19 @@ function readDashboardSummary() {
       clientId: "",
       metadataUrl: "",
     },
+    accessControl: {
+      rolePermissions: {
+        founder: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+        admin: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+        developer: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+        enterprise: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+        user: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+        guest: { defaultAction: "allow", allow: [], suspend: [], revoke: [] },
+      },
+      userOverrides: [],
+      updatedAt: Date.now(),
+    },
+    permissionCatalog: DASHBOARD_PERMISSION_CATALOG,
     idverse: idversePublicView(readIdverseConfigFromState()),
   };
   const dashboard = { ...defaults, ...((state.summary?.dashboard || {}) as Record<string, any>) };
@@ -363,6 +376,25 @@ function mergeDashboardSection(section: string, data: any) {
   writeDashboardSummary(next);
   return next;
 }
+
+type AccessAction = "allow" | "suspend" | "revoke";
+const DASHBOARD_PERMISSION_CATALOG = [
+  { id: "dashboard.bootstrap", group: "dashboard", label: "View Dashboard Data", scope: "admin:read", roles: ["founder", "admin"] },
+  { id: "users.role", group: "users", label: "Change User Roles", scope: "admin:write", roles: ["founder"] },
+  { id: "users.status", group: "users", label: "Ban/Verify/Status", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "plans.manage", group: "billing", label: "Manage Plans", scope: "admin:write", roles: ["founder"] },
+  { id: "payment.manage", group: "billing", label: "Manage Payment Profile", scope: "admin:write", roles: ["founder"] },
+  { id: "offers.manage", group: "billing", label: "Create/Toggle Offers", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "api_keys.manage", group: "developer", label: "Create/Revoke API Keys", scope: "admin:write", roles: ["founder", "admin", "developer"] },
+  { id: "integrations.manage", group: "developer", label: "Manage Integrations", scope: "admin:write", roles: ["founder", "admin", "developer"] },
+  { id: "domain_links.manage", group: "platform", label: "Manage Domain Links", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "webhooks.manage", group: "developer", label: "Manage Webhooks", scope: "admin:write", roles: ["founder", "admin", "developer"] },
+  { id: "agents.manage", group: "ai", label: "Manage Agent Profiles", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "extensions.manage", group: "platform", label: "Manage Extensions", scope: "admin:write", roles: ["founder", "admin", "developer"] },
+  { id: "enterprise.manage", group: "enterprise", label: "Manage Enterprise Settings", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "idverse.manage", group: "identity", label: "Configure IDVerse", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "training.manage", group: "training", label: "Run Training Studio Jobs", scope: "training:write", roles: ["founder", "admin"] },
+];
 
 function auditDashboardAction(req: Request, domain: string, action: string, payload: Record<string, any> = {}) {
   appendEvent({
@@ -528,6 +560,102 @@ export function startServer(
       updatedAt: state.updatedAt,
       version: state.version,
     });
+  });
+
+  app.get("/admin/dashboard/access/bootstrap", requireWorkspace, requireScope("admin:read"), requireRole(["founder", "admin"]), (_req: Request, res: Response) => {
+    const { dashboard } = readDashboardSummary();
+    const accessControl = (dashboard.accessControl || {}) as Record<string, any>;
+    res.json({
+      success: true,
+      permissionCatalog: DASHBOARD_PERMISSION_CATALOG,
+      accessControl: {
+        rolePermissions: accessControl.rolePermissions || {},
+        userOverrides: Array.isArray(accessControl.userOverrides) ? accessControl.userOverrides : [],
+        updatedAt: Number(accessControl.updatedAt || Date.now()),
+      },
+    });
+  });
+
+  app.post("/admin/dashboard/access/role-action", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const role = String(req.body?.role || "").trim().toLowerCase();
+    const permissionId = String(req.body?.permissionId || "").trim();
+    const action = String(req.body?.action || "").trim().toLowerCase() as AccessAction;
+    const allowedRoles = new Set(["founder", "admin", "developer", "enterprise", "user", "guest"]);
+    if (!allowedRoles.has(role)) return res.status(400).json({ error: "Invalid role" });
+    if (!DASHBOARD_PERMISSION_CATALOG.some((p) => p.id === permissionId)) return res.status(400).json({ error: "Invalid permissionId" });
+    if (!["allow", "suspend", "revoke"].includes(action)) return res.status(400).json({ error: "Invalid action" });
+
+    const { dashboard } = readDashboardSummary();
+    const accessControl = (dashboard.accessControl || {}) as Record<string, any>;
+    const rolePermissions = (accessControl.rolePermissions || {}) as Record<string, any>;
+    const current = rolePermissions[role] || { defaultAction: "allow", allow: [], suspend: [], revoke: [] };
+    const clean = (arr: any[]) => Array.from(new Set((arr || []).map((x) => String(x).trim()).filter(Boolean)));
+    const nextRole = {
+      defaultAction: String(current.defaultAction || "allow"),
+      allow: clean(current.allow),
+      suspend: clean(current.suspend),
+      revoke: clean(current.revoke),
+    };
+    nextRole.allow = nextRole.allow.filter((x) => x !== permissionId);
+    nextRole.suspend = nextRole.suspend.filter((x) => x !== permissionId);
+    nextRole.revoke = nextRole.revoke.filter((x) => x !== permissionId);
+    nextRole[action].push(permissionId);
+
+    const next = {
+      rolePermissions: { ...rolePermissions, [role]: nextRole },
+      userOverrides: Array.isArray(accessControl.userOverrides) ? accessControl.userOverrides : [],
+      updatedAt: Date.now(),
+    };
+    mergeDashboardSection("accessControl", next);
+    auditDashboardAction(req, "access_control", "role_action", { role, permissionId, action });
+    res.json({ success: true, accessControl: next, permissionCatalog: DASHBOARD_PERMISSION_CATALOG });
+  });
+
+  app.post("/admin/dashboard/access/user-action", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
+    const userId = String(req.body?.userId || "").trim();
+    const permissionId = String(req.body?.permissionId || "").trim();
+    const action = String(req.body?.action || "").trim().toLowerCase() as AccessAction;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+    if (!DASHBOARD_PERMISSION_CATALOG.some((p) => p.id === permissionId)) return res.status(400).json({ error: "Invalid permissionId" });
+    if (!["allow", "suspend", "revoke"].includes(action)) return res.status(400).json({ error: "Invalid action" });
+
+    const { dashboard } = readDashboardSummary();
+    const accessControl = (dashboard.accessControl || {}) as Record<string, any>;
+    const overrides = Array.isArray(accessControl.userOverrides) ? accessControl.userOverrides : [];
+    const clean = (arr: any[]) => Array.from(new Set((arr || []).map((x) => String(x).trim()).filter(Boolean)));
+    let found = false;
+    const nextOverrides = overrides.map((ov: any) => {
+      if (String(ov.userId) !== userId) return ov;
+      found = true;
+      const next = {
+        userId,
+        allow: clean(ov.allow),
+        suspend: clean(ov.suspend),
+        revoke: clean(ov.revoke),
+      };
+      next.allow = next.allow.filter((x) => x !== permissionId);
+      next.suspend = next.suspend.filter((x) => x !== permissionId);
+      next.revoke = next.revoke.filter((x) => x !== permissionId);
+      next[action].push(permissionId);
+      return next;
+    });
+    if (!found) {
+      nextOverrides.push({
+        userId,
+        allow: action === "allow" ? [permissionId] : [],
+        suspend: action === "suspend" ? [permissionId] : [],
+        revoke: action === "revoke" ? [permissionId] : [],
+      });
+    }
+
+    const next = {
+      rolePermissions: accessControl.rolePermissions || {},
+      userOverrides: nextOverrides,
+      updatedAt: Date.now(),
+    };
+    mergeDashboardSection("accessControl", next);
+    auditDashboardAction(req, "access_control", "user_action", { userId, permissionId, action });
+    res.json({ success: true, accessControl: next, permissionCatalog: DASHBOARD_PERMISSION_CATALOG });
   });
 
   app.post("/admin/dashboard/users/role", requireWorkspace, requireScope("admin:write"), requireRole(["founder"]), (req: Request, res: Response) => {
@@ -783,12 +911,19 @@ export function startServer(
     if (!name) return res.status(400).json({ error: "Missing key name" });
     const { dashboard } = readDashboardSummary();
     const keys = Array.isArray(dashboard.devApiKeys) ? dashboard.devApiKeys : [];
-    const suffix = crypto.randomBytes(2).toString("hex");
-    const created = { id: `k-${Date.now()}`, name, keyMasked: `neur...${suffix}`, createdAt: Date.now(), revoked: false };
+    const apiKey = generateApiKey("ne_dev");
+    const created = {
+      id: `k-${Date.now()}`,
+      name,
+      apiKey,
+      keyMasked: `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`,
+      createdAt: Date.now(),
+      revoked: false,
+    };
     const next = [created, ...keys];
     mergeDashboardSection("devApiKeys", next);
     auditDashboardAction(req, "api_keys", "create", { id: created.id });
-    res.json({ success: true, devApiKeys: next });
+    res.json({ success: true, devApiKeys: next, apiKey });
   });
 
   app.post("/admin/dashboard/api-keys/toggle", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {

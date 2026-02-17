@@ -140,9 +140,24 @@ interface SupportTicket {
 interface DevApiKey {
   id: string;
   name: string;
+  apiKey?: string;
   keyMasked: string;
   createdAt: number;
   revoked: boolean;
+}
+
+interface PermissionCatalogItem {
+  id: string;
+  group: string;
+  label: string;
+  scope: string;
+  roles: string[];
+}
+
+interface AccessControlState {
+  rolePermissions: Record<string, { defaultAction?: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
+  userOverrides: Array<{ userId: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
+  updatedAt?: number;
 }
 
 interface WebhookRecord {
@@ -600,6 +615,14 @@ const Dashboard: React.FC = () => {
     webhookUrl: "",
     rateLimitPerMin: "120",
   });
+  const [permissionCatalog, setPermissionCatalog] = useState<PermissionCatalogItem[]>([]);
+  const [accessControl, setAccessControl] = useState<AccessControlState>({
+    rolePermissions: {},
+    userOverrides: [],
+    updatedAt: 0,
+  });
+  const [selectedAccessRole, setSelectedAccessRole] = useState("user");
+  const [selectedAccessUserId, setSelectedAccessUserId] = useState("u2");
   const [latestGeneratedApiKey, setLatestGeneratedApiKey] = useState("");
   const [webhookEvent, setWebhookEvent] = useState("chat.completed");
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() => {
@@ -845,6 +868,8 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.webhooks)) setWebhooks(remote.webhooks);
     if (Array.isArray(remote.integrations)) setIntegrations(remote.integrations);
     if (Array.isArray(remote.domainLinks)) setDomainLinks(remote.domainLinks);
+    if (remote.accessControl && typeof remote.accessControl === "object") setAccessControl(remote.accessControl);
+    if (Array.isArray(remote.permissionCatalog)) setPermissionCatalog(remote.permissionCatalog);
     if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
     if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
@@ -874,6 +899,8 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.webhooks)) setWebhooks(data.webhooks);
       if (Array.isArray(data.integrations)) setIntegrations(data.integrations);
       if (Array.isArray(data.domainLinks)) setDomainLinks(data.domainLinks);
+      if (data.accessControl && typeof data.accessControl === "object") setAccessControl(data.accessControl);
+      if (Array.isArray(data.permissionCatalog)) setPermissionCatalog(data.permissionCatalog);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
       if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
@@ -899,6 +926,13 @@ const Dashboard: React.FC = () => {
         applyRemoteDashboard(data?.dashboard || {});
       } catch {
         // fallback to local state
+      }
+      try {
+        const access = await getJson("/admin/dashboard/access/bootstrap");
+        if (Array.isArray(access?.permissionCatalog)) setPermissionCatalog(access.permissionCatalog);
+        if (access?.accessControl && typeof access.accessControl === "object") setAccessControl(access.accessControl);
+      } catch {
+        // ignore when not authorized
       }
     };
     loadDashboardState();
@@ -1875,6 +1909,41 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: "Department added." });
   };
 
+  const applyRolePermissionAction = async (
+    role: string,
+    permissionId: string,
+    action: "allow" | "suspend" | "revoke"
+  ) => {
+    const data = await callAction("/admin/dashboard/access/role-action", { role, permissionId, action });
+    if (data?.success) addNotification({ type: "success", message: `Role ${role}: ${action} ${permissionId}` });
+  };
+
+  const applyUserPermissionAction = async (
+    userId: string,
+    permissionId: string,
+    action: "allow" | "suspend" | "revoke"
+  ) => {
+    const data = await callAction("/admin/dashboard/access/user-action", { userId, permissionId, action });
+    if (data?.success) addNotification({ type: "success", message: `User ${userId}: ${action} ${permissionId}` });
+  };
+
+  const permissionStateForRole = (role: string, permissionId: string) => {
+    const entry = accessControl.rolePermissions?.[role] || {};
+    if ((entry.revoke || []).includes(permissionId)) return "revoke";
+    if ((entry.suspend || []).includes(permissionId)) return "suspend";
+    if ((entry.allow || []).includes(permissionId)) return "allow";
+    return "allow";
+  };
+
+  const permissionStateForUser = (userId: string, permissionId: string) => {
+    const entry = (accessControl.userOverrides || []).find((u) => String(u.userId) === String(userId));
+    if (!entry) return "inherit";
+    if ((entry.revoke || []).includes(permissionId)) return "revoke";
+    if ((entry.suspend || []).includes(permissionId)) return "suspend";
+    if ((entry.allow || []).includes(permissionId)) return "allow";
+    return "inherit";
+  };
+
   const domainRegistryCard = (
     <Card title="Domain & Link Registry (Founder/Admin)">
       <div style={{ display: "grid", gap: 8 }}>
@@ -2010,10 +2079,90 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const accessControlCard = (
+    <Card title="Task & Permission Control Matrix">
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select
+            value={selectedAccessRole}
+            onChange={(e) => setSelectedAccessRole(e.target.value)}
+            style={input}
+          >
+            <option value="founder">founder</option>
+            <option value="admin">admin</option>
+            <option value="developer">developer</option>
+            <option value="enterprise">enterprise</option>
+            <option value="user">user</option>
+            <option value="guest">guest</option>
+          </select>
+          <select
+            value={selectedAccessUserId}
+            onChange={(e) => setSelectedAccessUserId(e.target.value)}
+            style={input}
+          >
+            {(users || []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.id})
+              </option>
+            ))}
+          </select>
+          <button style={chip} onClick={async () => {
+            try {
+              const access = await getJson("/admin/dashboard/access/bootstrap");
+              if (Array.isArray(access?.permissionCatalog)) setPermissionCatalog(access.permissionCatalog);
+              if (access?.accessControl && typeof access.accessControl === "object") setAccessControl(access.accessControl);
+            } catch (err: any) {
+              addNotification({ type: "error", message: err?.message || "Failed to refresh access control" });
+            }
+          }}>Refresh</button>
+        </div>
+        <div style={muted}>
+          Founder/Admin can set each task to <strong>allow</strong>, <strong>suspend</strong>, or <strong>revoke</strong> by role and by user.
+        </div>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        {Object.entries(
+          (permissionCatalog || []).reduce((acc: Record<string, PermissionCatalogItem[]>, item) => {
+            const key = item.group || "general";
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(item);
+            return acc;
+          }, {})
+        ).map(([group, items]) => (
+          <div key={group} style={log}>
+            <div style={{ fontWeight: 700, marginBottom: 6, textTransform: "capitalize" }}>{group}</div>
+            {items.map((item) => (
+              <div key={item.id} style={{ ...row, alignItems: "center", borderBottom: "1px solid rgba(148,163,184,0.15)", paddingBottom: 6, marginBottom: 6 }}>
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <div style={{ fontWeight: 600 }}>{item.label}</div>
+                  <div style={muted}>{item.id} • scope: {item.scope}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span style={muted}>Role: {permissionStateForRole(selectedAccessRole, item.id)}</span>
+                  <button style={chip} onClick={() => applyRolePermissionAction(selectedAccessRole, item.id, "allow")}>Allow</button>
+                  <button style={chip} onClick={() => applyRolePermissionAction(selectedAccessRole, item.id, "suspend")}>Suspend</button>
+                  <button style={chip} onClick={() => applyRolePermissionAction(selectedAccessRole, item.id, "revoke")}>Revoke</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span style={muted}>User: {permissionStateForUser(selectedAccessUserId, item.id)}</span>
+                  <button style={chip} onClick={() => applyUserPermissionAction(selectedAccessUserId, item.id, "allow")}>Allow</button>
+                  <button style={chip} onClick={() => applyUserPermissionAction(selectedAccessUserId, item.id, "suspend")}>Suspend</button>
+                  <button style={chip} onClick={() => applyUserPermissionAction(selectedAccessUserId, item.id, "revoke")}>Revoke</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+        {permissionCatalog.length === 0 && <div style={muted}>No permission tasks loaded yet.</div>}
+      </div>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
       {trainingStudioCard}
       {domainRegistryCard}
+      {accessControlCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -2743,6 +2892,7 @@ const Dashboard: React.FC = () => {
     <div style={grid}>
       {trainingStudioCard}
       {domainRegistryCard}
+      {accessControlCard}
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -2843,12 +2993,25 @@ const Dashboard: React.FC = () => {
         {devApiKeys.map((k) => (
           <div key={k.id} style={row}>
             <span>{k.name} • {k.keyMasked}</span>
-            <button
-              style={chip}
-              onClick={() => callAction("/admin/dashboard/api-keys/toggle", { id: k.id })}
-            >
-              {k.revoked ? "Restore" : "Revoke"}
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                style={chip}
+                onClick={() => {
+                  const value = String(k.apiKey || k.keyMasked || "");
+                  if (!value) return;
+                  navigator.clipboard?.writeText(value);
+                  addNotification({ type: "success", message: `Copied key for ${k.name}` });
+                }}
+              >
+                Copy
+              </button>
+              <button
+                style={chip}
+                onClick={() => callAction("/admin/dashboard/api-keys/toggle", { id: k.id })}
+              >
+                {k.revoked ? "Restore" : "Revoke"}
+              </button>
+            </div>
           </div>
         ))}
       </Card>
