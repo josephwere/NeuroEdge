@@ -46,6 +46,7 @@ import {
 } from "@core/selfExpansion";
 import path from "path";
 import fs from "fs";
+import * as crypto from "crypto";
 
 type RestartUrgency = "emergency" | "high" | "normal" | "low";
 
@@ -119,8 +120,7 @@ function isPaidUser(req: Request): boolean {
 }
 
 function generateApiKey(prefix = "ne_sk"): string {
-  const rand = () => Math.random().toString(36).slice(2, 10);
-  return `${prefix}-${rand()}${rand()}${rand()}`;
+  return `${prefix}-${crypto.randomBytes(24).toString("hex")}`;
 }
 
 function readDashboardSummary() {
@@ -688,7 +688,7 @@ export function startServer(
     if (!name) return res.status(400).json({ error: "Missing key name" });
     const { dashboard } = readDashboardSummary();
     const keys = Array.isArray(dashboard.devApiKeys) ? dashboard.devApiKeys : [];
-    const suffix = Math.random().toString(36).slice(-4);
+    const suffix = crypto.randomBytes(2).toString("hex");
     const created = { id: `k-${Date.now()}`, name, keyMasked: `neur...${suffix}`, createdAt: Date.now(), revoked: false };
     const next = [created, ...keys];
     mergeDashboardSection("devApiKeys", next);

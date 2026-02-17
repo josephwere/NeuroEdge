@@ -76,8 +76,8 @@ def _save_cache() -> None:
             raw = _fernet.encrypt(raw)
         with open(CACHE_PATH, "wb") as f:
             f.write(raw)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[edge-node] cache save failed: {exc}")
 
 
 def _cache_get(key: str) -> Optional[Any]:
@@ -101,8 +101,8 @@ def _register_node() -> None:
     }
     try:
         httpx.post(f"{ORCHESTRATOR_URL}/mesh/register", json=payload, timeout=5.0)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[edge-node] register failed: {exc}")
 
 
 def _heartbeat_loop() -> None:
@@ -126,7 +126,7 @@ def _heartbeat_loop() -> None:
                 timeout=5.0,
             )
         except Exception:
-            pass
+            print("[edge-node] heartbeat/metrics push failed")
         time.sleep(10)
 
 

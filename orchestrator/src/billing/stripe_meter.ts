@@ -1,4 +1,5 @@
 import axios from "axios";
+import * as crypto from "crypto";
 
 export interface MeterEventInput {
   customerId: string;
@@ -20,7 +21,7 @@ export async function reportStripeMeterEvent(input: MeterEventInput): Promise<bo
   if (!stripeKey) return false;
 
   const meterName = input.meterName || process.env.STRIPE_METER_EVENT_NAME || "neuroedge_tokens";
-  const identifier = input.identifier || `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const identifier = input.identifier || `evt_${crypto.randomUUID()}`;
   const form = toForm({
     event_name: meterName,
     identifier,
@@ -37,4 +38,3 @@ export async function reportStripeMeterEvent(input: MeterEventInput): Promise<bo
   });
   return true;
 }
-

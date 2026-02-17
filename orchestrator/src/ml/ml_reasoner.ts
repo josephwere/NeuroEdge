@@ -1,4 +1,5 @@
 import { EventBus } from "@core/event_bus";
+import * as crypto from "crypto";
 
 export interface MLProposal {
   id: string;
@@ -15,7 +16,7 @@ export class MLReasoner {
     if (lower.includes("test")) reason = "Detected testing workflow. Prefer running tests with verbose output.";
     else if (lower.includes("build") || lower.includes("compile")) reason = "Detected build workflow. Suggest build checks and dependency validation.";
     else if (lower.includes("error") || lower.includes("fail")) reason = "Detected failure analysis workflow. Suggest log analysis before execution.";
-    return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, command, reason };
+    return { id: crypto.randomUUID(), command, reason };
   }
 
   startListening() {

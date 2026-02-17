@@ -1,7 +1,8 @@
-//kernel/mesh/mesh_manager.go
+// kernel/mesh/mesh_manager.go
 package mesh
 
 import (
+	"encoding/base64"
 	"fmt"
 )
 
@@ -44,7 +45,9 @@ func (m *MeshManager) SendMessage(nodeID string, message string) {
 		fmt.Printf("❌ Encryption failed: %v\n", err)
 		return
 	}
-	m.Messaging.SendMessage(node, string(cipherText))
+	encoded := base64.StdEncoding.EncodeToString(cipherText)
+	m.Routing.RouteMessage(node, encoded)
+	m.Messaging.SendMessage(node, encoded)
 }
 
 // BroadcastMessage sends a message to all active nodes

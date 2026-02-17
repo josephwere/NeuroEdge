@@ -40,6 +40,7 @@ def run_inference(model: ort.InferenceSession, prompt: str, max_tokens=128) -> s
     elif input_names:
         feeds[input_names[0]] = encoded.reshape(1, -1)
 
+    model_error = None
     try:
         outputs = model.run(output_names, feeds)
         if outputs:
@@ -52,14 +53,16 @@ def run_inference(model: ort.InferenceSession, prompt: str, max_tokens=128) -> s
                 decoded = bytes([int(t) % 256 for t in token_ids[:max_tokens]]).decode("utf-8", errors="ignore").strip()
                 if decoded:
                     return decoded
-    except Exception:
-        pass
+    except Exception as exc:
+        model_error = str(exc)
 
     # Deterministic fallback: concise actionable response derived from prompt.
     words = text.split()
     head = " ".join(words[: min(len(words), 24)])
     if len(words) > 24:
         head += " ..."
+    if model_error:
+        return f"NeuroEdge summary: {head}\n\n(model fallback active: {model_error[:120]})"
     return f"NeuroEdge summary: {head}"
 
 # -------------------------------
@@ -75,6 +78,7 @@ def run_image_inference(model: ort.InferenceSession, img: Image.Image) -> dict:
     feeds: Dict[str, Any] = {}
     if input_names:
         feeds[input_names[0]] = input_data
+    model_error = None
     try:
         outputs = model.run(output_names, feeds)
         logits = np.array(outputs[0]).flatten() if outputs else np.array([])
@@ -82,9 +86,12 @@ def run_image_inference(model: ort.InferenceSession, img: Image.Image) -> dict:
             idx = int(np.argmax(logits))
             conf = float(np.max(logits))
             return {"label": f"class_{idx}", "confidence": round(conf, 6)}
-    except Exception:
-        pass
-    return {"label": "unknown", "confidence": 0.0}
+    except Exception as exc:
+        model_error = str(exc)
+    result = {"label": "unknown", "confidence": 0.0}
+    if model_error:
+        result["detail"] = f"fallback:{model_error[:120]}"
+    return result
 
 # -------------------------------
 # Audio Inference
@@ -99,6 +106,7 @@ def run_audio_inference(model: ort.InferenceSession, audio_array: np.ndarray) ->
     feeds: Dict[str, Any] = {}
     if input_names:
         feeds[input_names[0]] = features
+    model_error = None
     try:
         outputs = model.run(output_names, feeds)
         if outputs:
@@ -108,6 +116,8 @@ def run_audio_inference(model: ort.InferenceSession, audio_array: np.ndarray) ->
                 text = bytes([int(v) for v in clipped]).decode("utf-8", errors="ignore").strip()
                 if text:
                     return text
-    except Exception:
-        pass
+    except Exception as exc:
+        model_error = str(exc)
+    if model_error:
+        return f"Audio processed with fallback mode ({model_error[:120]})."
     return "Audio processed; no transcription tokens produced."

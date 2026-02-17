@@ -1,5 +1,6 @@
 import axios from "axios";
 import { appendEvent } from "@storage/hybrid_db";
+import * as crypto from "crypto";
 
 export interface TraceInput {
   name: string;
@@ -28,7 +29,7 @@ async function sendLangfuse(trace: TraceInput) {
   const payload = {
     batch: [
       {
-        id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `trace-${crypto.randomUUID()}`,
         timestamp: nowIso(),
         type: "generation-create",
         body: {
@@ -98,4 +99,3 @@ export async function traceLLMCall(trace: TraceInput) {
   });
   await Promise.allSettled([sendLangfuse(trace), sendHelicone(trace)]);
 }
-
