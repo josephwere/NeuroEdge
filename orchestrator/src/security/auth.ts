@@ -73,6 +73,17 @@ function verifyJwt(token: string): JwtClaims | null {
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const publicRoutes = new Set(["/health", "/status", "/metrics", "/system/status"]);
+  if (req.method === "GET" && publicRoutes.has(req.path)) {
+    req.auth = {
+      sub: "public",
+      orgId: process.env.DEFAULT_ORG_ID || "personal",
+      workspaceId: process.env.DEFAULT_WORKSPACE_ID || "default",
+      scopes: ["public:read"],
+    };
+    return next();
+  }
+
   const authRequired = process.env.AUTH_REQUIRED ? isTruthy(process.env.AUTH_REQUIRED) : true;
   const sharedApiKey = process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || "";
   const defaultOrgId = process.env.DEFAULT_ORG_ID || "personal";
