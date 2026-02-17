@@ -6,6 +6,32 @@ import { traceLLMCall } from "@observability/tracing";
 import { recordTokenUsage } from "@billing/usage";
 import { trackTokenUsage } from "@observability/metrics";
 
+function buildAssistantResponse(input: string, action: string): string {
+  const text = input.trim();
+  const lower = text.toLowerCase();
+
+  if (!text) return "I can help with questions, coding tasks, and system diagnostics.";
+  if (/(^|\s)(hi|hello|hey)\b/.test(lower)) {
+    return "Hello. I am ready to help. Ask a question or give me a task.";
+  }
+  if (lower.includes("trend") || lower.includes("trending")) {
+    return "I can help analyze trends, but I need a data source or timeframe. Tell me the domain (tech, markets, sports, news) and period.";
+  }
+  if (action === "analyze_logs") {
+    return "This looks like an issue-analysis request. Share the error logs and I will identify root cause and fixes.";
+  }
+  if (action === "run_tests") {
+    return "I can help run and diagnose tests. Tell me your stack and I will give the exact test commands and fixes.";
+  }
+  if (action === "run_build_checks") {
+    return "I can help with build checks. Share your build error output and I will provide targeted fixes.";
+  }
+  if (action === "prepare_deploy_plan") {
+    return "I can draft a production deploy plan with rollout, health checks, rollback, and monitoring steps.";
+  }
+  return "Understood. I can continue with context gathering and provide a concrete next action if you share more details.";
+}
+
 /**
  * Handles AI inference requests via ML service.
  */
@@ -99,11 +125,13 @@ export async function handleAIInference(req: Request, res: Response) {
         intent: mlData.action || "unknown",
       },
     });
+    const assistant = String(mlData?.response || buildAssistantResponse(String(input || ""), String(mlData?.action || fallbackIntent)));
     res.json({
       success: true,
       reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,
       intent: mlData.action || "unknown",
       risk: "low",
+      response: assistant,
       ml: { ...mlData, mesh: usedMesh },
       timestamp: new Date().toISOString(),
     });
@@ -137,11 +165,13 @@ export async function handleAIInference(req: Request, res: Response) {
       workspaceId: req.auth?.workspaceId,
       metadata: { reason: "ml_unavailable", intent: fallbackIntent },
     });
+    const assistant = buildAssistantResponse(String(input || ""), fallbackIntent);
     res.json({
       success: true,
       reasoning: `Fallback inferred action '${fallbackIntent}'`,
       intent: fallbackIntent,
       risk: "low",
+      response: assistant,
       ml: {
         status: "fallback",
         action: fallbackIntent,

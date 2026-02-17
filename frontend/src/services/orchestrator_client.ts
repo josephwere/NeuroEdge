@@ -15,6 +15,7 @@ export interface ExecuteResponse {
   reasoning?: string;
   intent?: string;
   risk?: "low" | "medium" | "high";
+  response?: string;
   logs?: string[];
   results?: Array<{ id?: string; success: boolean; stdout?: string; stderr?: string }>;
   approvals?: Array<{ id: string; message: string; command?: string }>;
@@ -73,17 +74,20 @@ export class OrchestratorClient {
       throw new Error("Command is required");
     }
 
-    const [aiResult, execResult] = await Promise.allSettled([
-      this.postJson("/ai", {
-        kernelId,
-        input: command,
-        context: req.context || [],
-      }),
-      this.postJson("/execute", {
-        kernelId,
-        command,
-      }),
-    ]);
+    const chatLike = this.isChatPrompt(command);
+    const aiPromise = this.postJson("/ai", {
+      kernelId,
+      input: command,
+      context: req.context || [],
+    });
+    const execPromise = chatLike
+      ? Promise.resolve(null)
+      : this.postJson("/execute", {
+          kernelId,
+          command,
+        });
+
+    const [aiResult, execResult] = await Promise.allSettled([aiPromise, execPromise]);
 
     const aiResp = aiResult.status === "fulfilled" ? aiResult.value : null;
     const execResp = execResult.status === "fulfilled" ? execResult.value : null;
@@ -111,10 +115,11 @@ export class OrchestratorClient {
       }
     }
 
+    const assistantText = String(aiResp?.response || "");
     let finalSuccess = Boolean(
       (execResp?.success && !executeError) || fallbackChatResp?.success || aiResp?.success
     );
-    let finalStdout = fallbackChatResp?.stdout || execResp?.stdout;
+    let finalStdout = assistantText || fallbackChatResp?.stdout || execResp?.stdout;
     let finalStderr =
       finalSuccess ? undefined : (fallbackChatResp?.stderr || execResp?.stderr || executeError || "Execution failed");
     let finalReasoning = fallbackChatResp?.success
@@ -134,6 +139,7 @@ export class OrchestratorClient {
       reasoning: finalReasoning,
       intent: aiResp?.intent,
       risk: aiResp?.risk || "low",
+      response: assistantText || undefined,
       logs: [],
       results: [
         {
@@ -146,6 +152,23 @@ export class OrchestratorClient {
       approvals: Array.isArray(execResp?.approvals) ? execResp.approvals : [],
       meshStatus: [],
     };
+  }
+
+  private isChatPrompt(command: string): boolean {
+    const text = String(command || "").trim();
+    if (!text) return true;
+    const lower = text.toLowerCase();
+    if (text.includes("\n")) return false;
+    if (/[|;&<>]/.test(text)) return false;
+    const cliStarters = [
+      "cd ", "ls", "pwd", "git ", "pnpm ", "npm ", "yarn ", "go ", "python", "pip ",
+      "curl ", "wget ", "cat ", "mkdir ", "rm ", "cp ", "mv ", "touch ", "echo ",
+      "docker ", "kubectl ", "node ", "npx ", "make ", "chmod ", "chown ", "sudo ",
+    ];
+    if (cliStarters.some((p) => lower === p.trim() || lower.startsWith(p))) return false;
+    if (text.endsWith("?")) return true;
+    if (/\b(what|how|why|when|where|who|help|explain|trend|trending)\b/i.test(text)) return true;
+    return text.split(" ").length >= 2;
   }
 
   sendCommand(cmd: { command?: string; payload?: any }): Promise<ExecuteResponse> {
