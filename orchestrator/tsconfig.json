@@ -26,6 +26,8 @@
       "@github/*": ["github/*"],
       "@context/*": ["context/*"],
       "@federation/*": ["federation/*"],
+      "@observability/*": ["observability/*"],
+      "@billing/*": ["billing/*"],
       "@stream/*": ["stream/*"],
       "@types/*": ["types/*"],
       "@server": ["server/index"]

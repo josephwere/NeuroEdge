@@ -2,11 +2,15 @@
 import { Request, Response } from "express";
 import axios from "axios";
 import { appendEvent } from "@storage/hybrid_db";
+import { traceLLMCall } from "@observability/tracing";
+import { recordTokenUsage } from "@billing/usage";
+import { trackTokenUsage } from "@observability/metrics";
 
 /**
  * Handles AI inference requests via ML service.
  */
 export async function handleAIInference(req: Request, res: Response) {
+  const startedAt = Date.now();
   const input = req.body?.input || req.body?.text || req.body?.message || "";
   const payload = req.body?.payload || {};
 
@@ -63,6 +67,38 @@ export async function handleAIInference(req: Request, res: Response) {
         input_len: String(input || "").length,
       },
     });
+    const inputTokens = Math.max(1, Math.ceil(String(input || "").length / 4));
+    const outputTokens = Math.max(1, Math.ceil(JSON.stringify(mlData || {}).length / 4));
+    trackTokenUsage("/ai", inputTokens, outputTokens);
+    await recordTokenUsage({
+      route: "/ai",
+      orgId: req.auth?.orgId || "personal",
+      workspaceId: req.auth?.workspaceId || "default",
+      actor: req.auth?.sub || "anonymous",
+      provider: usedMesh ? "mesh" : "ml",
+      model: process.env.ML_MODEL_NAME || "neuroedge-ml",
+      inputText: input,
+      outputText: mlData,
+      inputTokens,
+      outputTokens,
+      stripeCustomerId:
+        (req.auth?.raw?.stripe_customer_id as string | undefined) ||
+        (req.header("x-stripe-customer-id") as string | undefined),
+    });
+    await traceLLMCall({
+      name: "ai.infer",
+      provider: usedMesh ? "mesh" : "ml",
+      model: process.env.ML_MODEL_NAME || "neuroedge-ml",
+      inputTokens,
+      outputTokens,
+      latencyMs: Date.now() - startedAt,
+      success: true,
+      orgId: req.auth?.orgId,
+      workspaceId: req.auth?.workspaceId,
+      metadata: {
+        intent: mlData.action || "unknown",
+      },
+    });
     res.json({
       success: true,
       reasoning: `${usedMesh ? "Mesh" : "ML"} inferred action '${mlData.action || "unknown"}'`,
@@ -73,6 +109,34 @@ export async function handleAIInference(req: Request, res: Response) {
     });
   } catch (err) {
     console.warn("[aiHandler] ML unavailable, returning fallback intent");
+    const inputTokens = Math.max(1, Math.ceil(String(input || "").length / 4));
+    trackTokenUsage("/ai", inputTokens, 0);
+    await recordTokenUsage({
+      route: "/ai",
+      orgId: req.auth?.orgId || "personal",
+      workspaceId: req.auth?.workspaceId || "default",
+      actor: req.auth?.sub || "anonymous",
+      provider: "fallback",
+      model: "rule-based-fallback",
+      inputText: input,
+      inputTokens,
+      outputTokens: 0,
+      stripeCustomerId:
+        (req.auth?.raw?.stripe_customer_id as string | undefined) ||
+        (req.header("x-stripe-customer-id") as string | undefined),
+    });
+    await traceLLMCall({
+      name: "ai.infer",
+      provider: "fallback",
+      model: "rule-based-fallback",
+      inputTokens,
+      outputTokens: 0,
+      latencyMs: Date.now() - startedAt,
+      success: false,
+      orgId: req.auth?.orgId,
+      workspaceId: req.auth?.workspaceId,
+      metadata: { reason: "ml_unavailable", intent: fallbackIntent },
+    });
     res.json({
       success: true,
       reasoning: `Fallback inferred action '${fallbackIntent}'`,

@@ -1,0 +1,53 @@
+{
+  "title": "NeuroEdge Orchestrator",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "HTTP Requests / sec",
+      "targets": [
+        {
+          "expr": "sum(rate(neuroedge_http_requests_total[1m]))",
+          "legendFormat": "req/s"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "P95 HTTP Latency (s)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(neuroedge_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Mesh Nodes Online",
+      "targets": [
+        {
+          "expr": "neuroedge_mesh_nodes_online",
+          "legendFormat": "nodes"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Token Usage / min",
+      "targets": [
+        {
+          "expr": "sum(rate(neuroedge_token_usage_total[1m]))",
+          "legendFormat": "tokens/min"
+        }
+      ],
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 8 }
+    }
+  ]
+}
+

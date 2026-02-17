@@ -19,6 +19,15 @@ import { handleAIInference } from "@handlers/aiHandler";
 import { appendEvent, listEvents, readState, writeState } from "@storage/hybrid_db";
 import { InferenceRegistry, InferenceNode } from "@mesh/inference_registry";
 import { FedAggregator, verifyPayload, signPayload } from "@federation/fed_aggregator";
+import { authMiddleware } from "@security/auth";
+import { requireScope, requireWorkspace } from "@security/scope";
+import {
+  getPrometheusContentType,
+  metricsMiddleware,
+  renderPrometheusMetrics,
+  setMeshNodesOnline,
+} from "@observability/metrics";
+import { summarizeUsage } from "@billing/usage";
 
 export function startServer(
   restPort: number,
@@ -39,6 +48,22 @@ export function startServer(
     next();
   });
   app.use(express.json());
+  app.use(metricsMiddleware);
+  app.use(authMiddleware);
+
+  app.get("/metrics", async (_req: Request, res: Response) => {
+    res.set("Content-Type", getPrometheusContentType());
+    res.send(await renderPrometheusMetrics());
+  });
+
+  app.get("/auth/whoami", (req: Request, res: Response) => {
+    res.json({
+      sub: req.auth?.sub || "anonymous",
+      orgId: req.auth?.orgId || "personal",
+      workspaceId: req.auth?.workspaceId || "default",
+      scopes: req.auth?.scopes || [],
+    });
+  });
 
   app.get("/status", (_req: Request, res: Response) => {
     res.json({
@@ -97,7 +122,7 @@ export function startServer(
   const fedAggregator = new FedAggregator();
   const fedKey = process.env.NEUROEDGE_FED_KEY || "";
 
-  app.post("/mesh/register", (req: Request, res: Response) => {
+  app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities } = req.body || {};
     if (!id || !baseUrl) {
       return res.status(400).json({ error: "Missing id or baseUrl" });
@@ -108,17 +133,19 @@ export function startServer(
       kind: kind || "unknown",
       capabilities: Array.isArray(capabilities) ? capabilities : [],
     } as InferenceNode);
+    setMeshNodesOnline(meshRegistry.list().filter((n) => n.online).length);
     res.json({ status: "ok" });
   });
 
-  app.post("/mesh/heartbeat", (req: Request, res: Response) => {
+  app.post("/mesh/heartbeat", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: "Missing id" });
     meshRegistry.heartbeat(id);
+    setMeshNodesOnline(meshRegistry.list().filter((n) => n.online).length);
     res.json({ status: "ok" });
   });
 
-  app.post("/mesh/metrics", (req: Request, res: Response) => {
+  app.post("/mesh/metrics", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, latency_ms, load, cache_size } = req.body || {};
     if (!id) return res.status(400).json({ error: "Missing id" });
     meshRegistry.updateMetrics(id, {
@@ -126,10 +153,11 @@ export function startServer(
       load: typeof load === "number" ? load : undefined,
       cacheSize: typeof cache_size === "number" ? cache_size : undefined,
     });
+    setMeshNodesOnline(meshRegistry.list().filter((n) => n.online).length);
     res.json({ status: "ok" });
   });
 
-  app.post("/mesh/train-signal", (req: Request, res: Response) => {
+  app.post("/mesh/train-signal", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, signal } = req.body || {};
     if (!id || !signal) return res.status(400).json({ error: "Missing id or signal" });
     appendEvent({
@@ -141,11 +169,11 @@ export function startServer(
   });
 
   /* ---------------- Federated Training ---------------- */
-  app.get("/fed/model", (_req: Request, res: Response) => {
+  app.get("/fed/model", requireScope("federation:read"), (_req: Request, res: Response) => {
     res.json({ model: fedAggregator.getGlobal() });
   });
 
-  app.post("/fed/update", (req: Request, res: Response) => {
+  app.post("/fed/update", requireScope("federation:write"), (req: Request, res: Response) => {
     const { update, sig } = req.body || {};
     if (!update) return res.status(400).json({ error: "Missing update" });
     if (!verifyPayload(update, sig || "", fedKey)) {
@@ -160,18 +188,20 @@ export function startServer(
     res.json({ status: "ok" });
   });
 
-  app.post("/fed/sign", (req: Request, res: Response) => {
+  app.post("/fed/sign", requireScope("federation:write"), (req: Request, res: Response) => {
     const { payload } = req.body || {};
     if (!payload) return res.status(400).json({ error: "Missing payload" });
     if (!fedKey) return res.status(400).json({ error: "Missing NEUROEDGE_FED_KEY" });
     res.json({ sig: signPayload(payload, fedKey) });
   });
 
-  app.get("/mesh/nodes", (_req: Request, res: Response) => {
-    res.json(meshRegistry.list());
+  app.get("/mesh/nodes", requireScope("mesh:read"), (_req: Request, res: Response) => {
+    const nodes = meshRegistry.list();
+    setMeshNodesOnline(nodes.filter((n) => n.online).length);
+    res.json(nodes);
   });
 
-  app.post("/mesh/infer", async (req: Request, res: Response) => {
+  app.post("/mesh/infer", requireWorkspace, requireScope("ai:infer"), async (req: Request, res: Response) => {
     const node = meshRegistry.pickNode();
     if (!node) {
       return res.status(503).json({ error: "No mesh nodes available" });
@@ -184,14 +214,14 @@ export function startServer(
     }
   });
 
-  app.post("/chat", handleChat);
-  app.post("/execute", handleExecution);
-  app.post("/ai", handleAIInference);
+  app.post("/chat", requireWorkspace, requireScope("chat:write"), handleChat);
+  app.post("/execute", requireWorkspace, requireScope("execute:run"), handleExecution);
+  app.post("/ai", requireWorkspace, requireScope("ai:infer"), handleAIInference);
 
   app.get("/storage/state", (_req: Request, res: Response) => {
     res.json(readState());
   });
-  app.post("/storage/state", (req: Request, res: Response) => {
+  app.post("/storage/state", requireScope("storage:write"), (req: Request, res: Response) => {
     const next = req.body || {};
     res.json(writeState(next));
   });
@@ -199,9 +229,16 @@ export function startServer(
     const limit = Number(req.query.limit) || 200;
     res.json(listEvents(limit));
   });
-  app.post("/storage/event", (req: Request, res: Response) => {
+  app.post("/storage/event", requireScope("storage:write"), (req: Request, res: Response) => {
     const evt = req.body || {};
     res.json(appendEvent(evt));
+  });
+  app.get("/billing/usage", requireWorkspace, requireScope("billing:read"), (req: Request, res: Response) => {
+    res.json({
+      orgId: req.auth?.orgId || "personal",
+      workspaceId: req.auth?.workspaceId || "default",
+      summary: summarizeUsage(),
+    });
   });
   const kernelsHandler = async (_req: Request, res: Response) => {
     const snapshot = await globalKernelManager.getAllHealth();

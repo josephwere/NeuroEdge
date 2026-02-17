@@ -5,6 +5,9 @@ export interface OrchestratorConfig {
   mlUrl: string;
   logLevel: "debug" | "info" | "warn" | "error";
   localOnly: boolean;
+  authRequired: boolean;
+  authzEnforceScopes: boolean;
+  authzRequireWorkspace: boolean;
 }
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
@@ -32,6 +35,22 @@ export function loadConfig(): OrchestratorConfig {
   const kernelUrl = process.env.KERNEL_URL || "http://localhost:8080";
   const mlUrl = process.env.ML_URL || "http://localhost:8090";
   const localOnly = parseBool(process.env.NEUROEDGE_LOCAL_ONLY, true);
+  const authRequired = parseBool(process.env.AUTH_REQUIRED, true);
+  const authzEnforceScopes = parseBool(process.env.AUTHZ_ENFORCE_SCOPES, true);
+  const authzRequireWorkspace = parseBool(process.env.AUTHZ_REQUIRE_WORKSPACE, true);
+
+  if (authRequired) {
+    const hasJwtKey = Boolean((process.env.JWT_SECRET || "").trim()) || Boolean((process.env.JWT_PUBLIC_KEY || "").trim());
+    if (!hasJwtKey) {
+      throw new Error("AUTH_REQUIRED=true but neither JWT_SECRET nor JWT_PUBLIC_KEY is configured.");
+    }
+    if (!(process.env.JWT_ISSUER || "").trim()) {
+      throw new Error("AUTH_REQUIRED=true requires JWT_ISSUER.");
+    }
+    if (!(process.env.JWT_AUDIENCE || "").trim()) {
+      throw new Error("AUTH_REQUIRED=true requires JWT_AUDIENCE.");
+    }
+  }
 
   if (localOnly) {
     assertLocalServiceUrl("KERNEL_URL", kernelUrl);
@@ -44,5 +63,8 @@ export function loadConfig(): OrchestratorConfig {
     mlUrl,
     logLevel: (process.env.LOG_LEVEL as any) || "info",
     localOnly,
+    authRequired,
+    authzEnforceScopes,
+    authzRequireWorkspace,
   };
 }
