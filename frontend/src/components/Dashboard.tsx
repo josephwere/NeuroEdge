@@ -112,6 +112,23 @@ interface WebhookRecord {
   active: boolean;
 }
 
+interface IntegrationApp {
+  id: string;
+  appName: string;
+  appDescription?: string;
+  owner?: string;
+  status: "active" | "paused" | "revoked";
+  environment: "development" | "staging" | "production";
+  scopes: string[];
+  allowedOrigins: string[];
+  rateLimitPerMin: number;
+  webhookUrl?: string;
+  apiKey?: string;
+  keyMasked?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
 interface AgentProfile {
   id: string;
   name: string;
@@ -344,6 +361,24 @@ const Dashboard: React.FC = () => {
       return [];
     }
   });
+  const [integrations, setIntegrations] = useState<IntegrationApp[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_integrations_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [integrationDraft, setIntegrationDraft] = useState({
+    appName: "",
+    appDescription: "",
+    environment: "production" as IntegrationApp["environment"],
+    scopesCsv: "chat:write, ai:infer",
+    originsCsv: "",
+    webhookUrl: "",
+    rateLimitPerMin: "120",
+  });
+  const [latestGeneratedApiKey, setLatestGeneratedApiKey] = useState("");
   const [webhookEvent, setWebhookEvent] = useState("chat.completed");
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() => {
     try {
@@ -458,6 +493,9 @@ const Dashboard: React.FC = () => {
     localStorage.setItem("neuroedge_webhooks_v1", JSON.stringify(webhooks));
   }, [webhooks]);
   useEffect(() => {
+    localStorage.setItem("neuroedge_integrations_v1", JSON.stringify(integrations));
+  }, [integrations]);
+  useEffect(() => {
     localStorage.setItem("neuroedge_support_tickets_v1", JSON.stringify(supportTickets));
   }, [supportTickets]);
   useEffect(() => {
@@ -570,6 +608,7 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.supportTickets)) setSupportTickets(remote.supportTickets);
     if (Array.isArray(remote.devApiKeys)) setDevApiKeys(remote.devApiKeys);
     if (Array.isArray(remote.webhooks)) setWebhooks(remote.webhooks);
+    if (Array.isArray(remote.integrations)) setIntegrations(remote.integrations);
     if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
     if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
@@ -589,6 +628,8 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.supportTickets)) setSupportTickets(data.supportTickets);
       if (Array.isArray(data.devApiKeys)) setDevApiKeys(data.devApiKeys);
       if (Array.isArray(data.webhooks)) setWebhooks(data.webhooks);
+      if (Array.isArray(data.integrations)) setIntegrations(data.integrations);
+      if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
       if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
       if (Array.isArray(data.enterpriseDepartments)) setEnterpriseDepartments(data.enterpriseDepartments);
@@ -1053,6 +1094,67 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: "Webhook added." });
   };
 
+  const createIntegration = async () => {
+    const appName = integrationDraft.appName.trim();
+    if (!appName) {
+      addNotification({ type: "error", message: "App name is required." });
+      return;
+    }
+    const scopes = integrationDraft.scopesCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const allowedOrigins = integrationDraft.originsCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const body = {
+      integration: {
+        appName,
+        appDescription: integrationDraft.appDescription.trim(),
+        environment: integrationDraft.environment,
+        scopes: scopes.length ? scopes : ["chat:write"],
+        allowedOrigins,
+        webhookUrl: integrationDraft.webhookUrl.trim(),
+        rateLimitPerMin: Number(integrationDraft.rateLimitPerMin || 120),
+      },
+    };
+    const data = await callAction("/admin/dashboard/integrations/upsert", body);
+    if (data?.apiKey) {
+      setLatestGeneratedApiKey(String(data.apiKey));
+      addNotification({ type: "success", message: "Integration created. Copy API key now." });
+    }
+  };
+
+  const requestPaidIntegrationKey = async () => {
+    const appName = integrationDraft.appName.trim();
+    if (!appName) {
+      addNotification({ type: "error", message: "App name is required." });
+      return;
+    }
+    const scopes = integrationDraft.scopesCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const allowedOrigins = integrationDraft.originsCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const data = await callAction("/dashboard/integrations/request-key", {
+      appName,
+      appDescription: integrationDraft.appDescription.trim(),
+      environment: integrationDraft.environment,
+      scopes: scopes.length ? scopes : ["chat:write"],
+      allowedOrigins,
+      webhookUrl: integrationDraft.webhookUrl.trim(),
+      rateLimitPerMin: Number(integrationDraft.rateLimitPerMin || 60),
+    });
+    if (data?.apiKey) {
+      setLatestGeneratedApiKey(String(data.apiKey));
+      addNotification({ type: "success", message: "Paid key issued. Copy API key now." });
+    }
+  };
+
   const testWebhook = async (id: string) => {
     const hook = webhooks.find((w) => w.id === id);
     if (!hook) return;
@@ -1249,6 +1351,110 @@ const Dashboard: React.FC = () => {
           Ready state: stores compute donation reward policy and payout wallet config for transparent reward accounting.
         </div>
         <button style={primary} onClick={saveCryptoRewards}>Save Crypto Rewards</button>
+      </Card>
+      <Card title="Integrations & API Platform (Founder Premium)">
+        <div style={{ display: "grid", gap: 8 }}>
+          <input
+            value={integrationDraft.appName}
+            onChange={(e) => setIntegrationDraft((p) => ({ ...p, appName: e.target.value }))}
+            placeholder="App name (e.g. afyalink)"
+            style={input}
+          />
+          <textarea
+            value={integrationDraft.appDescription}
+            onChange={(e) => setIntegrationDraft((p) => ({ ...p, appDescription: e.target.value }))}
+            placeholder="App details / what it needs from NeuroEdge"
+            style={{ ...input, minHeight: 70 }}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              value={integrationDraft.environment}
+              onChange={(e) => setIntegrationDraft((p) => ({ ...p, environment: e.target.value as IntegrationApp["environment"] }))}
+              style={input}
+            >
+              <option value="development">development</option>
+              <option value="staging">staging</option>
+              <option value="production">production</option>
+            </select>
+            <input
+              value={integrationDraft.rateLimitPerMin}
+              onChange={(e) => setIntegrationDraft((p) => ({ ...p, rateLimitPerMin: e.target.value }))}
+              placeholder="Rate limit/min"
+              style={input}
+            />
+          </div>
+          <input
+            value={integrationDraft.scopesCsv}
+            onChange={(e) => setIntegrationDraft((p) => ({ ...p, scopesCsv: e.target.value }))}
+            placeholder="Scopes (comma-separated): chat:write, ai:infer, execute:run"
+            style={input}
+          />
+          <input
+            value={integrationDraft.originsCsv}
+            onChange={(e) => setIntegrationDraft((p) => ({ ...p, originsCsv: e.target.value }))}
+            placeholder="Allowed origins (comma-separated)"
+            style={input}
+          />
+          <input
+            value={integrationDraft.webhookUrl}
+            onChange={(e) => setIntegrationDraft((p) => ({ ...p, webhookUrl: e.target.value }))}
+            placeholder="Webhook URL"
+            style={input}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={createIntegration}>Create Integration + Key</button>
+          <button style={chip} onClick={requestPaidIntegrationKey}>Request Paid User Key</button>
+        </div>
+        {!!latestGeneratedApiKey && (
+          <div style={log}>
+            <div style={{ marginBottom: 6 }}>Generated API Key</div>
+            <code style={{ fontSize: "0.78rem", wordBreak: "break-all" }}>{latestGeneratedApiKey}</code>
+            <div style={{ marginTop: 8 }}>
+              <button style={chip} onClick={() => navigator.clipboard?.writeText(latestGeneratedApiKey)}>Copy API Key</button>
+            </div>
+          </div>
+        )}
+        <div style={{ display: "grid", gap: 8 }}>
+          {integrations.map((it) => (
+            <div key={it.id} style={log}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <strong>{it.appName}</strong>
+                <span>{it.environment} • {it.status}</span>
+              </div>
+              <div style={{ marginTop: 4, color: "#94a3b8" }}>{it.appDescription || "No description."}</div>
+              <div style={{ marginTop: 4 }}>Scopes: {(it.scopes || []).join(", ") || "-"}</div>
+              <div>Key: {it.keyMasked || (it.apiKey ? `${it.apiKey.slice(0, 6)}...${it.apiKey.slice(-4)}` : "not set")}</div>
+              <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {it.apiKey && (
+                  <button style={chip} onClick={() => navigator.clipboard?.writeText(it.apiKey || "")}>Copy Key</button>
+                )}
+                <button
+                  style={chip}
+                  onClick={() =>
+                    callAction("/admin/dashboard/integrations/upsert", {
+                      integration: {
+                        ...it,
+                        status: it.status === "active" ? "paused" : "active",
+                      },
+                    })
+                  }
+                >
+                  {it.status === "active" ? "Pause" : "Activate"}
+                </button>
+                <button
+                  style={chip}
+                  onClick={() =>
+                    runGuarded(`integration ${it.appName}`, () => callAction("/admin/dashboard/integrations/delete", { id: it.id }), "delete")
+                  }
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+          {integrations.length === 0 && <div style={muted}>No integrations yet. Create your first app connection.</div>}
+        </div>
       </Card>
       <Card title="Role Governance">
         {users.map((u) => (

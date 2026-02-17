@@ -104,6 +104,25 @@ function requireRole(roles: string[]) {
   };
 }
 
+function isPaidUser(req: Request): boolean {
+  const raw = req.auth?.raw || {};
+  const plan = String(
+    (raw.plan as string | undefined) ||
+      (raw.subscription_tier as string | undefined) ||
+      (raw.tier as string | undefined) ||
+      (req.header("x-user-plan") as string | undefined) ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  return ["pro", "enterprise", "paid", "business"].includes(plan);
+}
+
+function generateApiKey(prefix = "ne_sk"): string {
+  const rand = () => Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${rand()}${rand()}${rand()}`;
+}
+
 function readDashboardSummary() {
   const state = readState();
   const defaults = {
@@ -161,6 +180,7 @@ function readDashboardSummary() {
     },
     supportTickets: [],
     devApiKeys: [{ id: "k1", name: "Default SDK Key", keyMasked: "neur...9x3a", createdAt: Date.now(), revoked: false }],
+    integrations: [],
     webhooks: [],
     extensions: [
       {
@@ -557,6 +577,83 @@ export function startServer(
     mergeDashboardSection("devApiKeys", next);
     auditDashboardAction(req, "api_keys", "toggle", { id });
     res.json({ success: true, devApiKeys: next });
+  });
+
+  app.post("/admin/dashboard/integrations/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+    const appInput = req.body?.integration || {};
+    const appName = String(appInput?.appName || "").trim();
+    if (!appName) return res.status(400).json({ error: "Missing appName" });
+    const { dashboard } = readDashboardSummary();
+    const integrations = Array.isArray(dashboard.integrations) ? dashboard.integrations : [];
+    const id = String(appInput?.id || `int-${Date.now()}`);
+    const apiKey = String(appInput?.apiKey || generateApiKey("ne_sk"));
+    const keyMasked = `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
+    const base = {
+      id,
+      appName,
+      appDescription: String(appInput?.appDescription || ""),
+      owner: req.auth?.sub || "unknown",
+      status: String(appInput?.status || "active"),
+      environment: String(appInput?.environment || "production"),
+      scopes: Array.isArray(appInput?.scopes) ? appInput.scopes : ["chat:write"],
+      allowedOrigins: Array.isArray(appInput?.allowedOrigins) ? appInput.allowedOrigins : [],
+      rateLimitPerMin: Number(appInput?.rateLimitPerMin || 120),
+      webhookUrl: String(appInput?.webhookUrl || ""),
+      apiKey,
+      keyMasked,
+      createdAt: Number(appInput?.createdAt || Date.now()),
+      updatedAt: Date.now(),
+    };
+    const exists = integrations.some((it: any) => it.id === id);
+    const next = exists
+      ? integrations.map((it: any) => (it.id === id ? { ...it, ...base } : it))
+      : [base, ...integrations];
+    mergeDashboardSection("integrations", next);
+    auditDashboardAction(req, "integrations", exists ? "update" : "create", { id, appName });
+    res.json({ success: true, integrations: next, apiKey });
+  });
+
+  app.post("/admin/dashboard/integrations/delete", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+    const id = String(req.body?.id || "");
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    const { dashboard } = readDashboardSummary();
+    const integrations = Array.isArray(dashboard.integrations) ? dashboard.integrations : [];
+    const next = integrations.filter((it: any) => it.id !== id);
+    mergeDashboardSection("integrations", next);
+    auditDashboardAction(req, "integrations", "delete", { id });
+    res.json({ success: true, integrations: next });
+  });
+
+  app.post("/dashboard/integrations/request-key", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (req: Request, res: Response) => {
+    if (!isPaidUser(req) && !isFounder(req) && !hasRole(req, ["admin", "developer"])) {
+      return res.status(403).json({ error: "Paid plan required for external API key request" });
+    }
+    const appName = String(req.body?.appName || "").trim();
+    if (!appName) return res.status(400).json({ error: "Missing appName" });
+    const { dashboard } = readDashboardSummary();
+    const integrations = Array.isArray(dashboard.integrations) ? dashboard.integrations : [];
+    const apiKey = generateApiKey("ne_usr");
+    const id = `int-${Date.now()}`;
+    const created = {
+      id,
+      appName,
+      appDescription: String(req.body?.appDescription || ""),
+      owner: req.auth?.sub || "unknown",
+      status: "active",
+      environment: String(req.body?.environment || "production"),
+      scopes: Array.isArray(req.body?.scopes) ? req.body.scopes : ["chat:write"],
+      allowedOrigins: Array.isArray(req.body?.allowedOrigins) ? req.body.allowedOrigins : [],
+      rateLimitPerMin: Number(req.body?.rateLimitPerMin || 60),
+      webhookUrl: String(req.body?.webhookUrl || ""),
+      apiKey,
+      keyMasked: `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const next = [created, ...integrations];
+    mergeDashboardSection("integrations", next);
+    auditDashboardAction(req, "integrations", "request_key", { id, appName });
+    res.json({ success: true, integration: created, apiKey, integrations: next });
   });
 
   app.post("/admin/dashboard/webhooks/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
