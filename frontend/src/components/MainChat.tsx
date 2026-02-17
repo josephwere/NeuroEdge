@@ -71,6 +71,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [isSending, setIsSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const sendRunRef = useRef(0);
+  const [recordingDraft, setRecordingDraft] = useState("");
+  const recordingDraftRef = useRef("");
 
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
@@ -459,6 +461,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       setIsListening(false);
       return;
     }
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
     const recognition = new SR();
     recognition.lang = "en-US";
     recognition.interimResults = true;
@@ -468,13 +472,26 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         .map((r: any) => r[0]?.transcript || "")
         .join(" ")
         .trim();
-      if (transcript) setInput((prev) => `${prev} ${transcript}`.trim());
+      recordingDraftRef.current = transcript;
+      setRecordingDraft(transcript);
     };
     recognition.onend = () => setIsListening(false);
     recognition.onerror = () => setIsListening(false);
     recognitionRef.current = recognition;
     setIsListening(true);
     recognition.start();
+  };
+
+  const acceptRecordingDraft = () => {
+    if (!recordingDraft.trim()) return;
+    setInput((prev) => `${prev} ${recordingDraft}`.trim());
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
+  };
+
+  const cancelRecordingDraft = () => {
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
   };
 
   const sendReaction = async (
@@ -973,32 +990,100 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
               outline: "none",
             }}
           />
+          {isListening && (
+            <div
+              style={{
+                position: "absolute",
+                left: 66,
+                right: 126,
+                top: "50%",
+                transform: "translateY(-50%)",
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                pointerEvents: "none",
+                opacity: 0.85,
+              }}
+            >
+              {Array.from({ length: 22 }).map((_, i) => (
+                <span
+                  key={`mw-${i}`}
+                  style={{
+                    width: 3,
+                    height: 8 + (i % 4) * 4,
+                    borderRadius: 3,
+                    background: "rgba(148,163,184,0.7)",
+                    animation: `neWave 1s ${i * 0.04}s ease-in-out infinite`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
           <button
             onClick={toggleVoiceInput}
             style={{
               padding: "0.55rem 0.7rem",
-              background: isListening ? "#f59e0b" : "#475569",
+              background: "transparent",
               color: "#fff",
-              border: "none",
+              border: "1px solid rgba(148,163,184,0.2)",
               borderRadius: 10,
               cursor: "pointer",
               fontWeight: 700,
+              fontSize: "1.22rem",
+              lineHeight: 1,
             }}
             title={isListening ? "Stop voice input" : "Start voice input"}
           >
             {isListening ? "◼" : "🎙"}
           </button>
+          {!!recordingDraft && !isListening && (
+            <>
+              <button
+                onClick={acceptRecordingDraft}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.65)",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+                title="Use recorded transcript"
+              >
+                ✓
+              </button>
+              <button
+                onClick={cancelRecordingDraft}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 999,
+                  border: "none",
+                  background: "#dc2626",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+                title="Discard recording"
+              >
+                ✕
+              </button>
+            </>
+          )}
           <button
             onClick={isSending ? cancelSend : handleSend}
             style={{
-              width: 38,
-              height: 38,
+              width: 44,
+              height: 44,
               background: isSending ? "#dc2626" : "#2563eb",
               color: "#fff",
               border: "none",
               borderRadius: 999,
               cursor: "pointer",
               fontWeight: 700,
+              fontSize: "1.3rem",
               display: "grid",
               placeItems: "center",
               animation: isSending ? "neSpin 1s linear infinite" : "none",
@@ -1009,7 +1094,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           </button>
         </div>
       </div>
-      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} }`}</style>
     </div>
   );
 };

@@ -73,6 +73,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const sendRunRef = useRef(0);
+  const [recordingDraft, setRecordingDraft] = useState("");
+  const recordingDraftRef = useRef("");
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -355,6 +357,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       setIsListening(false);
       return;
     }
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
     const recognition = new SR();
     recognition.lang = "en-US";
     recognition.interimResults = true;
@@ -364,13 +368,26 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         .map((r: any) => r[0]?.transcript || "")
         .join(" ")
         .trim();
-      if (transcript) setInput((prev) => `${prev} ${transcript}`.trim());
+      recordingDraftRef.current = transcript;
+      setRecordingDraft(transcript);
     };
     recognition.onend = () => setIsListening(false);
     recognition.onerror = () => setIsListening(false);
     recognitionRef.current = recognition;
     setIsListening(true);
     recognition.start();
+  };
+
+  const acceptRecordingDraft = () => {
+    if (!recordingDraft.trim()) return;
+    setInput((prev) => `${prev} ${recordingDraft}`.trim());
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
+  };
+
+  const cancelRecordingDraft = () => {
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
   };
 
   const startLongPress = (m: LogLine) => {
@@ -650,32 +667,99 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               placeholder="execute • debug • fix • analyze"
               style={{ flex: 1, padding: "10px", background: "rgba(15, 23, 42, 0.8)", border: "1px solid rgba(148, 163, 184, 0.3)", color: "#e2e8f0", borderRadius: 8, outline: "none" }}
             />
+            {isListening && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 56,
+                  right: 118,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  pointerEvents: "none",
+                  opacity: 0.85,
+                }}
+              >
+                {Array.from({ length: 18 }).map((_, i) => (
+                  <span
+                    key={`fw-${i}`}
+                    style={{
+                      width: 3,
+                      height: 7 + (i % 4) * 3,
+                      borderRadius: 3,
+                      background: "rgba(148,163,184,0.75)",
+                      animation: `neWave 1s ${i * 0.05}s ease-in-out infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
             <button
               onClick={toggleVoiceInput}
               style={{
                 padding: "10px",
-                background: isListening ? "#f59e0b" : "#475569",
-                border: "none",
+                background: "transparent",
+                border: "1px solid rgba(148,163,184,0.2)",
                 color: "#fff",
                 borderRadius: 8,
                 marginLeft: 6,
                 fontWeight: 700,
+                fontSize: "1.2rem",
               }}
               title={isListening ? "Stop voice input" : "Start voice input"}
             >
               {isListening ? "◼" : "🎙"}
             </button>
+            {!!recordingDraft && !isListening && (
+              <>
+                <button
+                  onClick={acceptRecordingDraft}
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.65)",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    marginLeft: 6,
+                    fontWeight: 800,
+                  }}
+                  title="Use recorded transcript"
+                >
+                  ✓
+                </button>
+                <button
+                  onClick={cancelRecordingDraft}
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 999,
+                    border: "none",
+                    background: "#dc2626",
+                    color: "#fff",
+                    marginLeft: 6,
+                    fontWeight: 800,
+                  }}
+                  title="Discard recording"
+                >
+                  ✕
+                </button>
+              </>
+            )}
             <button
               onClick={isSending ? cancelSend : send}
               style={{
-                width: 38,
-                height: 38,
+                width: 44,
+                height: 44,
                 background: isSending ? "#dc2626" : "#2563eb",
                 border: "none",
                 color: "#fff",
                 borderRadius: 999,
                 marginLeft: 6,
                 fontWeight: 700,
+                fontSize: "1.28rem",
                 animation: isSending ? "neSpin 1s linear infinite" : "none",
               }}
               title={isSending ? "Cancel" : "Send"}
@@ -685,7 +769,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
           </div>
         </>
       )}
-      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} }`}</style>
     </div>
   );
 };
