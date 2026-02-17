@@ -767,20 +767,6 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         </div>
         <div style={{ display: "flex", gap: "0.45rem" }}>
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:toggleFloating"))}
-            style={{
-              border: "1px solid rgba(148,163,184,0.35)",
-              background: "rgba(15,23,42,0.75)",
-              color: "#e2e8f0",
-              borderRadius: 8,
-              padding: "0.28rem 0.55rem",
-              cursor: "pointer",
-              fontSize: "0.72rem",
-            }}
-          >
-            Floating Chat
-          </button>
-          <button
             onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "my_chats" }))}
             style={{
               border: "1px solid rgba(148,163,184,0.35)",
