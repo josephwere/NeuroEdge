@@ -6,6 +6,7 @@ import {
   listProjects,
   updateProject,
 } from "@/services/projectStore";
+import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
 
 const ProjectsPanel: React.FC = () => {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -115,7 +116,14 @@ const ProjectsPanel: React.FC = () => {
               >
                 Edit
               </button>
-              <button style={dangerBtn} onClick={() => deleteProject(p.id)}>
+              <button
+                style={dangerBtn}
+                onClick={() => {
+                  if (!confirmSafeAction({ title: p.name, actionLabel: "delete project" })) return;
+                  deleteProject(p.id);
+                  window.alert(recoveryGuidance("Project"));
+                }}
+              >
                 Delete
               </button>
             </div>

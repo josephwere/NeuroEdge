@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { useNotifications } from "@/services/notificationStore";
 import { exportChatJSON, exportChatTXT, importChatJSON } from "@/services/chatExport";
+import { confirmSafeAction } from "@/services/safetyPrompts";
 
 const ChatHistoryPanel: React.FC = () => {
   const { messages, allMessages, replayMessage, resetHistory, importHistory } = useChatHistory();
@@ -57,7 +58,10 @@ const ChatHistoryPanel: React.FC = () => {
           <button onClick={() => handleExport("json")} style={primaryActionStyle}>Export JSON</button>
           <button onClick={() => handleExport("txt")} style={secondaryActionStyle}>Export TXT</button>
           <button
-            onClick={() => resetHistory()}
+            onClick={() => {
+              if (!confirmSafeAction({ title: "chat history", actionLabel: "clear", chatMode: true })) return;
+              resetHistory();
+            }}
             style={dangerActionStyle}
           >
             Clear History

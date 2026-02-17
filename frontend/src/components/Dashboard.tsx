@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
 import { chatContext } from "@/services/chatContext";
 import { listConversations } from "@/services/conversationStore";
+import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
 
 type View = "founder" | "admin" | "developer" | "agents" | "user" | "enterprise";
 
@@ -507,6 +508,12 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const runGuarded = async (title: string, fn: () => Promise<any>, actionLabel = "delete") => {
+    if (!confirmSafeAction({ title, actionLabel })) return;
+    const data = await fn();
+    if (data) addNotification({ type: "warn", message: recoveryGuidance(title) });
+  };
+
   useEffect(() => {
     const loadDashboardState = async () => {
       try {
@@ -739,6 +746,7 @@ const Dashboard: React.FC = () => {
   };
 
   const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
+    if (!confirmSafeAction({ title: `${service} service`, actionLabel: "restart" })) return;
     const reason = window.prompt(`Reason for restarting ${service}:`, "Emergency maintenance");
     if (!reason || reason.trim().length < 8) {
       addNotification({ type: "error", message: "Restart reason is required (min 8 characters)." });
@@ -870,7 +878,13 @@ const Dashboard: React.FC = () => {
         {plans.map((p) => (
           <div key={p.id} style={row}>
             <span>{p.name} (${p.monthly}/mo, ${p.annual}/yr)</span>
-            <button style={chip} onClick={() => callAction("/admin/dashboard/plans/toggle", { id: p.id })}>
+            <button
+              style={chip}
+              onClick={async () => {
+                if (p.active && !confirmSafeAction({ title: `${p.name} plan`, actionLabel: "disable" })) return;
+                await callAction("/admin/dashboard/plans/toggle", { id: p.id });
+              }}
+            >
               {p.active ? "Disable" : "Enable"}
             </button>
           </div>
@@ -1032,7 +1046,13 @@ const Dashboard: React.FC = () => {
                 <option value="new_users">new users</option>
                 <option value="enterprise">enterprise</option>
               </select>
-              <button style={chip} onClick={() => callAction("/admin/dashboard/offers/toggle", { id: o.id })}>
+              <button
+                style={chip}
+                onClick={async () => {
+                  if (o.active && !confirmSafeAction({ title: `${o.name} offer`, actionLabel: "disable" })) return;
+                  await callAction("/admin/dashboard/offers/toggle", { id: o.id });
+                }}
+              >
                 {o.active ? "Disable" : "Enable"}
               </button>
             </div>
@@ -1065,7 +1085,14 @@ const Dashboard: React.FC = () => {
                 <option value="triaged">triaged</option>
                 <option value="resolved">resolved</option>
               </select>
-              <button style={chip} onClick={() => callAction("/admin/dashboard/tickets/delete", { id: t.id })}>Close</button>
+              <button
+                style={chip}
+                onClick={() =>
+                  runGuarded(`ticket ${t.id}`, () => callAction("/admin/dashboard/tickets/delete", { id: t.id }), "close ticket")
+                }
+              >
+                Close
+              </button>
             </div>
           </div>
         ))}
@@ -1115,7 +1142,14 @@ const Dashboard: React.FC = () => {
             <span>{w.event} → {w.url}</span>
             <div style={{ display: "flex", gap: 6 }}>
               <button style={chip} onClick={() => testWebhook(w.id)}>Test</button>
-              <button style={chip} onClick={() => callAction("/admin/dashboard/webhooks/delete", { id: w.id })}>Delete</button>
+              <button
+                style={chip}
+                onClick={() =>
+                  runGuarded(`webhook ${w.url}`, () => callAction("/admin/dashboard/webhooks/delete", { id: w.id }))
+                }
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -1146,7 +1180,12 @@ const Dashboard: React.FC = () => {
         {agentsLocal.length === 0 ? <div style={muted}>No agents configured yet.</div> : agentsLocal.map((a) => (
           <div key={a.id} style={{ ...row, ...(selectedAgentId === a.id ? { border: "1px solid rgba(125,211,252,0.55)", borderRadius: 8, padding: 6 } : {}) }}>
             <button style={chip} onClick={() => setSelectedAgentId(a.id)}>{a.name}</button>
-            <button style={chip} onClick={() => callAction("/admin/dashboard/agents/delete", { id: a.id })}>Delete</button>
+            <button
+              style={chip}
+              onClick={() => runGuarded(`agent ${a.name}`, () => callAction("/admin/dashboard/agents/delete", { id: a.id }))}
+            >
+              Delete
+            </button>
           </div>
         ))}
         {adminAgents.length > 0 && (
@@ -1253,7 +1292,12 @@ const Dashboard: React.FC = () => {
             <span>{p.title}</span>
             <div style={{ display: "flex", gap: 6 }}>
               <button style={chip} onClick={() => navigator.clipboard?.writeText(p.text)}>Copy</button>
-              <button style={chip} onClick={() => callAction("/admin/dashboard/prompts/delete", { id: p.id })}>Delete</button>
+              <button
+                style={chip}
+                onClick={() => runGuarded(`prompt ${p.title}`, () => callAction("/admin/dashboard/prompts/delete", { id: p.id }))}
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -1295,7 +1339,14 @@ const Dashboard: React.FC = () => {
                   onBlur={(e) => callAction("/admin/dashboard/enterprise/departments/upsert", { department: { ...d, members: Number(e.target.value) || 1 } })}
                   style={{ ...input, width: 80 }}
                 />
-                <button style={chip} onClick={() => callAction("/admin/dashboard/enterprise/departments/delete", { id: d.id })}>Remove</button>
+                <button
+                  style={chip}
+                  onClick={() =>
+                    runGuarded(`department ${d.name}`, () => callAction("/admin/dashboard/enterprise/departments/delete", { id: d.id }), "remove")
+                  }
+                >
+                  Remove
+                </button>
               </div>
             </div>
           ))}

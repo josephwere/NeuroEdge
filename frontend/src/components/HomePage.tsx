@@ -21,6 +21,7 @@ import { OrchestratorClient } from "@/services/orchestrator_client";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { exportChatJSON, exportChatTXT } from "@/services/chatExport";
 import { useUI } from "@/services/uiStore";
+import { confirmSafeAction } from "@/services/safetyPrompts";
 
 import { loadExtension } from "@/extensions/extensionLoader";
 import codeLinter from "@/extensions/examples/codeLinter";
@@ -157,6 +158,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       return;
     }
     if (normalized === "clear history") {
+      if (!confirmSafeAction({ title: "chat history", actionLabel: "clear", chatMode: true })) return;
       resetHistory();
       startNewChat();
       return;
@@ -221,6 +223,14 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
               minWidth: 0,
             }}
           >
+            {activeView !== "chat" && (
+              <div style={viewHeaderStyle}>
+                <strong>{activeView.replace("_", " ").toUpperCase()}</strong>
+                <button style={viewCloseBtnStyle} onClick={() => setActiveView("chat")}>
+                  Close
+                </button>
+              </div>
+            )}
             {activeView === "chat" && <HomeContent orchestrator={orchestrator} />}
             {activeView === "my_chats" && <MyChatsPanel />}
             {activeView === "projects" && <ProjectsPanel />}
@@ -294,5 +304,25 @@ const overlayCloseBtn: React.CSSProperties = {
   background: "rgba(15,23,42,0.88)",
   color: "#e2e8f0",
   padding: "0.35rem 0.55rem",
+  cursor: "pointer",
+};
+
+const viewHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "0.45rem 0.7rem",
+  borderBottom: "1px solid rgba(148,163,184,0.22)",
+  background: "rgba(15,23,42,0.75)",
+  color: "#e2e8f0",
+  fontSize: "0.78rem",
+};
+
+const viewCloseBtnStyle: React.CSSProperties = {
+  border: "1px solid rgba(248,113,113,0.55)",
+  borderRadius: 8,
+  background: "#7f1d1d",
+  color: "#fff",
+  padding: "0.28rem 0.58rem",
   cursor: "pointer",
 };

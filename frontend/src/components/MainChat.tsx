@@ -26,6 +26,7 @@ import {
   deleteConversationMessage,
   createConversation,
 } from "@/services/conversationStore";
+import { confirmSafeAction } from "@/services/safetyPrompts";
 
 interface Message {
   id: string;
@@ -64,6 +65,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [editingDraft, setEditingDraft] = useState("");
   const longPressTimer = useRef<number | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
@@ -101,6 +105,18 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     importLegacyCacheOnce();
     const active = ensureActiveConversation();
     loadConversation(active.id);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -392,7 +408,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     if (!action) return;
     const normalized = action.trim().toLowerCase();
     if (normalized === "d") {
-      if (window.confirm("Delete this message?")) {
+      if (confirmSafeAction({ title: "chat message", actionLabel: "delete", chatMode: true })) {
         applyMessageDelete(msg.id);
       }
       return;
@@ -401,6 +417,41 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       setEditingMessageId(msg.id);
       setEditingDraft(msg.text);
     }
+  };
+
+  const onUploadFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const names = Array.from(files).map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(", ");
+    setInput((prev) => `${prev}${prev ? "\n" : ""}[Attached] ${names}`);
+  };
+
+  const toggleVoiceInput = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      addMessage("⚠️ Voice input is not supported in this browser.", "warn");
+      return;
+    }
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+    const recognition = new SR();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results || [])
+        .map((r: any) => r[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (transcript) setInput((prev) => `${prev} ${transcript}`.trim());
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
   };
 
   const sendReaction = async (
@@ -832,12 +883,37 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         style={{
           position: "relative",
           display: "flex",
+          alignItems: "center",
+          gap: "0.45rem",
           padding: "0.6rem",
           background: "rgba(15, 23, 42, 0.9)",
           borderTop: "1px solid rgba(148, 163, 184, 0.2)",
         }}
       >
         <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="*/*"
+          style={{ display: "none" }}
+          onChange={(e) => onUploadFiles(e.target.files)}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            padding: "0.55rem 0.7rem",
+            background: "#0ea5e9",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+          title="Upload files"
+        >
+          ＋
+        </button>
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -858,9 +934,23 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           }}
         />
         <button
+          onClick={toggleVoiceInput}
+          style={{
+            padding: "0.55rem 0.7rem",
+            background: isListening ? "#f59e0b" : "#475569",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+          title={isListening ? "Stop voice input" : "Start voice input"}
+        >
+          {isListening ? "◼" : "🎙"}
+        </button>
+        <button
           onClick={handleSend}
           style={{
-            marginLeft: "0.5rem",
             padding: "0.55rem 1rem",
             background: "#2563eb",
             color: "#fff",

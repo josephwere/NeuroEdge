@@ -6,6 +6,7 @@ import {
   listConversations,
   renameConversation,
 } from "@/services/conversationStore";
+import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
 
 const MyChatsPanel: React.FC = () => {
   const [threads, setThreads] = useState<ConversationThread[]>([]);
@@ -59,8 +60,9 @@ const MyChatsPanel: React.FC = () => {
   };
 
   const onDelete = (thread: ConversationThread) => {
-    if (!window.confirm(`Delete "${thread.title}"?`)) return;
+    if (!confirmSafeAction({ title: thread.title, actionLabel: "delete conversation" })) return;
     deleteConversation(thread.id);
+    window.alert(recoveryGuidance("Conversation"));
     refresh();
   };
 

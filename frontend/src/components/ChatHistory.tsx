@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import ChatSearchBar from "@/components/ChatSearchBar";
 import ChatHistoryItem from "@/components/ChatHistoryItem";
 import { ChatHistoryStore, ChatRecord } from "@/services/chatHistoryStore";
+import { confirmSafeAction } from "@/services/safetyPrompts";
 
 const ChatHistory: React.FC = () => {
   const [records, setRecords] = useState<ChatRecord[]>([]);
@@ -20,6 +21,7 @@ const ChatHistory: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
+    if (!confirmSafeAction({ title: "history record", actionLabel: "delete", chatMode: true })) return;
     ChatHistoryStore.remove(id);
     const updated = ChatHistoryStore.getAll();
     setRecords(updated);

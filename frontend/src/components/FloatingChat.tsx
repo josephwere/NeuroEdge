@@ -10,6 +10,7 @@ import { useChatHistory } from "@/services/chatHistoryStore";
 import { isFounderUser } from "@/services/founderAccess";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { confirmSafeAction } from "@/services/safetyPrompts";
 
 interface ExecutionResult {
   id: string;
@@ -66,6 +67,9 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(initialPosition || { x: 20, y: 20 });
   const longPressTimer = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -117,6 +121,18 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       setDisplayed(logs.slice(-PAGE_SIZE));
       setPage(1);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -288,13 +304,50 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     if (!action) return;
     const normalized = action.trim().toLowerCase();
     if (normalized === "d") {
-      if (window.confirm("Delete this message?")) applyMessageDelete(m.id);
+      if (confirmSafeAction({ title: "chat message", actionLabel: "delete", chatMode: true })) {
+        applyMessageDelete(m.id);
+      }
       return;
     }
     if (normalized === "e") {
       const next = window.prompt("Edit your message:", m.text);
       if (next !== null) applyMessageEdit(m.id, next);
     }
+  };
+
+  const onUploadFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const names = Array.from(files).map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(", ");
+    setInput((prev) => `${prev}${prev ? "\n" : ""}[Attached] ${names}`);
+  };
+
+  const toggleVoiceInput = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      addMessage("⚠️ Voice input is not supported in this browser.", "warn");
+      return;
+    }
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+    const recognition = new SR();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results || [])
+        .map((r: any) => r[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (transcript) setInput((prev) => `${prev} ${transcript}`.trim());
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
   };
 
   const startLongPress = (m: LogLine) => {
@@ -534,6 +587,21 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
           <div style={{ position: "relative", display: "flex" }}>
             <AISuggestionOverlay suggestions={suggestions} onAccept={acceptSuggestion} />
             <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="*/*"
+              style={{ display: "none" }}
+              onChange={(e) => onUploadFiles(e.target.files)}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{ padding: "10px", background: "#0ea5e9", border: "none", color: "#fff", borderRadius: 8, marginRight: 6, fontWeight: 700 }}
+              title="Upload files"
+            >
+              ＋
+            </button>
+            <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => {
@@ -544,6 +612,21 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               placeholder="execute • debug • fix • analyze"
               style={{ flex: 1, padding: "10px", background: "rgba(15, 23, 42, 0.8)", border: "1px solid rgba(148, 163, 184, 0.3)", color: "#e2e8f0", borderRadius: 8, outline: "none" }}
             />
+            <button
+              onClick={toggleVoiceInput}
+              style={{
+                padding: "10px",
+                background: isListening ? "#f59e0b" : "#475569",
+                border: "none",
+                color: "#fff",
+                borderRadius: 8,
+                marginLeft: 6,
+                fontWeight: 700,
+              }}
+              title={isListening ? "Stop voice input" : "Start voice input"}
+            >
+              {isListening ? "◼" : "🎙"}
+            </button>
             <button onClick={send} style={{ padding: "10px", background: "#2563eb", border: "none", color: "#fff", borderRadius: 8, marginLeft: 6 }}>▶</button>
           </div>
         </>
