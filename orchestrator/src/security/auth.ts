@@ -25,6 +25,13 @@ function parseScopes(claims?: JwtClaims): string[] {
   return [];
 }
 
+function parseScopeList(raw: string): string[] {
+  return raw
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function isTruthy(v?: string): boolean {
   if (!v) return false;
   return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
@@ -98,7 +105,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const scopes = parseScopes(claims);
+  const jwtScopes = parseScopes(claims);
+  const apiKeyScopes = parseScopeList(
+    process.env.API_KEY_SCOPES ||
+      "chat:write execute:run ai:infer mesh:read mesh:write billing:read storage:write federation:read federation:write"
+  );
+  const scopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : [];
   const requestedOrg = req.header("x-org-id") || undefined;
   const requestedWorkspace = req.header("x-workspace-id") || undefined;
   req.auth = {
