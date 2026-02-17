@@ -3,6 +3,7 @@ import { useNotifications } from "@/services/notificationStore";
 import { chatContext } from "@/services/chatContext";
 import { listConversations } from "@/services/conversationStore";
 import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
+import { isFounderUser } from "@/services/founderAccess";
 
 type View = "founder" | "admin" | "developer" | "agents" | "user" | "enterprise";
 
@@ -118,6 +119,8 @@ interface EnterpriseDepartment {
   tokensPerMonth: number;
 }
 
+type UploadTier = "founder" | "admin" | "paid" | "free";
+
 const Dashboard: React.FC = () => {
   const { addNotification } = useNotifications();
   const [view, setView] = useState<View>("founder");
@@ -139,6 +142,26 @@ const Dashboard: React.FC = () => {
   const [twinUploadedZips, setTwinUploadedZips] = useState<Array<{ name: string; data_base64: string }>>([]);
   const [twinIncludeAnalyze, setTwinIncludeAnalyze] = useState(true);
   const [twinIncludeReport, setTwinIncludeReport] = useState(true);
+
+  const twinUploadTier = useMemo<UploadTier>(() => {
+    if (isFounderUser()) return "founder";
+    try {
+      const rawUser = localStorage.getItem("neuroedge_user");
+      const user = rawUser ? JSON.parse(rawUser) : {};
+      const role = String(user?.role || "").toLowerCase();
+      if (role === "admin" || role === "moderator") return "admin";
+      const tier = String(
+        user?.plan ||
+          localStorage.getItem("neuroedge_plan") ||
+          localStorage.getItem("neuroedge_subscription_tier") ||
+          ""
+      ).toLowerCase();
+      if (tier === "pro" || tier === "enterprise" || tier === "paid") return "paid";
+    } catch {
+      // fallback below
+    }
+    return "free";
+  }, []);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -786,13 +809,59 @@ const Dashboard: React.FC = () => {
 
   const handleTwinZipUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const tierLimitsMb: Record<UploadTier, { perZip: number; total: number; wire: number }> = {
+      founder: { perZip: 102400, total: 307200, wire: 30 }, // 100GB each, 300GB total policy
+      admin: { perZip: 20480, total: 61440, wire: 25 }, // 20GB each, 60GB total policy
+      paid: { perZip: 5120, total: 15360, wire: 20 }, // 5GB each, 15GB total policy
+      free: { perZip: Number(import.meta.env.VITE_TWIN_MAX_ZIP_MB || 8), total: Number(import.meta.env.VITE_TWIN_MAX_TOTAL_ZIP_MB || 20), wire: 12 },
+    };
+    const policy = tierLimitsMb[twinUploadTier];
+    const maxZipMb = policy.perZip;
+    const maxTotalMb = policy.total;
+    const maxWireMb = policy.wire; // direct JSON/base64 transfer practical ceiling
+    const maxZipBytes = Math.max(1, maxZipMb) * 1024 * 1024;
+    const maxTotalBytes = Math.max(1, maxTotalMb) * 1024 * 1024;
+    const maxWireBytes = Math.max(1, maxWireMb) * 1024 * 1024;
     const zips = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".zip")).slice(0, 5);
     if (zips.length === 0) {
       addNotification({ type: "warn", message: "Select one or more .zip files." });
       return;
     }
     const encoded: Array<{ name: string; data_base64: string }> = [];
+    let totalBytes = 0;
     for (const f of zips) {
+      if (f.size > maxZipBytes) {
+        addNotification({
+          type: "warn",
+          message: `Skipped ${f.name}: exceeds ${maxZipMb}MB per zip limit.`,
+        });
+        continue;
+      }
+      if (f.size > maxWireBytes) {
+        const possiblePath = (f as any).path || (f as any).webkitRelativePath || "";
+        if (possiblePath && !twinZipPath) {
+          setTwinZipPath(possiblePath);
+          addNotification({
+            type: "info",
+            message: `${f.name} is large. Switched to server-path mode via zip path.`,
+          });
+        } else {
+          addNotification({
+            type: "warn",
+            message:
+              `${f.name} is too large for browser JSON upload (${maxWireMb}MB wire limit). ` +
+              `Use Server zip path mode for very large files (Founder/Admin large-file workflow).`,
+          });
+        }
+        continue;
+      }
+      if (totalBytes + f.size > maxTotalBytes) {
+        addNotification({
+          type: "warn",
+          message: `Upload limit reached (${maxTotalMb}MB total). Remaining zips skipped.`,
+        });
+        break;
+      }
       try {
         const buf = await f.arrayBuffer();
         const bytes = new Uint8Array(buf);
@@ -802,12 +871,16 @@ const Dashboard: React.FC = () => {
           binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
         }
         encoded.push({ name: f.name, data_base64: btoa(binary) });
+        totalBytes += f.size;
       } catch {
         // skip failed file
       }
     }
     setTwinUploadedZips((prev) => [...prev, ...encoded]);
-    addNotification({ type: "success", message: `Twin received ${encoded.length} zip file(s).` });
+    addNotification({
+      type: "success",
+      message: `Twin received ${encoded.length} zip file(s). Tier: ${twinUploadTier}.`,
+    });
   };
 
   const runBackendAction = async (path: string, body: any = {}) => {
@@ -1117,6 +1190,10 @@ const Dashboard: React.FC = () => {
               />
               Include Report
             </label>
+            <span style={muted}>
+              Tier: {twinUploadTier} • Policy limit:{" "}
+              {twinUploadTier === "founder" ? "100GB per zip" : twinUploadTier === "admin" ? "20GB per zip" : twinUploadTier === "paid" ? "5GB per zip" : "default"}
+            </span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={chip}>

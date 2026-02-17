@@ -238,6 +238,7 @@ export function startServer(
   logger: Logger
 ) {
   const WS_PORT = restPort + 1; // predictable, low-collision
+  const maxJsonBody = process.env.MAX_JSON_BODY || "30mb";
 
   /* ---------------- REST API ---------------- */
   const app = express();
@@ -253,7 +254,8 @@ export function startServer(
     }
     next();
   });
-  app.use(express.json({ limit: process.env.MAX_JSON_BODY || "1mb" }));
+  app.use(express.json({ limit: maxJsonBody }));
+  app.use(express.urlencoded({ extended: true, limit: maxJsonBody }));
   app.use(metricsMiddleware);
   app.use(authMiddleware);
   app.use(doctrineShieldMiddleware);
@@ -1276,6 +1278,17 @@ export function startServer(
   };
   app.get("/kernels", kernelsHandler);
   app.post("/kernels", kernelsHandler);
+
+  app.use((err: any, _req: Request, res: Response, next: any) => {
+    if (err?.type === "entity.too.large") {
+      res.status(413).json({
+        error: "Payload too large",
+        detail: `Request body exceeds MAX_JSON_BODY (${maxJsonBody}). Reduce upload size or increase MAX_JSON_BODY.`,
+      });
+      return;
+    }
+    next(err);
+  });
 
   app.listen(restPort, () => {
     logger.info(
