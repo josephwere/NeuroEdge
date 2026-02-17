@@ -20,6 +20,7 @@ import {
   ensureActiveConversation,
   getConversation,
   importLegacyCacheOnce,
+  replaceConversationMessages,
   setActiveConversation,
   updateConversationMessage,
   deleteConversationMessage,
@@ -57,6 +58,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [page, setPage] = useState(0);
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, string>>({});
   const longPressTimer = useRef<number | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
@@ -255,18 +258,43 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   };
 
   // --- Helpers ---
+  const normalizeAssistantText = (raw: string) => {
+    const trimmed = raw.trim();
+    const match = trimmed.match(/^```(\w+)?\n([\s\S]*?)```$/);
+    if (!match) return raw;
+    const lang = (match[1] || "").toLowerCase();
+    const body = (match[2] || "").trim();
+    const looksLikeCode = /[{}();=<>\[\]]|(^\s*(const|let|var|def|class|function|import|export)\s)/m.test(
+      body
+    );
+    if (looksLikeCode) return raw;
+    if (!lang || lang === "text" || lang === "md" || lang === "markdown") return body;
+    return raw;
+  };
+
   const addMessage = (text: string, type?: Message["type"], codeLanguage?: string, isCode?: boolean) => {
     const id = Date.now().toString() + Math.random();
-    const msg: Message = { id, text, type, isCode, codeLanguage, collapsible: isCode, collapsibleOpen: true, role: "assistant", timestamp: Date.now() };
+    const safeText = normalizeAssistantText(text);
+    const msg: Message = {
+      id,
+      text: safeText,
+      type,
+      isCode,
+      codeLanguage,
+      collapsible: isCode,
+      collapsibleOpen: true,
+      role: "assistant",
+      timestamp: Date.now(),
+    };
     setMessages(m => [...m, msg]);
     setDisplayed(d => [...d, msg]);
-    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "assistant", text, type, codeLanguage, isCode } });
-    addHistoryMessage({ id, role: "assistant", text, type, isCode, codeLanguage });
+    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "assistant", text: safeText, type, codeLanguage, isCode } });
+    addHistoryMessage({ id, role: "assistant", text: safeText, type, isCode, codeLanguage });
     if (activeConversationId) {
       const threadMessage: ConversationMessage = {
         id,
         role: "assistant",
-        text,
+        text: safeText,
         type,
         isCode,
         codeLanguage,
@@ -298,26 +326,57 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
+  const persistThreadSlice = (nextMessages: Message[]) => {
+    if (!activeConversationId) return;
+    replaceConversationMessages(
+      activeConversationId,
+      nextMessages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        text: m.text,
+        type: m.type,
+        isCode: m.isCode,
+        codeLanguage: m.codeLanguage,
+        timestamp: m.timestamp || Date.now(),
+      }))
+    );
+  };
+
+  const truncateFromMessage = (id: string, includeTarget: boolean): Message[] => {
+    const idx = messages.findIndex((m) => m.id === id);
+    if (idx < 0) return messages;
+    const cut = includeTarget ? idx : idx + 1;
+    const removed = messages.slice(cut);
+    removed.forEach((m) => {
+      deleteCachedItem(m.id);
+      deleteHistoryMessage(m.id);
+    });
+    const kept = messages.slice(0, cut);
+    setMessages(kept);
+    setDisplayed(kept.slice(-Math.max(PAGE_SIZE, kept.length)));
+    setPage(1);
+    syncContextFromMessages(kept);
+    persistThreadSlice(kept);
+    return kept;
+  };
+
   const applyMessageEdit = (id: string, nextText: string) => {
     const clean = nextText.trim();
     if (!clean) return;
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
-    setDisplayed((prev) => prev.map((m) => (m.id === id ? { ...m, text: clean } : m)));
+    const truncated = truncateFromMessage(id, false);
+    const updated = truncated.map((m) => (m.id === id ? { ...m, text: clean } : m));
+    setMessages(updated);
+    setDisplayed(updated.slice(-Math.max(PAGE_SIZE, updated.length)));
+    syncContextFromMessages(updated);
+    persistThreadSlice(updated);
     updateCachedItemText(id, clean);
     updateHistoryMessage(id, clean);
-    if (activeConversationId) {
-      updateConversationMessage(activeConversationId, id, clean);
-    }
+    if (activeConversationId) updateConversationMessage(activeConversationId, id, clean);
   };
 
   const applyMessageDelete = (id: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== id));
-    setDisplayed((prev) => prev.filter((m) => m.id !== id));
-    deleteCachedItem(id);
-    deleteHistoryMessage(id);
-    if (activeConversationId) {
-      deleteConversationMessage(activeConversationId, id);
-    }
+    truncateFromMessage(id, true);
+    if (activeConversationId) deleteConversationMessage(activeConversationId, id);
   };
 
   const promptMessageAction = (msg: Message) => {
@@ -339,6 +398,30 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
+  const sendReaction = async (
+    msg: Message,
+    previousUserText: string,
+    reaction: "up" | "down" | "laugh" | "sad"
+  ) => {
+    const mappedRating: "up" | "down" | "neutral" =
+      reaction === "up" ? "up" : reaction === "down" ? "down" : "neutral";
+    const tags = [`reaction:${reaction}`];
+    if (reaction === "laugh") tags.push("sentiment:positive");
+    if (reaction === "sad") tags.push("sentiment:negative");
+
+    try {
+      await orchestrator.submitTrainingFeedback({
+        query: previousUserText || "",
+        response: msg.text,
+        rating: mappedRating,
+        tags,
+      });
+      setReactionsByMessage((prev) => ({ ...prev, [msg.id]: reaction }));
+    } catch {
+      setReactionsByMessage((prev) => ({ ...prev, [msg.id]: "error" }));
+    }
+  };
+
   const startLongPress = (msg: Message) => {
     if (msg.role !== "user") return;
     if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
@@ -355,6 +438,27 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
+  const renderInlineCode = (line: string) => {
+    const chunks = line.split(/(`[^`]+`)/g);
+    return chunks.map((c, i) =>
+      c.startsWith("`") && c.endsWith("`") ? (
+        <code
+          key={`ic-${i}`}
+          style={{
+            background: "rgba(148,163,184,0.2)",
+            padding: "0.05rem 0.28rem",
+            borderRadius: 5,
+            fontSize: "0.86em",
+          }}
+        >
+          {c.slice(1, -1)}
+        </code>
+      ) : (
+        <React.Fragment key={`tx-${i}`}>{c}</React.Fragment>
+      )
+    );
+  };
+
   const renderRichText = (text: string) => {
     const nodes: React.ReactNode[] = [];
     const regex = /```(\w+)?\n([\s\S]*?)```/g;
@@ -367,7 +471,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         if (before) {
           nodes.push(
             <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
-              {before}
+              {before.split("\n").map((line, i) => (
+                <div key={`ln-${idx}-${i}`}>{renderInlineCode(line)}</div>
+              ))}
             </div>
           );
         }
@@ -416,7 +522,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     if (tail) {
       nodes.push(
         <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
-          {tail}
+          {tail.split("\n").map((line, i) => (
+            <div key={`lnf-${idx}-${i}`}>{renderInlineCode(line)}</div>
+          ))}
         </div>
       );
     }
@@ -480,7 +588,13 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         {showActions && (
           <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.12rem" }}>
             <button
-              onClick={() => copyText(msg.text)}
+              onClick={async () => {
+                await copyText(msg.text);
+                setCopiedMessageId(msg.id);
+                window.setTimeout(() => {
+                  setCopiedMessageId((v) => (v === msg.id ? null : v));
+                }, 1600);
+              }}
               style={{
                 border: "1px solid rgba(148, 163, 184, 0.25)",
                 background: "rgba(15, 23, 42, 0.75)",
@@ -491,19 +605,16 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
                 fontSize: "0.72rem",
               }}
             >
-              Copy
+              {copiedMessageId === msg.id ? "Copied" : "Copy"}
             </button>
             <button
-              onClick={() =>
-                orchestrator.submitTrainingFeedback({
-                  query: previousUserText,
-                  response: msg.text,
-                  rating: "up",
-                })
-              }
+              onClick={() => sendReaction(msg, previousUserText, "up")}
               style={{
                 border: "1px solid rgba(148, 163, 184, 0.25)",
-                background: "rgba(15, 23, 42, 0.75)",
+                background:
+                  reactionsByMessage[msg.id] === "up"
+                    ? "rgba(34,197,94,0.25)"
+                    : "rgba(15, 23, 42, 0.75)",
                 color: "#cbd5e1",
                 borderRadius: 8,
                 padding: "0.2rem 0.45rem",
@@ -514,16 +625,13 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
               👍
             </button>
             <button
-              onClick={() =>
-                orchestrator.submitTrainingFeedback({
-                  query: previousUserText,
-                  response: msg.text,
-                  rating: "down",
-                })
-              }
+              onClick={() => sendReaction(msg, previousUserText, "down")}
               style={{
                 border: "1px solid rgba(148, 163, 184, 0.25)",
-                background: "rgba(15, 23, 42, 0.75)",
+                background:
+                  reactionsByMessage[msg.id] === "down"
+                    ? "rgba(239,68,68,0.25)"
+                    : "rgba(15, 23, 42, 0.75)",
                 color: "#cbd5e1",
                 borderRadius: 8,
                 padding: "0.2rem 0.45rem",
@@ -533,6 +641,47 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             >
               👎
             </button>
+            <button
+              onClick={() => sendReaction(msg, previousUserText, "laugh")}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background:
+                  reactionsByMessage[msg.id] === "laugh"
+                    ? "rgba(59,130,246,0.28)"
+                    : "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.2rem 0.45rem",
+                cursor: "pointer",
+                fontSize: "0.72rem",
+              }}
+              title="Funny / liked tone"
+            >
+              😂
+            </button>
+            <button
+              onClick={() => sendReaction(msg, previousUserText, "sad")}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background:
+                  reactionsByMessage[msg.id] === "sad"
+                    ? "rgba(168,85,247,0.28)"
+                    : "rgba(15, 23, 42, 0.75)",
+                color: "#cbd5e1",
+                borderRadius: 8,
+                padding: "0.2rem 0.45rem",
+                cursor: "pointer",
+                fontSize: "0.72rem",
+              }}
+              title="Not helpful / disappointing"
+            >
+              😢
+            </button>
+            {reactionsByMessage[msg.id] === "error" && (
+              <span style={{ fontSize: "0.7rem", color: "#fca5a5", alignSelf: "center" }}>
+                reaction failed
+              </span>
+            )}
           </div>
         )}
       </div>
