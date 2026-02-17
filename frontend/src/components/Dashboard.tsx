@@ -129,6 +129,7 @@ const Dashboard: React.FC = () => {
   const [adminVersion, setAdminVersion] = useState<any>({});
   const [adminMetrics, setAdminMetrics] = useState<any>({});
   const [twinOutput, setTwinOutput] = useState<any>(null);
+  const [backendOutput, setBackendOutput] = useState<any>(null);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -404,7 +405,34 @@ const Dashboard: React.FC = () => {
     const envApiKey = String((import.meta.env.VITE_NEUROEDGE_API_KEY as string) || "").trim();
     const envOrg = String((import.meta.env.VITE_DEFAULT_ORG_ID as string) || "personal").trim();
     const envWorkspace = String((import.meta.env.VITE_DEFAULT_WORKSPACE_ID as string) || "default").trim();
-    return { token: envToken, apiKey: envApiKey, orgId: envOrg, workspaceId: envWorkspace };
+    let userToken = "";
+    let sessionToken = "";
+    let userOrg = "";
+    let userWorkspace = "";
+    try {
+      const rawUser = localStorage.getItem("neuroedge_user");
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser);
+        userToken = String(parsed?.token || "");
+        userOrg = String(parsed?.orgId || "");
+        userWorkspace = String(parsed?.workspaceId || "");
+      }
+      const rawSession = localStorage.getItem("neuroedge_session");
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        sessionToken = String(parsed?.token || "");
+        userOrg = userOrg || String(parsed?.orgId || "");
+        userWorkspace = userWorkspace || String(parsed?.workspaceId || "");
+      }
+    } catch {
+      // ignore localStorage parsing issues and fallback to env defaults
+    }
+    return {
+      token: envToken || userToken || sessionToken,
+      apiKey: envApiKey,
+      orgId: userOrg || envOrg || "personal",
+      workspaceId: userWorkspace || envWorkspace || "default",
+    };
   };
 
   const apiBase = String(import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:7070");
@@ -416,7 +444,10 @@ const Dashboard: React.FC = () => {
       "x-workspace-id": auth.workspaceId,
     };
     if (auth.token) h.Authorization = `Bearer ${auth.token}`;
-    if (auth.apiKey) h["x-api-key"] = auth.apiKey;
+    if (auth.apiKey) {
+      h["x-api-key"] = auth.apiKey;
+      if (!h.Authorization) h.Authorization = `Bearer ${auth.apiKey}`;
+    }
     return h;
   };
 
@@ -650,6 +681,18 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const runBackendAction = async (path: string, body: any = {}) => {
+    try {
+      const isGet = path.startsWith("GET:");
+      const target = isGet ? path.replace("GET:", "") : path;
+      const data = isGet ? await getJson(target) : await postJson(target, body);
+      setBackendOutput(data);
+      addNotification({ type: "success", message: "Backend action completed." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Backend action failed: ${err?.message || err}` });
+    }
+  };
+
   const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
     const reason = window.prompt(`Reason for restarting ${service}:`, "Emergency maintenance");
     if (!reason || reason.trim().length < 8) {
@@ -871,6 +914,21 @@ const Dashboard: React.FC = () => {
           </div>
         ))}
       </Card>
+      <Card title="Backend Capabilities">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button style={chip} onClick={() => runBackendAction("GET:/system/status")}>System Status</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/mesh/nodes")}>Mesh Nodes</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/fed/model")}>Federated Model</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/doctrine/rules")}>Doctrine Rules</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/self-expansion/analyze")}>Self Expansion</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/training/samples?limit=20")}>Training Samples</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/billing/usage")}>Billing Usage</button>
+          <button style={chip} onClick={() => setBackendOutput(null)}>Clear Output</button>
+        </div>
+        <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
+          {backendOutput ? JSON.stringify(backendOutput, null, 2) : "No backend output yet."}
+        </pre>
+      </Card>
       <Card title="Twin Systems">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <button style={chip} onClick={() => runTwinAction("/twin/scan")}>Twin Scan</button>
@@ -880,6 +938,7 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runTwinAction("/neurotwin/calibrate", { owner: "Joseph Were", tone: "direct", communication_style: "strategic", risk_appetite: "medium", goals: ["Scale NeuroEdge"], writing_samples: [] })}>NeuroTwin Calibrate</button>
           <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/profile")}>NeuroTwin Profile</button>
           <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/report")}>NeuroTwin Report</button>
+          <button style={chip} onClick={() => setTwinOutput(null)}>Clear Output</button>
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
           {twinOutput ? JSON.stringify(twinOutput, null, 2) : "No twin output yet."}
@@ -930,6 +989,9 @@ const Dashboard: React.FC = () => {
         ))}
       </Card>
       <Card title="Content Review Queue">
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button style={chip} onClick={() => setAdminLogs([])}>Clear View</button>
+        </div>
         {adminLogs.slice(0, 12).map((l, i) => (
           <div key={i} style={log}>{l.type}</div>
         ))}
@@ -960,6 +1022,7 @@ const Dashboard: React.FC = () => {
       <Card title="Activity & Reports">
         <Stat label="Logs" value={String(adminLogs.length)} />
         <Stat label="Audit events" value={String(adminAudit.length)} />
+        <button style={chip} onClick={() => { setAdminLogs([]); setAdminAudit([]); }}>Clear View</button>
         <button style={chip} onClick={() => exportData("admin_audit", adminAudit)}>Export Report</button>
       </Card>
     </div>
