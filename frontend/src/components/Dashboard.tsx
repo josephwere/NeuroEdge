@@ -191,10 +191,11 @@ interface EnterpriseDepartment {
 }
 
 type UploadTier = "founder" | "admin" | "paid" | "free";
+type DashboardRole = "founder" | "admin" | "developer" | "enterprise" | "user";
 
 const Dashboard: React.FC = () => {
   const { addNotification } = useNotifications();
-  const [view, setView] = useState<View>("founder");
+  const [view, setView] = useState<View>("user");
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [kernels, setKernels] = useState<KernelSnapshot[]>([]);
   const [usage, setUsage] = useState<UsageSummary>({});
@@ -213,6 +214,7 @@ const Dashboard: React.FC = () => {
   const [twinUploadedZips, setTwinUploadedZips] = useState<Array<{ name: string; data_base64: string }>>([]);
   const [twinIncludeAnalyze, setTwinIncludeAnalyze] = useState(true);
   const [twinIncludeReport, setTwinIncludeReport] = useState(true);
+  const [dashboardRole, setDashboardRole] = useState<DashboardRole>("user");
 
   const twinUploadTier = useMemo<UploadTier>(() => {
     if (isFounderUser()) return "founder";
@@ -233,6 +235,84 @@ const Dashboard: React.FC = () => {
     }
     return "free";
   }, []);
+
+  useEffect(() => {
+    if (isFounderUser()) {
+      setDashboardRole("founder");
+      return;
+    }
+    try {
+      const rawUser = localStorage.getItem("neuroedge_user");
+      const user = rawUser ? JSON.parse(rawUser) : {};
+      const role = String(user?.role || "").trim().toLowerCase();
+      const tier = String(
+        user?.plan ||
+          localStorage.getItem("neuroedge_plan") ||
+          localStorage.getItem("neuroedge_subscription_tier") ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+      if (role === "admin" || role === "moderator") {
+        setDashboardRole("admin");
+        return;
+      }
+      if (role === "developer") {
+        setDashboardRole("developer");
+        return;
+      }
+      if (role === "enterprise" || tier === "enterprise") {
+        setDashboardRole("enterprise");
+        return;
+      }
+      if (tier === "pro" || tier === "paid") {
+        setDashboardRole("developer");
+        return;
+      }
+    } catch {
+      // keep user fallback
+    }
+    setDashboardRole("user");
+  }, []);
+
+  const allowedViews = useMemo<View[]>(() => {
+    switch (dashboardRole) {
+      case "founder":
+        return ["founder", "admin", "developer", "agents", "user", "enterprise"];
+      case "admin":
+        return ["admin", "developer", "agents", "user", "enterprise"];
+      case "developer":
+        return ["developer", "agents", "user"];
+      case "enterprise":
+        return ["enterprise", "agents", "user"];
+      default:
+        return ["user", "agents"];
+    }
+  }, [dashboardRole]);
+  const canAccessAdminOps = useMemo(
+    () => dashboardRole === "founder" || dashboardRole === "admin",
+    [dashboardRole]
+  );
+
+  useEffect(() => {
+    if (!allowedViews.includes(view)) {
+      setView(allowedViews[0] || "user");
+    }
+  }, [allowedViews, view]);
+
+  useEffect(() => {
+    const preferred: Record<DashboardRole, View> = {
+      founder: "founder",
+      admin: "admin",
+      developer: "developer",
+      enterprise: "enterprise",
+      user: "user",
+    };
+    const next = preferred[dashboardRole] || "user";
+    if (view === "user" && next !== "user" && allowedViews.includes(next)) {
+      setView(next);
+    }
+  }, [dashboardRole, allowedViews, view]);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -800,15 +880,17 @@ const Dashboard: React.FC = () => {
       }
       setServices(nextServices);
 
-      const calls = await Promise.allSettled([
-        getJson("/kernels"),
-        getJson("/admin/usage"),
-        getJson("/admin/logs?limit=250"),
-        getJson("/admin/audit?limit=250"),
-        getJson("/admin/agents"),
-        getJson("/admin/version"),
-        getJson("/admin/system/metrics"),
-      ]);
+      const calls = await Promise.allSettled(
+        [
+          getJson("/kernels"),
+          canAccessAdminOps ? getJson("/admin/usage") : Promise.resolve({ usage: {} }),
+          canAccessAdminOps ? getJson("/admin/logs?limit=250") : Promise.resolve({ logs: [] }),
+          canAccessAdminOps ? getJson("/admin/audit?limit=250") : Promise.resolve({ audit: [] }),
+          canAccessAdminOps ? getJson("/admin/agents") : Promise.resolve({ agents: [] }),
+          canAccessAdminOps ? getJson("/admin/version") : Promise.resolve({}),
+          canAccessAdminOps ? getJson("/admin/system/metrics") : Promise.resolve({}),
+        ]
+      );
       if (calls[0].status === "fulfilled") {
         const ks: KernelSnapshot[] = Object.entries(calls[0].value || {}).map(([name, info]: [string, any]) => ({
           name,
@@ -827,7 +909,7 @@ const Dashboard: React.FC = () => {
     refresh();
     const t = setInterval(refresh, 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [canAccessAdminOps]);
 
   const localMsgStats = useMemo(() => {
     const all = chatContext.getAll();
@@ -2771,7 +2853,9 @@ const Dashboard: React.FC = () => {
       <div style={hero}>
         <h2 style={{ margin: 0 }}>NeuroEdge Sovereign Command Center</h2>
         <div style={muted}>
-          Founder-grade orchestration for product, revenue, agents, security, and enterprise operations.
+          {dashboardRole === "founder" || dashboardRole === "admin"
+            ? "Leadership orchestration for product, revenue, agents, security, and enterprise operations."
+            : "Your workspace for chats, agents, usage, and account operations."}
         </div>
       </div>
 
@@ -2792,11 +2876,13 @@ const Dashboard: React.FC = () => {
           ["agents", "AI Agents"],
           ["user", "User"],
           ["enterprise", "Enterprise"],
-        ].map(([id, label]) => (
+        ]
+          .filter(([id]) => allowedViews.includes(id as View))
+          .map(([id, label]) => (
           <button key={id} style={tab(view === id)} onClick={() => setView(id as View)}>
             {label}
           </button>
-        ))}
+          ))}
       </div>
 
       {view === "founder" && founderView}
