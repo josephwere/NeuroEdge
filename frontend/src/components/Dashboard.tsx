@@ -131,6 +131,11 @@ const Dashboard: React.FC = () => {
   const [adminMetrics, setAdminMetrics] = useState<any>({});
   const [twinOutput, setTwinOutput] = useState<any>(null);
   const [backendOutput, setBackendOutput] = useState<any>(null);
+  const [twinQuestion, setTwinQuestion] = useState("");
+  const [twinZipPath, setTwinZipPath] = useState("");
+  const [twinUploadedFiles, setTwinUploadedFiles] = useState<
+    Array<{ name: string; type: string; size: number; text_sample: string }>
+  >([]);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -733,6 +738,45 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const askTwin = async () => {
+    const q = twinQuestion.trim();
+    if (!q) {
+      addNotification({ type: "warn", message: "Type a question for Twin first." });
+      return;
+    }
+    await runTwinAction("/twin/ask", {
+      question: q,
+      uploaded_files: twinUploadedFiles,
+      zip_path: twinZipPath.trim(),
+    });
+  };
+
+  const handleTwinUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const next: Array<{ name: string; type: string; size: number; text_sample: string }> = [];
+    for (const f of Array.from(files).slice(0, 100)) {
+      const isTextLike =
+        f.type.startsWith("text/") ||
+        /\.(md|txt|json|ya?ml|ts|tsx|js|jsx|py|go|rs|java|sql|sh|env|toml|ini|csv)$/i.test(f.name);
+      let textSample = "";
+      if (isTextLike) {
+        try {
+          textSample = (await f.text()).slice(0, 8000);
+        } catch {
+          textSample = "";
+        }
+      }
+      next.push({
+        name: (f as any).webkitRelativePath || f.name,
+        type: f.type || "application/octet-stream",
+        size: f.size,
+        text_sample: textSample,
+      });
+    }
+    setTwinUploadedFiles((prev) => [...prev, ...next]);
+    addNotification({ type: "success", message: `Twin received ${next.length} file(s).` });
+  };
+
   const runBackendAction = async (path: string, body: any = {}) => {
     try {
       const isGet = path.startsWith("GET:");
@@ -1005,8 +1049,45 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => printOutputPdf("Twin Output", twinOutput || "No twin output yet.")}>Export PDF</button>
           <button style={chip} onClick={() => setTwinOutput(null)}>Clear Output</button>
         </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <input
+            value={twinQuestion}
+            onChange={(e) => setTwinQuestion(e.target.value)}
+            placeholder="Ask Twin: e.g. which image is used by floating chat and where is it?"
+            style={input}
+          />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={twinZipPath}
+              onChange={(e) => setTwinZipPath(e.target.value)}
+              placeholder="Optional server zip path: /home/.../project.zip"
+              style={{ ...input, flex: 1, minWidth: 260 }}
+            />
+            <button style={primary} onClick={askTwin}>Ask Twin</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label style={chip}>
+              Upload Files / Folder
+              <input
+                type="file"
+                multiple
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore non-standard but supported by Chromium
+                webkitdirectory=""
+                style={{ display: "none" }}
+                onChange={(e) => handleTwinUpload(e.target.files)}
+              />
+            </label>
+            <button style={chip} onClick={() => setTwinUploadedFiles([])}>Clear Uploaded</button>
+            <span style={muted}>Uploaded: {twinUploadedFiles.length}</span>
+          </div>
+        </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
-          {twinOutput ? JSON.stringify(twinOutput, null, 2) : "No twin output yet."}
+          {twinOutput
+            ? typeof twinOutput?.answer === "string"
+              ? `${twinOutput.answer}\n\n${JSON.stringify(twinOutput, null, 2)}`
+              : JSON.stringify(twinOutput, null, 2)
+            : "No twin output yet."}
         </pre>
       </Card>
     </div>

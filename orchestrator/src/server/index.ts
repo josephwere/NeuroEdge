@@ -951,6 +951,16 @@ export function startServer(
     }
   });
 
+  app.post("/twin/ask", requireWorkspace, requireScope("admin:read"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/ask`, req.body || {}, { timeout: 60000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin ask failed", detail: err?.message || String(err) });
+    }
+  });
+
   app.post("/neurotwin/calibrate", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {

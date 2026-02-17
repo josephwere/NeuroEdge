@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 import threading
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, FastAPI, HTTPException
@@ -212,6 +213,19 @@ class TwinValidateRequest(BaseModel):
 
 
 class TwinProjectAnalyzeRequest(BaseModel):
+    zip_path: str = ""
+
+
+class TwinUploadedFile(BaseModel):
+    name: str
+    type: str = ""
+    size: int = 0
+    text_sample: str = ""
+
+
+class TwinAskRequest(BaseModel):
+    question: str
+    uploaded_files: List[TwinUploadedFile] = Field(default_factory=list)
     zip_path: str = ""
 
 
@@ -589,6 +603,118 @@ def twincore_project_analyze(req: TwinProjectAnalyzeRequest) -> Dict[str, Any]:
     if not req.zip_path.strip():
         raise HTTPException(status_code=400, detail="Missing zip_path")
     return twin_core.analyze_zip(req.zip_path.strip())
+
+
+@app.post("/twin/ask")
+def twincore_ask(req: TwinAskRequest) -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+
+    q = (req.question or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Missing question")
+
+    scan = twin_core.scan_system()
+    structure = (scan or {}).get("structure", {}) or {}
+    files = structure.get("files", []) or []
+    q_lower = q.lower()
+    q_tokens = [t for t in re.split(r"[^a-z0-9_./-]+", q_lower) if len(t) >= 2]
+
+    evidence: List[Dict[str, Any]] = []
+
+    def score_path(path: str) -> int:
+        p = path.lower()
+        score = 0
+        for t in q_tokens:
+            if t in p:
+                score += 2
+        if "floating" in q_lower and "floating" in p:
+            score += 3
+        if "image" in q_lower and p.endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif")):
+            score += 2
+        if "logo" in q_lower and "logo" in p:
+            score += 2
+        return score
+
+    ranked = sorted(
+        ((score_path(p), p) for p in files),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    top = [p for s, p in ranked if s > 0][:12]
+    for p in top:
+        evidence.append({"type": "repo_path", "path": p})
+
+    uploaded_summary: List[Dict[str, Any]] = []
+    for f in req.uploaded_files[:50]:
+        entry = {
+            "name": f.name,
+            "type": f.type,
+            "size": f.size,
+            "text_sample_size": len(f.text_sample or ""),
+        }
+        uploaded_summary.append(entry)
+        if q_tokens and any(t in (f.name or "").lower() for t in q_tokens):
+            evidence.append({"type": "uploaded_file", **entry})
+
+    zip_analysis: Optional[Dict[str, Any]] = None
+    if req.zip_path.strip():
+        try:
+            zip_analysis = twin_core.analyze_zip(req.zip_path.strip())
+            evidence.append({
+                "type": "zip_analysis",
+                "ok": bool((zip_analysis or {}).get("ok")),
+                "zip_path": req.zip_path.strip(),
+            })
+        except Exception as ex:
+            zip_analysis = {"ok": False, "error": str(ex)}
+
+    answer_lines: List[str] = []
+    if "floating" in q_lower and ("image" in q_lower or "icon" in q_lower or "logo" in q_lower):
+        floating_images = [
+            p
+            for p in files
+            if ("floating" in p.lower() or "logo" in p.lower())
+            and p.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif"))
+        ][:8]
+        if floating_images:
+            answer_lines.append("Likely floating-chat image assets:")
+            answer_lines.extend([f"- {p}" for p in floating_images])
+        else:
+            answer_lines.append("No explicit floating image file matched; check `frontend/public/` and component imports.")
+
+    if not answer_lines:
+        if top:
+            answer_lines.append("Top matching repository paths:")
+            answer_lines.extend([f"- {p}" for p in top[:8]])
+        else:
+            answer_lines.append("No strong direct path match found in repository scan.")
+            answer_lines.append("Try a more specific question including filename, feature name, or folder.")
+
+    if uploaded_summary:
+        answer_lines.append("")
+        answer_lines.append(f"Uploaded artifacts received: {len(uploaded_summary)}")
+        for item in uploaded_summary[:8]:
+            answer_lines.append(f"- {item['name']} ({item['type'] or 'unknown'}, {item['size']} bytes)")
+
+    if zip_analysis:
+        answer_lines.append("")
+        if zip_analysis.get("ok"):
+            answer_lines.append(
+                f"Zip analysis complete for: {req.zip_path.strip()} (files: {zip_analysis.get('structure', {}).get('total_files', 0)})"
+            )
+        else:
+            answer_lines.append(f"Zip analysis failed: {zip_analysis.get('error', 'unknown error')}")
+
+    answer = "\n".join(answer_lines)
+    return {
+        "ok": True,
+        "question": q,
+        "answer": answer,
+        "evidence": evidence[:30],
+        "uploaded": uploaded_summary,
+        "zip_analysis": zip_analysis,
+    }
 
 if __name__ == "__main__":
     if uvicorn is None:
