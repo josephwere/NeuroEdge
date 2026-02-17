@@ -4,6 +4,8 @@ import subprocess
 import time
 import threading
 import re
+import base64
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, FastAPI, HTTPException
@@ -223,10 +225,19 @@ class TwinUploadedFile(BaseModel):
     text_sample: str = ""
 
 
+class TwinUploadedZip(BaseModel):
+    name: str
+    data_base64: str
+
+
 class TwinAskRequest(BaseModel):
     question: str
     uploaded_files: List[TwinUploadedFile] = Field(default_factory=list)
+    uploaded_zips: List[TwinUploadedZip] = Field(default_factory=list)
     zip_path: str = ""
+    include_scan: bool = True
+    include_analyze: bool = True
+    include_report: bool = True
 
 
 def _load_agent() -> Optional[Any]:
@@ -614,7 +625,7 @@ def twincore_ask(req: TwinAskRequest) -> Dict[str, Any]:
     if not q:
         raise HTTPException(status_code=400, detail="Missing question")
 
-    scan = twin_core.scan_system()
+    scan = twin_core.scan_system() if req.include_scan else {"structure": {"files": []}}
     structure = (scan or {}).get("structure", {}) or {}
     files = structure.get("files", []) or []
     q_lower = q.lower()
@@ -669,6 +680,24 @@ def twincore_ask(req: TwinAskRequest) -> Dict[str, Any]:
         except Exception as ex:
             zip_analysis = {"ok": False, "error": str(ex)}
 
+    uploaded_zip_analyses: List[Dict[str, Any]] = []
+    for z in req.uploaded_zips[:5]:
+        try:
+            raw = base64.b64decode(z.data_base64)
+            with tempfile.NamedTemporaryFile(prefix="neuroedge_twin_", suffix=".zip", delete=True) as tf:
+                tf.write(raw)
+                tf.flush()
+                analysis = twin_core.analyze_zip(tf.name)
+            uploaded_zip_analyses.append({"name": z.name, "analysis": analysis})
+            evidence.append({
+                "type": "uploaded_zip",
+                "name": z.name,
+                "ok": bool((analysis or {}).get("ok")),
+                "files": (analysis or {}).get("structure", {}).get("total_files", 0),
+            })
+        except Exception as ex:
+            uploaded_zip_analyses.append({"name": z.name, "analysis": {"ok": False, "error": str(ex)}})
+
     answer_lines: List[str] = []
     if "floating" in q_lower and ("image" in q_lower or "icon" in q_lower or "logo" in q_lower):
         floating_images = [
@@ -706,6 +735,18 @@ def twincore_ask(req: TwinAskRequest) -> Dict[str, Any]:
         else:
             answer_lines.append(f"Zip analysis failed: {zip_analysis.get('error', 'unknown error')}")
 
+    analysis_summary: Dict[str, Any] = {}
+    if req.include_analyze:
+        try:
+            analysis_summary["analyze"] = twin_core.analyze_system()
+        except Exception as ex:
+            analysis_summary["analyze_error"] = str(ex)
+    if req.include_report:
+        try:
+            analysis_summary["report"] = twin_core.generate_full_report()
+        except Exception as ex:
+            analysis_summary["report_error"] = str(ex)
+
     answer = "\n".join(answer_lines)
     return {
         "ok": True,
@@ -714,6 +755,8 @@ def twincore_ask(req: TwinAskRequest) -> Dict[str, Any]:
         "evidence": evidence[:30],
         "uploaded": uploaded_summary,
         "zip_analysis": zip_analysis,
+        "uploaded_zip_analyses": uploaded_zip_analyses,
+        "analysis_summary": analysis_summary,
     }
 
 if __name__ == "__main__":

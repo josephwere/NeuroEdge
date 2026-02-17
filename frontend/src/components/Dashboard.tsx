@@ -136,6 +136,9 @@ const Dashboard: React.FC = () => {
   const [twinUploadedFiles, setTwinUploadedFiles] = useState<
     Array<{ name: string; type: string; size: number; text_sample: string }>
   >([]);
+  const [twinUploadedZips, setTwinUploadedZips] = useState<Array<{ name: string; data_base64: string }>>([]);
+  const [twinIncludeAnalyze, setTwinIncludeAnalyze] = useState(true);
+  const [twinIncludeReport, setTwinIncludeReport] = useState(true);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -747,7 +750,11 @@ const Dashboard: React.FC = () => {
     await runTwinAction("/twin/ask", {
       question: q,
       uploaded_files: twinUploadedFiles,
+      uploaded_zips: twinUploadedZips,
       zip_path: twinZipPath.trim(),
+      include_scan: true,
+      include_analyze: twinIncludeAnalyze,
+      include_report: twinIncludeReport,
     });
   };
 
@@ -775,6 +782,32 @@ const Dashboard: React.FC = () => {
     }
     setTwinUploadedFiles((prev) => [...prev, ...next]);
     addNotification({ type: "success", message: `Twin received ${next.length} file(s).` });
+  };
+
+  const handleTwinZipUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const zips = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".zip")).slice(0, 5);
+    if (zips.length === 0) {
+      addNotification({ type: "warn", message: "Select one or more .zip files." });
+      return;
+    }
+    const encoded: Array<{ name: string; data_base64: string }> = [];
+    for (const f of zips) {
+      try {
+        const buf = await f.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        encoded.push({ name: f.name, data_base64: btoa(binary) });
+      } catch {
+        // skip failed file
+      }
+    }
+    setTwinUploadedZips((prev) => [...prev, ...encoded]);
+    addNotification({ type: "success", message: `Twin received ${encoded.length} zip file(s).` });
   };
 
   const runBackendAction = async (path: string, body: any = {}) => {
@@ -1065,9 +1098,38 @@ const Dashboard: React.FC = () => {
             />
             <button style={primary} onClick={askTwin}>Ask Twin</button>
           </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <label style={chip}>
+              <input
+                type="checkbox"
+                checked={twinIncludeAnalyze}
+                onChange={(e) => setTwinIncludeAnalyze(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Include Analyze
+            </label>
+            <label style={chip}>
+              <input
+                type="checkbox"
+                checked={twinIncludeReport}
+                onChange={(e) => setTwinIncludeReport(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Include Report
+            </label>
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={chip}>
-              Upload Files / Folder
+              Upload Files
+              <input
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => handleTwinUpload(e.target.files)}
+              />
+            </label>
+            <label style={chip}>
+              Upload Folder
               <input
                 type="file"
                 multiple
@@ -1078,8 +1140,27 @@ const Dashboard: React.FC = () => {
                 onChange={(e) => handleTwinUpload(e.target.files)}
               />
             </label>
-            <button style={chip} onClick={() => setTwinUploadedFiles([])}>Clear Uploaded</button>
-            <span style={muted}>Uploaded: {twinUploadedFiles.length}</span>
+            <label style={chip}>
+              Upload ZIP
+              <input
+                type="file"
+                multiple
+                accept=".zip,application/zip,application/x-zip-compressed"
+                style={{ display: "none" }}
+                onChange={(e) => handleTwinZipUpload(e.target.files)}
+              />
+            </label>
+            <button
+              style={chip}
+              onClick={() => {
+                setTwinUploadedFiles([]);
+                setTwinUploadedZips([]);
+              }}
+            >
+              Clear Uploaded
+            </button>
+            <span style={muted}>Uploaded files: {twinUploadedFiles.length}</span>
+            <span style={muted}>Uploaded zips: {twinUploadedZips.length}</span>
           </div>
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
