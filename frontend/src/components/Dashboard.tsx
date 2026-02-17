@@ -664,6 +664,51 @@ const Dashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const toOutputText = (data: unknown) => (typeof data === "string" ? data : JSON.stringify(data, null, 2));
+
+  const downloadText = (name: string, ext: string, mime: string, content: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}_${Date.now()}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const exportOutputTxt = (name: string, data: unknown) => {
+    downloadText(name, "txt", "text/plain;charset=utf-8", toOutputText(data));
+  };
+
+  const exportOutputWord = (name: string, data: unknown) => {
+    const safe = escapeHtml(toOutputText(data));
+    const docHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title></head><body><pre>${safe}</pre></body></html>`;
+    downloadText(name, "doc", "application/msword", docHtml);
+  };
+
+  const printOutputPdf = (title: string, data: unknown) => {
+    const w = window.open("", "_blank", "width=1024,height=760");
+    if (!w) {
+      addNotification({ type: "error", message: "Popup blocked. Allow popups to print/export PDF." });
+      return;
+    }
+    const safe = escapeHtml(toOutputText(data));
+    w.document.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;padding:20px;}h1{font-family:system-ui,sans-serif;font-size:18px;}pre{white-space:pre-wrap;line-height:1.4;}</style></head><body><h1>${title}</h1><pre>${safe}</pre></body></html>`
+    );
+    w.document.close();
+    w.focus();
+    w.print();
+  };
+
   const saveModelControl = async () => {
     await callAction("/admin/dashboard/model/save", { modelControl });
     addNotification({ type: "success", message: "Model control saved." });
@@ -923,6 +968,9 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runBackendAction("GET:/self-expansion/analyze")}>Self Expansion</button>
           <button style={chip} onClick={() => runBackendAction("GET:/training/samples?limit=20")}>Training Samples</button>
           <button style={chip} onClick={() => runBackendAction("GET:/billing/usage")}>Billing Usage</button>
+          <button style={chip} onClick={() => exportOutputTxt("backend_output", backendOutput || "No backend output yet.")}>Export TXT</button>
+          <button style={chip} onClick={() => exportOutputWord("backend_output", backendOutput || "No backend output yet.")}>Export Word</button>
+          <button style={chip} onClick={() => printOutputPdf("Backend Output", backendOutput || "No backend output yet.")}>Export PDF</button>
           <button style={chip} onClick={() => setBackendOutput(null)}>Clear Output</button>
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
@@ -938,6 +986,9 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runTwinAction("/neurotwin/calibrate", { owner: "Joseph Were", tone: "direct", communication_style: "strategic", risk_appetite: "medium", goals: ["Scale NeuroEdge"], writing_samples: [] })}>NeuroTwin Calibrate</button>
           <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/profile")}>NeuroTwin Profile</button>
           <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/report")}>NeuroTwin Report</button>
+          <button style={chip} onClick={() => exportOutputTxt("twin_output", twinOutput || "No twin output yet.")}>Export TXT</button>
+          <button style={chip} onClick={() => exportOutputWord("twin_output", twinOutput || "No twin output yet.")}>Export Word</button>
+          <button style={chip} onClick={() => printOutputPdf("Twin Output", twinOutput || "No twin output yet.")}>Export PDF</button>
           <button style={chip} onClick={() => setTwinOutput(null)}>Clear Output</button>
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
@@ -1330,12 +1381,39 @@ const Dashboard: React.FC = () => {
   );
 };
 
-const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <div style={card}>
-    <h3 style={{ marginTop: 0, marginBottom: 10 }}>{title}</h3>
-    <div style={{ display: "grid", gap: 8 }}>{children}</div>
-  </div>
-);
+const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
+  const [minimized, setMinimized] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+  const [closed, setClosed] = useState(false);
+
+  if (closed) {
+    return (
+      <button style={{ ...chip, justifySelf: "start" }} onClick={() => setClosed(false)}>
+        Reopen: {title}
+      </button>
+    );
+  }
+
+  return (
+    <div style={maximized ? { ...card, ...cardMaximized } : card}>
+      <div style={cardHeader}>
+        <h3 style={{ margin: 0 }}>{title}</h3>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button style={winBtn} onClick={() => setMinimized((v) => !v)} title={minimized ? "Expand" : "Minimize"}>
+            {minimized ? "▢" : "–"}
+          </button>
+          <button style={winBtn} onClick={() => setMaximized((v) => !v)} title={maximized ? "Restore" : "Maximize"}>
+            {maximized ? "❐" : "□"}
+          </button>
+          <button style={winBtn} onClick={() => setClosed(true)} title="Close">
+            ✕
+          </button>
+        </div>
+      </div>
+      {!minimized && <div style={{ display: "grid", gap: 8 }}>{children}</div>}
+    </div>
+  );
+};
 
 const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div style={row}>
@@ -1422,6 +1500,32 @@ const card: React.CSSProperties = {
   background: "rgba(15,23,42,0.74)",
   padding: "0.88rem",
   boxShadow: "0 10px 30px rgba(2,6,23,0.35)",
+};
+const cardMaximized: React.CSSProperties = {
+  position: "fixed",
+  top: "6vh",
+  left: "4vw",
+  width: "92vw",
+  height: "88vh",
+  zIndex: 1200,
+  overflow: "auto",
+  backdropFilter: "blur(6px)",
+};
+const cardHeader: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 10,
+  gap: 8,
+};
+const winBtn: React.CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.35)",
+  borderRadius: 7,
+  background: "rgba(15,23,42,0.86)",
+  color: "#e2e8f0",
+  padding: "0.1rem 0.38rem",
+  fontSize: "0.75rem",
+  cursor: "pointer",
 };
 
 const row: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 };
