@@ -60,6 +60,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, string>>({});
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState("");
   const longPressTimer = useRef<number | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
@@ -391,10 +393,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       return;
     }
     if (normalized === "e") {
-      const nextText = window.prompt("Edit your message:", msg.text);
-      if (nextText !== null) {
-        applyMessageEdit(msg.id, nextText);
-      }
+      setEditingMessageId(msg.id);
+      setEditingDraft(msg.text);
     }
   };
 
@@ -555,6 +555,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         };
 
     const showActions = msg.role === "assistant";
+    const isEditingThisUserMessage =
+      msg.role === "user" && editingMessageId === msg.id;
     const previousUserText = (() => {
       const idx = messages.findIndex((m) => m.id === msg.id);
       if (idx <= 0) return "";
@@ -583,7 +585,65 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           onTouchEnd={endLongPress}
           onTouchCancel={endLongPress}
         >
-          {renderRichText(msg.text)}
+          {isEditingThisUserMessage ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+              <textarea
+                value={editingDraft}
+                onChange={(e) => setEditingDraft(e.target.value)}
+                rows={3}
+                style={{
+                  width: "100%",
+                  resize: "vertical",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  background: "rgba(15,23,42,0.6)",
+                  color: "#f8fafc",
+                  padding: "0.55rem 0.65rem",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.4rem" }}>
+                <button
+                  onClick={() => {
+                    setEditingMessageId(null);
+                    setEditingDraft("");
+                  }}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.38)",
+                    background: "transparent",
+                    color: "#f8fafc",
+                    borderRadius: 8,
+                    padding: "0.25rem 0.55rem",
+                    cursor: "pointer",
+                    fontSize: "0.74rem",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    applyMessageEdit(msg.id, editingDraft);
+                    setEditingMessageId(null);
+                    setEditingDraft("");
+                  }}
+                  style={{
+                    border: "none",
+                    background: "#22c55e",
+                    color: "#06240f",
+                    borderRadius: 8,
+                    padding: "0.25rem 0.55rem",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontSize: "0.74rem",
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          ) : (
+            renderRichText(msg.text)
+          )}
         </div>
         {showActions && (
           <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.12rem" }}>
@@ -706,6 +766,20 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           Active Chat: <span style={{ color: "#e2e8f0" }}>{activeConversationId ? "Saved thread" : "Unsaved"}</span>
         </div>
         <div style={{ display: "flex", gap: "0.45rem" }}>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:toggleFloating"))}
+            style={{
+              border: "1px solid rgba(148,163,184,0.35)",
+              background: "rgba(15,23,42,0.75)",
+              color: "#e2e8f0",
+              borderRadius: 8,
+              padding: "0.28rem 0.55rem",
+              cursor: "pointer",
+              fontSize: "0.72rem",
+            }}
+          >
+            Floating Chat
+          </button>
           <button
             onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "my_chats" }))}
             style={{

@@ -25,6 +25,7 @@ interface Suggestion {
 const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const blockLauncherClickRef = useRef(false);
+  const isMobileViewport = () => window.innerWidth <= 768;
 
   /* Floating chat position */
   const [floatingPosition, setFloatingPosition] = useState({ x: 20, y: 20 });
@@ -33,8 +34,10 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [floatingOpen, setFloatingOpen] = useState(false);
   const [launcherPos, setLauncherPos] = useState({
-    x: Math.max(24, window.innerWidth - 72),
-    y: 88,
+    x: Math.max(16, window.innerWidth - 60),
+    y: isMobileViewport()
+      ? Math.max(80, window.innerHeight - 110)
+      : 88,
   });
 
   /**
@@ -80,7 +83,9 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
       }));
       setLauncherPos(pos => ({
         x: Math.min(pos.x, innerWidth - 48),
-        y: Math.max(56, Math.min(pos.y, innerHeight - 48)),
+        y: isMobileViewport()
+          ? Math.max(80, Math.min(pos.y, innerHeight - 56))
+          : Math.max(56, Math.min(pos.y, innerHeight - 48)),
       }));
     };
 
@@ -192,8 +197,8 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
               left: launcherPos.x,
               top: launcherPos.y,
               zIndex: 10020,
-              width: 36,
-              height: 36,
+              width: isMobileViewport() ? 44 : 36,
+              height: isMobileViewport() ? 44 : 36,
               borderRadius: 999,
               border: "1px solid rgba(148, 163, 184, 0.35)",
               background: "rgba(15, 23, 42, 0.9)",
