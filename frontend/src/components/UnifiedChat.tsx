@@ -26,19 +26,22 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const blockLauncherClickRef = useRef(false);
   const isMobileViewport = () => window.innerWidth <= 768;
+  const centerFloating = () => ({
+    x: Math.max(12, Math.round(window.innerWidth - 470)),
+    y: Math.max(70, Math.round(window.innerHeight / 2 - 260)),
+  });
+  const centerLauncher = () => ({
+    x: Math.max(10, Math.round(window.innerWidth - (isMobileViewport() ? 58 : 52))),
+    y: Math.max(80, Math.round(window.innerHeight / 2 - (isMobileViewport() ? 22 : 18))),
+  });
 
   /* Floating chat position */
-  const [floatingPosition, setFloatingPosition] = useState({ x: 20, y: 20 });
+  const [floatingPosition, setFloatingPosition] = useState(centerFloating);
 
   /* AI Suggestions state (overlay-ready) */
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [floatingOpen, setFloatingOpen] = useState(false);
-  const [launcherPos, setLauncherPos] = useState({
-    x: Math.max(10, window.innerWidth - 54),
-    y: isMobileViewport()
-      ? Math.max(86, window.innerHeight - 118)
-      : 112,
-  });
+  const [launcherPos, setLauncherPos] = useState(centerLauncher);
 
   /**
    * Accept a suggestion (top-ranked)
@@ -82,7 +85,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
         y: Math.min(pos.y, innerHeight - 560),
       }));
       setLauncherPos(pos => ({
-        x: Math.min(pos.x, innerWidth - 48),
+        x: Math.min(Math.max(8, pos.x), innerWidth - 48),
         y: isMobileViewport()
           ? Math.max(80, Math.min(pos.y, innerHeight - 56))
           : Math.max(56, Math.min(pos.y, innerHeight - 48)),
@@ -191,6 +194,7 @@ const UnifiedChat: React.FC<Props> = ({ orchestrator }) => {
             id="floating-launcher"
             onClick={() => {
               if (blockLauncherClickRef.current) return;
+              setFloatingPosition(centerFloating());
               setFloatingOpen(true);
             }}
             title="Open Floating Chat"

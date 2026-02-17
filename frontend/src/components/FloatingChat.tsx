@@ -75,6 +75,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const sendRunRef = useRef(0);
   const [recordingDraft, setRecordingDraft] = useState("");
   const recordingDraftRef = useRef("");
+  const [listenSeq, setListenSeq] = useState(0);
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -210,8 +211,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   };
 
   // --- Send Command ---
-  const send = async () => {
-    if (!input.trim() || isSending) return;
+  const sendText = async (text: string) => {
+    if (!text.trim() || isSending) return;
     setSuggestions([]);
     setIsSending(true);
     const runId = Date.now();
@@ -219,15 +220,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     const context = chatContext.getAll();
     const commandId = Date.now().toString();
 
-    addMessage(input, "info", undefined, undefined, "user");
-    addHistoryMessage({ id: commandId, role: "user", text: input, type: "info" });
-    saveToCache({ id: commandId, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
-
-    const userInput = input;
+    addMessage(text, "info", undefined, undefined, "user");
+    addHistoryMessage({ id: commandId, role: "user", text, type: "info" });
+    saveToCache({ id: commandId, timestamp: Date.now(), type: "chat", payload: { role: "user", text, type: "info" } });
     setInput("");
 
     try {
-      const res = await orchestrator.execute({ command: userInput, context });
+      const res = await orchestrator.execute({ command: text, context });
       if (runId !== sendRunRef.current) return;
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
@@ -261,6 +260,10 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     } finally {
       if (runId === sendRunRef.current) setIsSending(false);
     }
+  };
+
+  const send = async () => {
+    await sendText(input);
   };
 
   const cancelSend = () => {
@@ -357,6 +360,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       setIsListening(false);
       return;
     }
+    setListenSeq((v) => v + 1);
     setRecordingDraft("");
     recordingDraftRef.current = "";
     const recognition = new SR();
@@ -383,6 +387,14 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     setInput((prev) => `${prev} ${recordingDraft}`.trim());
     setRecordingDraft("");
     recordingDraftRef.current = "";
+  };
+
+  const sendRecordingDraft = async () => {
+    if (!recordingDraft.trim()) return;
+    const text = recordingDraft.trim();
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
+    await sendText(text);
   };
 
   const cancelRecordingDraft = () => {
@@ -684,25 +696,39 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                     inset: "0.18rem 0.45rem",
                     display: "flex",
                     alignItems: "center",
-                    gap: 2,
                     pointerEvents: "none",
                     opacity: 0.9,
                     overflow: "hidden",
                   }}
                 >
                   <span style={{ fontSize: "0.7rem", color: "#94a3b8", marginRight: 5 }}>Listening</span>
-                  {Array.from({ length: 20 }).map((_, i) => (
-                    <span
-                      key={`fw-${i}`}
-                      style={{
-                        width: 3,
-                        height: 7 + (i % 4) * 3,
-                        borderRadius: 3,
-                        background: "rgba(148,163,184,0.75)",
-                        animation: `neWave 1s ${i * 0.05}s ease-in-out infinite`,
-                      }}
-                    />
-                  ))}
+                  <div
+                    key={`listen-fill-${listenSeq}`}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "50%",
+                      height: 1,
+                      background: "rgba(148,163,184,0.42)",
+                      transform: "translateY(-50%)",
+                      animation: "neFill 0.95s ease-out forwards",
+                    }}
+                  />
+                  <div style={{ display: "flex", width: "100%" }}>
+                    {Array.from({ length: 44 }).map((_, i) => (
+                      <span
+                        key={`fw-${i}`}
+                        style={{
+                          width: 3,
+                          marginRight: 2,
+                          height: 7 + (i % 4) * 3,
+                          borderRadius: 3,
+                          background: "rgba(148,163,184,0.75)",
+                          animation: `neWave 1s ${i * 0.05}s ease-in-out infinite`,
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -724,6 +750,22 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             </button>
             {!!recordingDraft && !isListening && (
               <>
+                <button
+                  onClick={sendRecordingDraft}
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 999,
+                    border: "none",
+                    background: "#16a34a",
+                    color: "#fff",
+                    marginLeft: 6,
+                    fontWeight: 800,
+                  }}
+                  title="Send recorded transcript"
+                >
+                  ↑
+                </button>
                 <button
                   onClick={acceptRecordingDraft}
                   style={{
@@ -779,7 +821,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
           </div>
         </>
       )}
-      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} }`}</style>
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} } @keyframes neFill { from { width: 0%; } to { width: 100%; } }`}</style>
     </div>
   );
 };

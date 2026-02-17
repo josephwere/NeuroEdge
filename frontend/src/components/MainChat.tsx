@@ -73,6 +73,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const sendRunRef = useRef(0);
   const [recordingDraft, setRecordingDraft] = useState("");
   const recordingDraftRef = useRef("");
+  const [listenSeq, setListenSeq] = useState(0);
 
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
@@ -260,35 +261,36 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isSending) return;
+  const sendText = async (text: string) => {
+    if (!text.trim() || isSending) return;
     setSuggestions([]);
     setIsSending(true);
     const runId = Date.now();
     sendRunRef.current = runId;
 
     const id = Date.now().toString();
-    const userMsg: Message = { id, role: "user", text: input, type: "info" };
+    const userMsg: Message = { id, role: "user", text, type: "info" };
     setMessages(m => [...m, userMsg]);
     setDisplayed(d => [...d, userMsg]);
-    chatContext.add({ role: "user", content: input });
-    addHistoryMessage({ id, role: "user", text: input, type: "info" });
+    chatContext.add({ role: "user", content: text });
+    addHistoryMessage({ id, role: "user", text, type: "info" });
     if (activeConversationId) {
       appendConversationMessage(activeConversationId, {
         id,
         role: "user",
-        text: input,
+        text,
         type: "info",
         timestamp: Date.now(),
       });
     }
 
-    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
-
-    const userInput = input;
+    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text, type: "info" } });
     setInput("");
+    await executeWithContext(text, [...messages, userMsg], runId);
+  };
 
-    await executeWithContext(userInput, [...messages, userMsg], runId);
+  const handleSend = async () => {
+    await sendText(input);
   };
 
   const cancelSend = () => {
@@ -461,6 +463,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       setIsListening(false);
       return;
     }
+    setListenSeq((v) => v + 1);
     setRecordingDraft("");
     recordingDraftRef.current = "";
     const recognition = new SR();
@@ -487,6 +490,14 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     setInput((prev) => `${prev} ${recordingDraft}`.trim());
     setRecordingDraft("");
     recordingDraftRef.current = "";
+  };
+
+  const sendRecordingDraft = async () => {
+    if (!recordingDraft.trim()) return;
+    const text = recordingDraft.trim();
+    setRecordingDraft("");
+    recordingDraftRef.current = "";
+    await sendText(text);
   };
 
   const cancelRecordingDraft = () => {
@@ -999,25 +1010,39 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
                   inset: "0.18rem 0.5rem",
                   display: "flex",
                   alignItems: "center",
-                  gap: 2,
                   pointerEvents: "none",
                   opacity: 0.9,
                   overflow: "hidden",
                 }}
               >
                 <span style={{ fontSize: "0.72rem", color: "#94a3b8", marginRight: 6 }}>Listening</span>
-                {Array.from({ length: 28 }).map((_, i) => (
-                  <span
-                    key={`mw-${i}`}
-                    style={{
-                      width: 3,
+                <div
+                  key={`listen-fill-${listenSeq}`}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: "50%",
+                    height: 1,
+                    background: "rgba(148,163,184,0.42)",
+                    transform: "translateY(-50%)",
+                    animation: "neFill 0.95s ease-out forwards",
+                  }}
+                />
+                <div style={{ display: "flex", width: "100%" }}>
+                  {Array.from({ length: 56 }).map((_, i) => (
+                    <span
+                      key={`mw-${i}`}
+                      style={{
+                        width: 3,
+                      marginRight: 2,
                       height: 8 + (i % 4) * 4,
-                      borderRadius: 3,
-                      background: "rgba(148,163,184,0.72)",
-                      animation: `neWave 1s ${i * 0.04}s ease-in-out infinite`,
-                    }}
-                  />
-                ))}
+                        borderRadius: 3,
+                        background: "rgba(148,163,184,0.72)",
+                        animation: `neWave 1s ${i * 0.04}s ease-in-out infinite`,
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1040,6 +1065,22 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           </button>
           {!!recordingDraft && !isListening && (
             <>
+              <button
+                onClick={sendRecordingDraft}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 999,
+                  border: "none",
+                  background: "#16a34a",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+                title="Send recorded transcript"
+              >
+                ↑
+              </button>
               <button
                 onClick={acceptRecordingDraft}
                 style={{
@@ -1096,7 +1137,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           </button>
         </div>
       </div>
-      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} }`}</style>
+      <style>{`@keyframes neSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes neWave { 0%,100%{ transform: scaleY(0.45); opacity:0.45;} 50%{ transform: scaleY(1); opacity:1;} } @keyframes neFill { from { width: 0%; } to { width: 100%; } }`}</style>
     </div>
   );
 };
