@@ -31,6 +31,19 @@ import { summarizeUsage } from "@billing/usage";
 import { createRateLimiter } from "@security/rateLimit";
 import { runResearch } from "@research/pipeline";
 import { exportTrainingJSONL, listTrainingSamples, recordTrainingSample } from "@training/dataset";
+import {
+  doctrineShieldMiddleware,
+  doctrineVersion,
+  listDoctrineRules,
+  upsertDoctrineRule,
+} from "@security/doctrineShield";
+import {
+  analyzeWorkspace,
+  buildExpansionProposal,
+  generateModuleWithConfirmation,
+} from "@core/selfExpansion";
+import path from "path";
+import fs from "fs";
 
 export function startServer(
   restPort: number,
@@ -53,13 +66,221 @@ export function startServer(
     }
     next();
   });
-  app.use(express.json());
+  app.use(express.json({ limit: process.env.MAX_JSON_BODY || "1mb" }));
   app.use(metricsMiddleware);
   app.use(authMiddleware);
+  app.use(doctrineShieldMiddleware);
 
   app.get("/metrics", async (_req: Request, res: Response) => {
     res.set("Content-Type", getPrometheusContentType());
     res.send(await renderPrometheusMetrics());
+  });
+
+  app.get("/admin/logs", requireWorkspace, requireScope("admin:read"), (req: Request, res: Response) => {
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 300));
+    res.json({
+      success: true,
+      logs: listEvents(limit),
+    });
+  });
+
+  app.get("/admin/audit", requireWorkspace, requireScope("admin:read"), (req: Request, res: Response) => {
+    const limit = Math.min(3000, Math.max(1, Number(req.query.limit) || 500));
+    const audit = listEvents(limit).filter((evt) => {
+      const t = String(evt.type || "");
+      return (
+        t.startsWith("admin.") ||
+        t.startsWith("doctrine.") ||
+        t.startsWith("policy.") ||
+        t.startsWith("self_expansion.")
+      );
+    });
+    res.json({ success: true, audit });
+  });
+
+  app.get("/admin/usage", requireWorkspace, requireScope("admin:read"), (req: Request, res: Response) => {
+    res.json({
+      success: true,
+      orgId: req.auth?.orgId || "personal",
+      workspaceId: req.auth?.workspaceId || "default",
+      usage: summarizeUsage(),
+    });
+  });
+
+  app.get("/admin/agents", requireWorkspace, requireScope("admin:read"), (_req: Request, res: Response) => {
+    const knownAgents = [
+      "DevExecutionAgent",
+      "GitHubAgent",
+      "FloatingChatAgent",
+      "MLReasoningAgent",
+      "MeshAgent",
+    ];
+    const recentEvents = listEvents(800);
+    const agentEvents = recentEvents.filter((e) => String(e.type || "").toLowerCase().includes("agent"));
+    res.json({
+      success: true,
+      totalKnown: knownAgents.length,
+      agents: knownAgents.map((name) => ({
+        name,
+        status: "running",
+      })),
+      recentAgentEvents: agentEvents.slice(-40),
+    });
+  });
+
+  app.post("/admin/restart", requireWorkspace, requireScope("admin:write"), (req: Request, res: Response) => {
+    const service = String(req.body?.service || "").trim().toLowerCase();
+    const confirm = Boolean(req.body?.confirm);
+    const allowed = ["kernel", "ml", "orchestrator", "frontend"];
+    if (!allowed.includes(service)) {
+      return res.status(400).json({ error: "Invalid service", allowed });
+    }
+    appendEvent({
+      type: "admin.restart.requested",
+      timestamp: Date.now(),
+      payload: {
+        service,
+        actor: req.auth?.sub || "unknown",
+        orgId: req.auth?.orgId || "personal",
+        workspaceId: req.auth?.workspaceId || "default",
+        confirm,
+      },
+    });
+    return res.json({
+      success: true,
+      executed: false,
+      confirmationRequired: true,
+      message:
+        "Restart is intentionally manual in production-safe mode. Use your process manager (systemd/pm2/k8s) with explicit operator approval.",
+      suggestedCommands: [
+        `systemctl restart neuroedge-${service}`,
+        `pm2 restart neuroedge-${service}`,
+      ],
+    });
+  });
+
+  app.get("/admin/system/metrics", requireWorkspace, requireScope("admin:read"), async (_req: Request, res: Response) => {
+    const mem = process.memoryUsage();
+    const kernels = await globalKernelManager.getAllHealth();
+    const nodesOnline = meshRegistry.list().filter((n) => n.online).length;
+    res.json({
+      success: true,
+      uptimeSec: Math.round(process.uptime()),
+      memory: {
+        rss: mem.rss,
+        heapTotal: mem.heapTotal,
+        heapUsed: mem.heapUsed,
+        external: mem.external,
+      },
+      kernels,
+      mesh: {
+        nodesOnline,
+        nodesTotal: meshRegistry.list().length,
+      },
+      time: new Date().toISOString(),
+    });
+  });
+
+  app.get("/admin/version", requireWorkspace, requireScope("admin:read"), (_req: Request, res: Response) => {
+    const pkgPath = path.join(process.cwd(), "package.json");
+    const pkgVersion = (() => {
+      try {
+        const raw = fs.readFileSync(pkgPath, "utf-8");
+        return JSON.parse(raw).version || "unknown";
+      } catch {
+        return "unknown";
+      }
+    })();
+    const state = readState();
+    res.json({
+      success: true,
+      orchestratorVersion: pkgVersion,
+      stateVersion: state.version,
+      doctrineVersion: doctrineVersion(),
+      updatedAt: state.updatedAt,
+    });
+  });
+
+  app.get("/doctrine/rules", requireWorkspace, requireScope("admin:read"), (_req: Request, res: Response) => {
+    res.json({
+      success: true,
+      version: doctrineVersion(),
+      rules: listDoctrineRules(),
+    });
+  });
+
+  app.post("/doctrine/rules", requireWorkspace, requireScope("admin:write"), (req: Request, res: Response) => {
+    const body = req.body || {};
+    if (!body.id || !body.category || !body.action || !body.pattern || !body.message) {
+      return res.status(400).json({ error: "Missing rule fields" });
+    }
+    const saved = upsertDoctrineRule({
+      id: String(body.id),
+      version: Number(body.version) || 1,
+      enabled: body.enabled !== false,
+      category: body.category,
+      action: body.action,
+      pattern: String(body.pattern),
+      message: String(body.message),
+    });
+    res.json({ success: true, rule: saved, version: doctrineVersion() });
+  });
+
+  app.get("/self-expansion/analyze", requireWorkspace, requireScope("admin:read"), (_req: Request, res: Response) => {
+    const overview = analyzeWorkspace(process.cwd());
+    const proposal = buildExpansionProposal(process.cwd(), "system-wide self expansion readiness");
+    res.json({
+      success: true,
+      selfExpansion: {
+        overview,
+        proposal,
+        enforcement: {
+          requiresHumanApproval: true,
+          autoRewriteProductionCode: false,
+          autoSelfDeploy: false,
+        },
+      },
+    });
+  });
+
+  app.post("/self-expansion/propose", requireWorkspace, requireScope("admin:write"), (req: Request, res: Response) => {
+    const goal = String(req.body?.goal || "").trim();
+    const proposal = buildExpansionProposal(process.cwd(), goal);
+    appendEvent({
+      type: "self_expansion.proposal",
+      timestamp: Date.now(),
+      payload: {
+        actor: req.auth?.sub || "unknown",
+        orgId: req.auth?.orgId || "personal",
+        workspaceId: req.auth?.workspaceId || "default",
+        goal,
+        targetVersion: proposal.targetVersion,
+      },
+    });
+    res.json({
+      success: true,
+      proposal,
+    });
+  });
+
+  app.post("/self-expansion/generate-module", requireWorkspace, requireScope("admin:write"), (req: Request, res: Response) => {
+    const name = String(req.body?.name || "").trim();
+    const purpose = String(req.body?.purpose || "").trim();
+    const relativePath = String(req.body?.path || "orchestrator/src/generated/new_module.ts").trim();
+    const confirm = Boolean(req.body?.confirm);
+    if (!name || !purpose) {
+      return res.status(400).json({ error: "Missing name or purpose" });
+    }
+    const cwd = process.cwd();
+    const workspaceRoot = path.basename(cwd) === "orchestrator" ? path.resolve(cwd, "..") : cwd;
+    const result = generateModuleWithConfirmation({
+      workspaceRoot,
+      name,
+      purpose,
+      relativePath,
+      confirm,
+    });
+    res.json(result);
   });
 
   app.get("/auth/whoami", (req: Request, res: Response) => {
