@@ -128,6 +128,7 @@ const Dashboard: React.FC = () => {
   const [adminAgents, setAdminAgents] = useState<any[]>([]);
   const [adminVersion, setAdminVersion] = useState<any>({});
   const [adminMetrics, setAdminMetrics] = useState<any>({});
+  const [twinOutput, setTwinOutput] = useState<any>(null);
 
   const [users, setUsers] = useState<UserRecord[]>(() => {
     try {
@@ -637,6 +638,18 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: "Model control saved." });
   };
 
+  const runTwinAction = async (path: string, body: any = {}) => {
+    try {
+      const isGet = path.startsWith("GET:");
+      const target = isGet ? path.replace("GET:", "") : path;
+      const data = isGet ? await getJson(target) : await postJson(target, body);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Twin action completed." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Twin action failed: ${err?.message || err}` });
+    }
+  };
+
   const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
     const reason = window.prompt(`Reason for restarting ${service}:`, "Emergency maintenance");
     if (!reason || reason.trim().length < 8) {
@@ -857,6 +870,20 @@ const Dashboard: React.FC = () => {
             {f.name} • {f.phase} • {f.priority}
           </div>
         ))}
+      </Card>
+      <Card title="Twin Systems">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button style={chip} onClick={() => runTwinAction("/twin/scan")}>Twin Scan</button>
+          <button style={chip} onClick={() => runTwinAction("/twin/analyze")}>Twin Analyze</button>
+          <button style={chip} onClick={() => runTwinAction("/twin/evolve", { current_version: "1.0" })}>Twin Evolve</button>
+          <button style={chip} onClick={() => runTwinAction("GET:/twin/report")}>Twin Report</button>
+          <button style={chip} onClick={() => runTwinAction("/neurotwin/calibrate", { owner: "Joseph Were", tone: "direct", communication_style: "strategic", risk_appetite: "medium", goals: ["Scale NeuroEdge"], writing_samples: [] })}>NeuroTwin Calibrate</button>
+          <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/profile")}>NeuroTwin Profile</button>
+          <button style={chip} onClick={() => runTwinAction("GET:/neurotwin/report")}>NeuroTwin Report</button>
+        </div>
+        <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
+          {twinOutput ? JSON.stringify(twinOutput, null, 2) : "No twin output yet."}
+        </pre>
       </Card>
     </div>
   );

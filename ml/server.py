@@ -22,6 +22,35 @@ try:
 except Exception:
     FloatingChatMLAgent = None
 
+try:
+    from twin import TwinCore
+    from human_twin import (
+        TwinProfileStore,
+        set_mode as twin_set_mode,
+        get_mode as twin_get_mode,
+        summarize_meeting,
+        analyze_emotion,
+        simulate_decision,
+        enforce_human_twin_guardrails,
+        log_meeting,
+        list_meetings,
+        log_decision,
+        list_decisions,
+    )
+except Exception:
+    TwinCore = None
+    TwinProfileStore = None
+    twin_set_mode = None
+    twin_get_mode = None
+    summarize_meeting = None
+    analyze_emotion = None
+    simulate_decision = None
+    enforce_human_twin_guardrails = None
+    log_meeting = None
+    list_meetings = None
+    log_decision = None
+    list_decisions = None
+
 
 app = FastAPI(title="NeuroEdge ML Service", version="1.0.0")
 app.add_middleware(
@@ -150,6 +179,42 @@ class PredictRequest(BaseModel):
     text: str = ""
 
 
+class TwinCalibrateRequest(BaseModel):
+    owner: str = "founder"
+    goals: List[str] = Field(default_factory=list)
+    tone: str = "direct"
+    communication_style: str = "strategic"
+    risk_appetite: str = "medium"
+    writing_samples: List[str] = Field(default_factory=list)
+    calibration_answers: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TwinMeetingRequest(BaseModel):
+    transcript: str = ""
+    title: str = "Untitled meeting"
+    participants: List[str] = Field(default_factory=list)
+
+
+class TwinDecisionRequest(BaseModel):
+    prompt: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TwinModeRequest(BaseModel):
+    mode: str
+
+
+class TwinValidateRequest(BaseModel):
+    code: str = ""
+    language: str = "python"
+    schema: Dict[str, Any] = Field(default_factory=dict)
+    proposal: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TwinProjectAnalyzeRequest(BaseModel):
+    zip_path: str = ""
+
+
 def _load_agent() -> Optional[Any]:
     if FloatingChatMLAgent is None:
         return None
@@ -160,6 +225,8 @@ def _load_agent() -> Optional[Any]:
 
 
 ml_agent = _load_agent()
+twin_core = TwinCore(os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))) if TwinCore is not None else None
+twin_profile_store = TwinProfileStore() if TwinProfileStore is not None else None
 
 
 def _extract_text(req: InferRequest) -> str:
@@ -353,6 +420,175 @@ def execute_command(req: CommandRequest) -> Dict[str, Any]:
     except Exception as exc:
         return {"stdout": "", "stderr": str(exc), "success": False, "exit_code": -1}
 
+
+@app.post("/neurotwin/calibrate")
+def neurotwin_calibrate(req: TwinCalibrateRequest) -> Dict[str, Any]:
+    if twin_profile_store is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+
+    writing = " ".join(req.writing_samples).strip().lower()
+    avg_sentence = 0
+    vocab = []
+    if writing:
+        words = [w.strip(".,!?;:()[]{}\"'") for w in writing.split() if w.strip()]
+        vocab = sorted(list(set(words)))[:200]
+        avg_sentence = max(1, len(words) // max(1, writing.count(".") + writing.count("!") + writing.count("?")))
+
+    profile = twin_profile_store.save_profile(
+        {
+            "owner": req.owner,
+            "goals": req.goals,
+            "tone": req.tone,
+            "communication_style": req.communication_style,
+            "risk_appetite": req.risk_appetite,
+            "calibration_answers": req.calibration_answers,
+            "disclosure_required": True,
+        }
+    )
+    comm = twin_profile_store.save_communication_patterns(
+        {
+            "vocabulary": vocab,
+            "sentence_length_avg": avg_sentence,
+            "tone_vectors": {"directness": 0.8 if req.tone == "direct" else 0.5},
+        }
+    )
+    return {
+        "status": "ok",
+        "profile": profile,
+        "communication_patterns": comm,
+        "message": "NeuroTwin calibrated. AI disclosure remains mandatory.",
+    }
+
+
+@app.post("/neurotwin/update-profile")
+def neurotwin_update_profile(payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    if twin_profile_store is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    updated = twin_profile_store.save_profile(payload or {})
+    return {"status": "ok", "profile": updated}
+
+
+@app.post("/neurotwin/analyze-meeting")
+def neurotwin_analyze_meeting(req: TwinMeetingRequest) -> Dict[str, Any]:
+    if summarize_meeting is None or log_meeting is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    if not req.transcript.strip():
+        raise HTTPException(status_code=400, detail="Missing transcript")
+    analysis = summarize_meeting(req.transcript)
+    emotion = analyze_emotion(req.transcript) if analyze_emotion is not None else {}
+    guardrails = enforce_human_twin_guardrails(req.transcript) if enforce_human_twin_guardrails is not None else {"allowed": True}
+    payload = {
+        "title": req.title,
+        "participants": req.participants,
+        "analysis": analysis,
+        "emotion": emotion,
+        "guardrails": guardrails,
+    }
+    log_meeting(payload)
+    return {"status": "ok", **payload}
+
+
+@app.post("/neurotwin/decision-simulate")
+def neurotwin_decision_simulate(req: TwinDecisionRequest) -> Dict[str, Any]:
+    if twin_profile_store is None or simulate_decision is None or log_decision is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    profile = twin_profile_store.get_profile()
+    framework = twin_profile_store.get_decision_framework()
+    result = simulate_decision(req.prompt, profile, framework)
+    log_decision({"prompt": req.prompt, "result": result, "context": req.context})
+    return {"status": "ok", "result": result}
+
+
+@app.post("/neurotwin/set-mode")
+def neurotwin_set_mode(req: TwinModeRequest) -> Dict[str, Any]:
+    if twin_set_mode is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    allowed = {"public", "investor", "developer", "private_reflection", "aggressive_negotiation", "calm_mediator"}
+    mode = req.mode.strip().lower()
+    if mode not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid mode. Allowed: {sorted(list(allowed))}")
+    data = twin_set_mode(mode)
+    return {"status": "ok", "mode": data}
+
+
+@app.get("/neurotwin/profile")
+def neurotwin_profile() -> Dict[str, Any]:
+    if twin_profile_store is None or twin_get_mode is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    return {
+        "status": "ok",
+        "profile": twin_profile_store.get_profile(),
+        "communication_patterns": twin_profile_store.get_communication_patterns(),
+        "decision_framework": twin_profile_store.get_decision_framework(),
+        "mode": twin_get_mode(),
+        "disclosure": "This is an AI digital twin assistant, not a human identity replacement.",
+    }
+
+
+@app.get("/neurotwin/report")
+def neurotwin_report() -> Dict[str, Any]:
+    if twin_profile_store is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin unavailable")
+    meetings = list_meetings(20) if list_meetings is not None else []
+    decisions = list_decisions(20) if list_decisions is not None else []
+    return {
+        "status": "ok",
+        "profile": twin_profile_store.get_profile(),
+        "recent_meetings": meetings,
+        "recent_decisions": decisions,
+    }
+
+
+@app.post("/twin/scan")
+def twincore_scan() -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    return twin_core.scan_system()
+
+
+@app.post("/twin/analyze")
+def twincore_analyze() -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    return twin_core.analyze_system()
+
+
+@app.post("/twin/evolve")
+def twincore_evolve(payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    current_version = str((payload or {}).get("current_version", "1.0"))
+    return twin_core.simulate_evolution(current_version)
+
+
+@app.post("/twin/validate")
+def twincore_validate(req: TwinValidateRequest) -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    return twin_core.validate_proposal(
+        {
+            "code": req.code,
+            "language": req.language,
+            "schema": req.schema,
+            **(req.proposal or {}),
+        }
+    )
+
+
+@app.get("/twin/report")
+def twincore_report() -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    return twin_core.generate_full_report()
+
+
+@app.post("/twin/project/analyze")
+def twincore_project_analyze(req: TwinProjectAnalyzeRequest) -> Dict[str, Any]:
+    if twin_core is None:
+        raise HTTPException(status_code=503, detail="TwinCore unavailable")
+    if not req.zip_path.strip():
+        raise HTTPException(status_code=400, detail="Missing zip_path")
+    return twin_core.analyze_zip(req.zip_path.strip())
 
 if __name__ == "__main__":
     if uvicorn is None:

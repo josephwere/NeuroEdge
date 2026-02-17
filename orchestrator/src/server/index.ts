@@ -813,6 +813,136 @@ export function startServer(
     });
   });
 
+  app.post("/twin/scan", requireWorkspace, requireScope("admin:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/scan`, {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin scan failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/twin/analyze", requireWorkspace, requireScope("admin:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/analyze`, {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin analyze failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/twin/evolve", requireWorkspace, requireScope("admin:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/evolve`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin evolve failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/twin/validate", requireWorkspace, requireScope("admin:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/validate`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin validate failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/twin/report", requireWorkspace, requireScope("admin:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/twin/report`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin report failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/twin/project/analyze", requireWorkspace, requireScope("admin:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/twin/project/analyze`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Twin project analyze failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/calibrate", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/calibrate`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin calibrate failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/update-profile", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/update-profile`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin update profile failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/analyze-meeting", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/analyze-meeting`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin analyze meeting failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/decision-simulate", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/decision-simulate`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin decision simulate failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/set-mode", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/set-mode`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin set mode failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/profile", requireWorkspace, requireScope("chat:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/profile`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin profile failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/report", requireWorkspace, requireScope("chat:write"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/report`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin report failed", detail: err?.message || String(err) });
+    }
+  });
+
   /* ---------------- Mesh Inference Registry ---------------- */
   const meshRegistry = new InferenceRegistry();
   const fedAggregator = new FedAggregator();
