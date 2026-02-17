@@ -7,6 +7,7 @@ import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
+import { isFounderUser } from "@/services/founderAccess";
 
 interface ExecutionResult {
   id: string;
@@ -42,6 +43,7 @@ interface FloatingChatProps {
 }
 
 const PAGE_SIZE = 20;
+const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
 
 const FloatingChat: React.FC<FloatingChatProps> = ({
   orchestrator,
@@ -198,12 +200,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     try {
       const res = await orchestrator.execute({ command: userInput, context });
 
-      if (res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
-      if (res.intent) addMessage(`🎯 Intent: ${res.intent}`, "ml");
-      if (res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
+      const founderDebugVisible = SHOW_AI_META || isFounderUser();
+      if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
+      if (founderDebugVisible && res.intent) addMessage(`🎯 Intent: ${res.intent}`, "ml");
+      if (founderDebugVisible && res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
 
-      if (res.logs) res.logs.forEach(l => addMessage(`[Log] ${l}`, "info"));
-      if (res.meshStatus) res.meshStatus.forEach((n: any) => addMessage(`🌐 [${n.node}] ${n.status}`, "mesh"));
+      if (founderDebugVisible && res.logs) res.logs.forEach(l => addMessage(`[Log] ${l}`, "info"));
+      if (founderDebugVisible && res.meshStatus) res.meshStatus.forEach((n: any) => addMessage(`🌐 [${n.node}] ${n.status}`, "mesh"));
       if (res.results) {
         res.results.forEach((r: ExecutionResult) => {
           const stderr = String(r?.stderr || "");

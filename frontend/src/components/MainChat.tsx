@@ -9,6 +9,7 @@ import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
 import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
+import { isFounderUser } from "@/services/founderAccess";
 
 interface Message {
   id: string;
@@ -27,6 +28,7 @@ interface MainChatProps {
 }
 
 const PAGE_SIZE = 30;
+const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
 
 const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const { addMessage: addHistoryMessage } = useChatHistory();
@@ -128,8 +130,10 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         });
       } else {
         // Other founder messages
-        addMessage(`📣 Founder: ${msg.message}`, msg.type);
-        speak(msg.message);
+        if (isFounderUser()) {
+          addMessage(`📣 Founder: ${msg.message}`, msg.type);
+          speak(msg.message);
+        }
       }
     };
 
@@ -157,11 +161,12 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     try {
       const res = await orchestrator.execute({ command: userInput, context: chatContext.getAll() });
 
-      if (res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
-      if (res.intent) addMessage(`🎯 Intent: ${res.intent}`, "ml");
-      if (res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
+      const founderDebugVisible = SHOW_AI_META || isFounderUser();
+      if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
+      if (founderDebugVisible && res.intent) addMessage(`🎯 Intent: ${res.intent}`, "ml");
+      if (founderDebugVisible && res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
 
-      if (res.logs) res.logs.forEach((l: string) => addMessage(`[Log] ${l}`, "info"));
+      if (founderDebugVisible && res.logs) res.logs.forEach((l: string) => addMessage(`[Log] ${l}`, "info"));
       if (res.results) {
         res.results.forEach((r: any) => {
           const stderr = String(r?.stderr || "");
