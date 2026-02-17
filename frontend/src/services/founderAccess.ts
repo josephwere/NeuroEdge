@@ -21,32 +21,36 @@ function looksLikeFounder(name: string, email: string): boolean {
   );
 }
 
-function readLocalProfile(): { name: string; email: string } {
+function readLocalProfile(): { name: string; email: string; role: string } {
   let name = "";
   let email = "";
+  let role = "";
   try {
     const rawUser = localStorage.getItem("neuroedge_user");
     if (rawUser) {
       const parsed = JSON.parse(rawUser);
       name = String(parsed?.name || name);
       email = String(parsed?.email || email);
+      role = String(parsed?.role || role);
     }
     const rawProfile = localStorage.getItem("neuroedge_profile_settings");
     if (rawProfile) {
       const parsed = JSON.parse(rawProfile);
       name = String(parsed?.name || name);
       email = String(parsed?.email || email);
+      role = String(parsed?.role || role);
     }
     const rawSession = localStorage.getItem("neuroedge_session");
     if (rawSession) {
       const parsed = JSON.parse(rawSession);
       name = String(parsed?.name || name);
       email = String(parsed?.email || email);
+      role = String(parsed?.role || role);
     }
   } catch {
     // Ignore malformed local storage.
   }
-  return { name, email };
+  return { name, email, role };
 }
 
 export function isFounderUser(): boolean {
@@ -54,8 +58,8 @@ export function isFounderUser(): boolean {
   const envName = normalize(import.meta.env.VITE_FOUNDER_NAME as string);
   const envEmail = normalize(import.meta.env.VITE_FOUNDER_EMAIL as string);
   const profile = readLocalProfile();
+  const roleFounder = normalize(profile.role) === "founder";
   const localFounder = looksLikeFounder(profile.name, profile.email);
   const envFounder = looksLikeFounder(envName, envEmail);
-  return envEnabled || localFounder || envFounder;
+  return envEnabled || roleFounder || localFounder || envFounder;
 }
-

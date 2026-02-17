@@ -238,6 +238,7 @@ const Dashboard: React.FC = () => {
       const rawUser = localStorage.getItem("neuroedge_user");
       const user = rawUser ? JSON.parse(rawUser) : {};
       const role = String(user?.role || "").toLowerCase();
+      if (role === "founder") return "founder";
       if (role === "admin" || role === "moderator") return "admin";
       const tier = String(
         user?.plan ||
@@ -269,6 +270,10 @@ const Dashboard: React.FC = () => {
       )
         .trim()
         .toLowerCase();
+      if (role === "founder") {
+        setDashboardRole("founder");
+        return;
+      }
       if (role === "admin" || role === "moderator") {
         setDashboardRole("admin");
         return;
