@@ -16,6 +16,8 @@ import { KernelCommand } from "@services/kernelComm";
 import { handleChat } from "@handlers/chatHandler";
 import { handleExecution } from "@handlers/executionHandler";
 import { handleAIInference } from "@handlers/aiHandler";
+import { handleBrainstorm } from "@handlers/brainstormHandler";
+import { handleDevAssistant } from "@handlers/devAssistantHandler";
 import { appendEvent, listEvents, readState, writeState } from "@storage/hybrid_db";
 import { InferenceRegistry, InferenceNode } from "@mesh/inference_registry";
 import { FedAggregator, verifyPayload, signPayload } from "@federation/fed_aggregator";
@@ -1220,6 +1222,8 @@ export function startServer(
   app.post("/chat", requireWorkspace, requireScope("chat:write"), aiLimiter, handleChat);
   app.post("/execute", requireWorkspace, requireScope("execute:run"), executeLimiter, handleExecution);
   app.post("/ai", requireWorkspace, requireScope("ai:infer"), aiLimiter, handleAIInference);
+  app.post("/brainstorm", requireWorkspace, requireScope("chat:write"), aiLimiter, handleBrainstorm);
+  app.post("/dev/assist", requireWorkspace, requireScope("chat:write"), executeLimiter, handleDevAssistant);
   app.post("/ai/stream", requireWorkspace, requireScope("ai:infer"), aiLimiter, async (req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");

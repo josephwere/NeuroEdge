@@ -914,7 +914,10 @@ const Dashboard: React.FC = () => {
       reader.readAsDataURL(file);
     });
 
-  const onBrandAssetUpload = async (kind: "logoUrl" | "iconUrl" | "faviconUrl", files: FileList | null) => {
+  const onBrandAssetUpload = async (
+    kind: "logoUrl" | "iconUrl" | "faviconUrl" | "mainChatBackgroundUrl" | "floatingChatBackgroundUrl" | "loginBackgroundUrl",
+    files: FileList | null
+  ) => {
     const file = files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -936,6 +939,14 @@ const Dashboard: React.FC = () => {
       logoUrl: brandingDraft.logoUrl || defaultBranding.logoUrl,
       iconUrl: brandingDraft.iconUrl || defaultBranding.iconUrl,
       faviconUrl: brandingDraft.faviconUrl || brandingDraft.iconUrl || defaultBranding.faviconUrl,
+      mainChatBackgroundUrl: brandingDraft.mainChatBackgroundUrl || "",
+      floatingChatBackgroundUrl: brandingDraft.floatingChatBackgroundUrl || "",
+      loginBackgroundUrl: brandingDraft.loginBackgroundUrl || "",
+      mainChatOverlayOpacity: Number(brandingDraft.mainChatOverlayOpacity || defaultBranding.mainChatOverlayOpacity),
+      floatingOverlayOpacity: Number(brandingDraft.floatingOverlayOpacity || defaultBranding.floatingOverlayOpacity),
+      loginOverlayOpacity: Number(brandingDraft.loginOverlayOpacity || defaultBranding.loginOverlayOpacity),
+      accentColor: brandingDraft.accentColor || defaultBranding.accentColor,
+      glassBlur: Number(brandingDraft.glassBlur || defaultBranding.glassBlur),
     };
     saveBranding(next);
     applyBrandingToDocument(next);
@@ -1172,11 +1183,99 @@ const Dashboard: React.FC = () => {
               <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("faviconUrl", e.target.files)} />
             </label>
           </div>
+          <div style={row}>
+            <span>Main Chat Background</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("mainChatBackgroundUrl", e.target.files)} />
+            </label>
+          </div>
+          <div style={row}>
+            <span>Floating Chat Background</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("floatingChatBackgroundUrl", e.target.files)} />
+            </label>
+          </div>
+          <div style={row}>
+            <span>Login Background</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("loginBackgroundUrl", e.target.files)} />
+            </label>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <img src={brandingDraft.logoUrl || defaultBranding.logoUrl} alt="logo preview" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
           <img src={brandingDraft.iconUrl || defaultBranding.iconUrl} alt="icon preview" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(148,163,184,0.35)" }} />
           <img src={brandingDraft.faviconUrl || defaultBranding.faviconUrl} alt="favicon preview" style={{ width: 20, height: 20, objectFit: "cover", borderRadius: 4, border: "1px solid rgba(148,163,184,0.35)" }} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 8 }}>
+          <img src={brandingDraft.mainChatBackgroundUrl || defaultBranding.logoUrl} alt="main chat bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+          <img src={brandingDraft.floatingChatBackgroundUrl || defaultBranding.logoUrl} alt="floating bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+          <img src={brandingDraft.loginBackgroundUrl || defaultBranding.logoUrl} alt="login bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Main chat overlay opacity</span>
+            <input
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.02}
+              value={brandingDraft.mainChatOverlayOpacity}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, mainChatOverlayOpacity: Number(e.target.value) }))}
+              style={{ width: 180 }}
+            />
+          </div>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Floating overlay opacity</span>
+            <input
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.02}
+              value={brandingDraft.floatingOverlayOpacity}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, floatingOverlayOpacity: Number(e.target.value) }))}
+              style={{ width: 180 }}
+            />
+          </div>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Login overlay opacity</span>
+            <input
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.02}
+              value={brandingDraft.loginOverlayOpacity}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, loginOverlayOpacity: Number(e.target.value) }))}
+              style={{ width: 180 }}
+            />
+          </div>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Accent color</span>
+            <input
+              type="color"
+              value={brandingDraft.accentColor || "#2563eb"}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, accentColor: e.target.value }))}
+              style={{ width: 64, height: 30, padding: 0, border: "none", background: "transparent" }}
+            />
+          </div>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Glass blur</span>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={1}
+              value={brandingDraft.glassBlur}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, glassBlur: Number(e.target.value) }))}
+              style={{ width: 180 }}
+            />
+          </div>
+        </div>
+        <div style={{ ...log, whiteSpace: "pre-wrap" }}>
+          Future options: custom fonts, animated gradients, per-workspace themes, scheduled themes, campaign branding, locale-based branding.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={primary} onClick={saveBrandingSettings}>Save Branding</button>

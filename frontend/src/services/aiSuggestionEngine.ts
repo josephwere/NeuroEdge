@@ -38,6 +38,24 @@ export const generateSuggestions = async (
     });
   }
 
+  if (/\b(brainstorm|idea|roadmap|strategy)\b/i.test(input)) {
+    suggestions.push({
+      id: "brainstorm",
+      text: "/brainstorm " + input.replace(/\bbrainstorm\b/i, "").trim(),
+      type: "command",
+      confidence: 0.9,
+    });
+  }
+
+  if (/\b(npm|pnpm|yarn|install|lint|test|build|push|deploy)\b/i.test(input)) {
+    suggestions.push({
+      id: "dev-assist",
+      text: `/dev ${input}`,
+      type: "command",
+      confidence: 0.86,
+    });
+  }
+
   if (input.endsWith("{")) {
     suggestions.push({
       id: "code-complete",

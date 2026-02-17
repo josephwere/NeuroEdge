@@ -11,6 +11,8 @@ import { isFounderUser } from "@/services/founderAccess";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { confirmSafeAction } from "@/services/safetyPrompts";
+import { extractVisibleText, fillFormFieldsFromSpec } from "@/services/localAutomation";
+import { loadBranding } from "@/services/branding";
 
 interface ExecutionResult {
   id: string;
@@ -76,6 +78,18 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const [recordingDraft, setRecordingDraft] = useState("");
   const recordingDraftRef = useRef("");
   const [listenSeq, setListenSeq] = useState(0);
+  const [brainstormMode, setBrainstormMode] = useState(false);
+  const [branding, setBranding] = useState(() => loadBranding());
+
+  useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
 
   // --- Drag & Move ---
   useEffect(() => {
@@ -224,9 +238,39 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     addHistoryMessage({ id: commandId, role: "user", text, type: "info" });
     saveToCache({ id: commandId, timestamp: Date.now(), type: "chat", payload: { role: "user", text, type: "info" } });
     setInput("");
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (lower.startsWith("/extract-text")) {
+      const pageText = extractVisibleText();
+      if (!pageText) addMessage("⚠️ No visible page text found.", "warn");
+      else {
+        addMessage("✅ Extracted visible page text (preview):", "info");
+        addMessage(`\`\`\`text\n${pageText}\n\`\`\``, "info");
+      }
+      setIsSending(false);
+      return;
+    }
+
+    if (lower.startsWith("/fill-form")) {
+      const spec = trimmed.replace(/^\/fill-form\s*/i, "");
+      const r = fillFormFieldsFromSpec(spec);
+      addMessage(
+        r.missing.length
+          ? `✅ Filled ${r.filled} field(s). Missing: ${r.missing.join(", ")}`
+          : `✅ Filled ${r.filled} field(s).`,
+        r.missing.length ? "warn" : "info"
+      );
+      setIsSending(false);
+      return;
+    }
+
+    const outbound = brainstormMode && !lower.startsWith("/brainstorm")
+      ? `/brainstorm ${trimmed}`
+      : trimmed;
 
     try {
-      const res = await orchestrator.execute({ command: text, context });
+      const res = await orchestrator.execute({ command: outbound, context });
       if (runId !== sendRunRef.current) return;
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
@@ -549,7 +593,13 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         height: embedded ? "100%" : minimized ? "48px" : maximized ? "calc(100vh - 48px)" : "560px",
         maxWidth: "100vw",
         maxHeight: "100vh",
-        background: "rgba(15, 23, 42, 0.9)",
+        background: `rgba(15, 23, 42, ${branding.floatingOverlayOpacity || 0.92})`,
+        backgroundImage: branding.floatingChatBackgroundUrl
+          ? `linear-gradient(rgba(2,6,23,${branding.floatingOverlayOpacity || 0.92}), rgba(2,6,23,${branding.floatingOverlayOpacity || 0.92})), url(${branding.floatingChatBackgroundUrl})`
+          : undefined,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backdropFilter: `blur(${branding.glassBlur || 0}px)`,
         color: "#e2e8f0",
         borderRadius: embedded ? "0" : "12px",
         boxShadow: embedded ? "none" : "0 12px 30px rgba(15, 23, 42, 0.55)",
@@ -559,10 +609,10 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         overflow: "hidden",
       }}
     >
-      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: "rgba(15, 23, 42, 0.95)", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(148, 163, 184, 0.2)" }}>
+      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: `rgba(15, 23, 42, ${Math.min(1, (branding.floatingOverlayOpacity || 0.92) + 0.05)})`, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(148, 163, 184, 0.2)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-          <img src="/logo.png" alt="NeuroEdge" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
-          <strong>NeuroEdge Floating Chat</strong>
+          <img src={branding.logoUrl || "/logo.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
+          <strong>{branding.productName || "NeuroEdge"} Floating Chat</strong>
           {!embedded && (
             <>
               <button
@@ -663,10 +713,26 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              style={{ padding: "10px", background: "#0ea5e9", border: "none", color: "#fff", borderRadius: 8, marginRight: 6, fontWeight: 700 }}
+              style={{ padding: "10px", background: branding.accentColor || "#0ea5e9", border: "none", color: "#fff", borderRadius: 8, marginRight: 6, fontWeight: 700 }}
               title="Upload files"
             >
               ＋
+            </button>
+            <button
+              onClick={() => setBrainstormMode((v) => !v)}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                border: "1px solid rgba(148,163,184,0.3)",
+                background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
+                color: "#e2e8f0",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+              title="Brainstorm mode"
+            >
+              🧠
             </button>
             <div style={{ flex: 1, position: "relative" }}>
               <input
@@ -677,7 +743,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                   if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
                   if (e.key === "Escape") setSuggestions([]);
                 }}
-                placeholder="execute • debug • fix • analyze"
+                placeholder={brainstormMode ? "Brainstorm ideas..." : "execute • debug • fix • analyze"}
                 style={{
                   width: "100%",
                   padding: "10px 7.9rem 10px 10px",

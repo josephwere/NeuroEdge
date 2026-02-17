@@ -27,6 +27,8 @@ import {
   createConversation,
 } from "@/services/conversationStore";
 import { confirmSafeAction } from "@/services/safetyPrompts";
+import { extractVisibleText, fillFormFieldsFromSpec } from "@/services/localAutomation";
+import { loadBranding } from "@/services/branding";
 
 interface Message {
   id: string;
@@ -74,6 +76,18 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [recordingDraft, setRecordingDraft] = useState("");
   const recordingDraftRef = useRef("");
   const [listenSeq, setListenSeq] = useState(0);
+  const [brainstormMode, setBrainstormMode] = useState(false);
+  const [branding, setBranding] = useState(() => loadBranding());
+
+  useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
 
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
@@ -286,7 +300,34 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
 
     saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role: "user", text, type: "info" } });
     setInput("");
-    await executeWithContext(text, [...messages, userMsg], runId);
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith("/extract-text")) {
+      const pageText = extractVisibleText();
+      if (!pageText) addMessage("⚠️ No visible page text found.", "warn");
+      else {
+        addMessage("✅ Extracted visible page text (preview):", "info");
+        addMessage(`\`\`\`text\n${pageText}\n\`\`\``, "info");
+      }
+      setIsSending(false);
+      return;
+    }
+    if (lower.startsWith("/fill-form")) {
+      const spec = trimmed.replace(/^\/fill-form\s*/i, "");
+      const r = fillFormFieldsFromSpec(spec);
+      addMessage(
+        r.missing.length
+          ? `✅ Filled ${r.filled} field(s). Missing: ${r.missing.join(", ")}`
+          : `✅ Filled ${r.filled} field(s).`,
+        r.missing.length ? "warn" : "info"
+      );
+      setIsSending(false);
+      return;
+    }
+    const outbound = brainstormMode && !lower.startsWith("/brainstorm")
+      ? `/brainstorm ${trimmed}`
+      : trimmed;
+    await executeWithContext(outbound, [...messages, userMsg], runId);
   };
 
   const handleSend = async () => {
@@ -861,7 +902,20 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
 
   // --- Render ---
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", color: "#e2e8f0" }}>
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        color: "#e2e8f0",
+        backgroundImage: branding.mainChatBackgroundUrl
+          ? `linear-gradient(rgba(2,6,23,${branding.mainChatOverlayOpacity}), rgba(2,6,23,${branding.mainChatOverlayOpacity})), url(${branding.mainChatBackgroundUrl})`
+          : undefined,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -895,7 +949,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:newChat"))}
             style={{
               border: "none",
-              background: "#2563eb",
+              background: branding.accentColor || "#2563eb",
               color: "#fff",
               borderRadius: 8,
               padding: "0.28rem 0.55rem",
@@ -982,6 +1036,22 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           >
             +
           </button>
+          <button
+            onClick={() => setBrainstormMode((v) => !v)}
+            style={{
+              padding: "0.46rem 0.62rem",
+              background: brainstormMode ? "rgba(59,130,246,0.35)" : "rgba(15,23,42,0.78)",
+              color: "#e2e8f0",
+              border: "1px solid rgba(148,163,184,0.28)",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontSize: "0.75rem",
+              fontWeight: 700,
+            }}
+            title="Brainstorm mode (sends to /brainstorm)"
+          >
+            🧠
+          </button>
           <div style={{ flex: 1, position: "relative" }}>
             <input
               value={input}
@@ -991,7 +1061,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
                 if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
                 if (e.key === "Escape") setSuggestions([]);
               }}
-              placeholder="Message NeuroEdge..."
+              placeholder={brainstormMode ? "Brainstorm ideas, strategy, roadmap..." : "Message NeuroEdge..."}
               style={{
                 width: "100%",
                 padding: "0.64rem 8.6rem 0.64rem 0.75rem",

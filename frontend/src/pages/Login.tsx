@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useUI } from "@/services/uiStore";
+import { loadBranding } from "@/services/branding";
 
 type AuthMethod = "email" | "google" | "github" | "phone";
 
@@ -16,6 +17,17 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("+1");
   const [error, setError] = useState("");
+  const [branding, setBranding] = useState(() => loadBranding());
+
+  React.useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
 
   const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string }) => {
     const token = `neuroedge-${payload.provider}-token`;
@@ -78,7 +90,14 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   };
 
   return (
-    <div style={container(embedded)}>
+    <div
+      style={container(
+        embedded,
+        branding.loginBackgroundUrl,
+        branding.loginOverlayOpacity,
+        branding.glassBlur
+      )}
+    >
       <div style={card}>
         <h2 style={{ margin: 0 }}>NeuroEdge Access</h2>
         <p style={muted}>
@@ -151,12 +170,15 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   );
 };
 
-const container = (embedded: boolean): React.CSSProperties => ({
+const container = (embedded: boolean, loginBackgroundUrl: string, loginOverlayOpacity: number, blur: number): React.CSSProperties => ({
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
   height: embedded ? "auto" : "100vh",
-  background: embedded ? "transparent" : "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+  background: embedded
+    ? "transparent"
+    : `linear-gradient(rgba(2,6,23,${loginOverlayOpacity || 0.6}), rgba(2,6,23,${loginOverlayOpacity || 0.6})), ${loginBackgroundUrl ? `url(${loginBackgroundUrl}) center / cover no-repeat` : "linear-gradient(180deg, #0f172a 0%, #111827 100%)"}`,
+  backdropFilter: `blur(${blur || 0}px)`,
   color: "#e2e8f0",
 });
 

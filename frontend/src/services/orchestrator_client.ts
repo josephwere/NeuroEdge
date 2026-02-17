@@ -30,6 +30,30 @@ interface ResearchResponse {
   pagesFetched?: number;
 }
 
+interface BrainstormResponse {
+  success: boolean;
+  topic: string;
+  summary: string;
+  ideas?: Array<{
+    title: string;
+    what: string;
+    impact: "low" | "medium" | "high";
+    effort: "low" | "medium" | "high";
+    firstStep: string;
+  }>;
+}
+
+interface DevAssistResponse {
+  success: boolean;
+  task?: string;
+  planned?: { command: string; args: string[]; reason: string };
+  cwd?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  message?: string;
+}
+
 interface OrchestratorClientOptions {
   baseUrl?: string;
   wsUrl?: string;
@@ -80,6 +104,47 @@ export class OrchestratorClient {
     const command = (req.command || "").trim();
     if (!command) {
       throw new Error("Command is required");
+    }
+    if (command.toLowerCase().startsWith("/brainstorm")) {
+      const topic = command.replace(/^\/brainstorm\s*/i, "").trim() || "new product idea";
+      const data = await this.brainstorm(topic);
+      const ideaLines = (data.ideas || [])
+        .map((i, idx) => `${idx + 1}. ${i.title} (${i.impact}/${i.effort})\n   ${i.what}\n   First step: ${i.firstStep}`)
+        .join("\n\n");
+      return {
+        success: data.success,
+        reasoning: "Brainstorm pipeline generated structured options",
+        intent: "brainstorm",
+        risk: "low",
+        response: `## Brainstorm: ${data.topic}\n\n${data.summary}\n\n${ideaLines}`,
+        logs: [],
+        results: [{ id: `brainstorm-${Date.now()}`, success: data.success, stdout: data.summary }],
+      };
+    }
+    if (command.toLowerCase().startsWith("/dev ")) {
+      const task = command.replace(/^\/dev\s+/i, "").trim();
+      const data = await this.devAssist(task, ".");
+      const prettyPlan = data.planned
+        ? `${data.planned.command} ${Array.isArray(data.planned.args) ? data.planned.args.join(" ") : ""}`.trim()
+        : "";
+      const body = [
+        `Task: ${data.task || task}`,
+        prettyPlan ? `Planned: ${prettyPlan}` : "",
+        data.cwd ? `CWD: ${data.cwd}` : "",
+        data.stdout ? `\nOutput:\n${data.stdout}` : "",
+        data.stderr ? `\nErrors:\n${data.stderr}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return {
+        success: data.success,
+        reasoning: "Developer assistant planned and executed a local-safe command",
+        intent: "dev_assist",
+        risk: data.success ? "low" : "medium",
+        response: body,
+        logs: [],
+        results: [{ id: `dev-${Date.now()}`, success: data.success, stdout: data.stdout, stderr: data.stderr }],
+      };
     }
 
     const chatLike = this.isChatPrompt(command);
@@ -273,6 +338,14 @@ export class OrchestratorClient {
     citations?: Array<{ title?: string; url?: string }>;
   }) {
     return this.postJson("/training/feedback", input as Record<string, unknown>);
+  }
+
+  async brainstorm(topic: string): Promise<BrainstormResponse> {
+    return this.postJson("/brainstorm", { topic }) as Promise<BrainstormResponse>;
+  }
+
+  async devAssist(task: string, cwd = ".", autoRun = true): Promise<DevAssistResponse> {
+    return this.postJson("/dev/assist", { task, cwd, autoRun }) as Promise<DevAssistResponse>;
   }
 
   private async postJson(path: string, body: Record<string, unknown>) {
