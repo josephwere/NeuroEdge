@@ -73,6 +73,50 @@ interface FeatureFlags {
   [key: string]: boolean;
 }
 
+interface SupportTicket {
+  id: string;
+  subject: string;
+  priority: "low" | "medium" | "high";
+  status: "open" | "triaged" | "resolved";
+  assignee: string;
+}
+
+interface DevApiKey {
+  id: string;
+  name: string;
+  keyMasked: string;
+  createdAt: number;
+  revoked: boolean;
+}
+
+interface WebhookRecord {
+  id: string;
+  url: string;
+  event: string;
+  active: boolean;
+}
+
+interface AgentProfile {
+  id: string;
+  name: string;
+  memoryDays: number;
+  tools: string[];
+  permission: "workspace" | "project" | "read_only";
+}
+
+interface SavedPrompt {
+  id: string;
+  title: string;
+  text: string;
+}
+
+interface EnterpriseDepartment {
+  id: string;
+  name: string;
+  members: number;
+  tokensPerMonth: number;
+}
+
 const Dashboard: React.FC = () => {
   const { addNotification } = useNotifications();
   const [view, setView] = useState<View>("founder");
@@ -202,6 +246,100 @@ const Dashboard: React.FC = () => {
 
   const [devWebhook, setDevWebhook] = useState("");
   const [devEnvironment, setDevEnvironment] = useState<"dev" | "staging" | "prod">("dev");
+  const [devApiKeys, setDevApiKeys] = useState<DevApiKey[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_dev_api_keys_v1");
+      return raw
+        ? JSON.parse(raw)
+        : [{ id: "k1", name: "Default SDK Key", keyMasked: "neur...9x3a", createdAt: Date.now(), revoked: false }];
+    } catch {
+      return [];
+    }
+  });
+  const [webhooks, setWebhooks] = useState<WebhookRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_webhooks_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [webhookEvent, setWebhookEvent] = useState("chat.completed");
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_support_tickets_v1");
+      return raw
+        ? JSON.parse(raw)
+        : [
+            { id: "t-1001", subject: "Login failed", priority: "medium", status: "open", assignee: "ops" },
+            { id: "t-1002", subject: "Billing mismatch", priority: "high", status: "triaged", assignee: "finance" },
+          ];
+    } catch {
+      return [];
+    }
+  });
+  const [newTicket, setNewTicket] = useState("");
+  const [agentsLocal, setAgentsLocal] = useState<AgentProfile[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_agent_profiles_v1");
+      return raw
+        ? JSON.parse(raw)
+        : [
+            { id: "ag1", name: "Research Agent", memoryDays: 30, tools: ["research", "web"], permission: "workspace" },
+            { id: "ag2", name: "Code Agent", memoryDays: 14, tools: ["code", "files"], permission: "project" },
+          ];
+    } catch {
+      return [];
+    }
+  });
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_saved_prompts_v1");
+      return raw
+        ? JSON.parse(raw)
+        : [
+            { id: "sp1", title: "Research Brief", text: "Summarize latest trends with sources." },
+            { id: "sp2", title: "Code Review", text: "Review this code for bugs and regressions." },
+          ];
+    } catch {
+      return [];
+    }
+  });
+  const [newPromptTitle, setNewPromptTitle] = useState("");
+  const [newPromptText, setNewPromptText] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [newDepartmentMembers, setNewDepartmentMembers] = useState("5");
+  const [newDepartmentTokens, setNewDepartmentTokens] = useState("50000");
+  const [enterpriseDepartments, setEnterpriseDepartments] = useState<EnterpriseDepartment[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_enterprise_departments_v1");
+      return raw
+        ? JSON.parse(raw)
+        : [
+            { id: "d1", name: "Engineering", members: 12, tokensPerMonth: 210000 },
+            { id: "d2", name: "Support", members: 7, tokensPerMonth: 54000 },
+          ];
+    } catch {
+      return [];
+    }
+  });
+  const [ssoConfig, setSsoConfig] = useState(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_enterprise_sso_v1");
+      return raw
+        ? JSON.parse(raw)
+        : {
+            enabled: false,
+            provider: "okta",
+            domain: "",
+            clientId: "",
+            metadataUrl: "",
+          };
+    } catch {
+      return { enabled: false, provider: "okta", domain: "", clientId: "", metadataUrl: "" };
+    }
+  });
   const [newOfferName, setNewOfferName] = useState("");
   const [newOfferPct, setNewOfferPct] = useState("10");
   const [futureFeatures, setFutureFeatures] = useState([
@@ -229,6 +367,36 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("neuroedge_model_control_v2", JSON.stringify(modelControl));
   }, [modelControl]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_dev_api_keys_v1", JSON.stringify(devApiKeys));
+  }, [devApiKeys]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_webhooks_v1", JSON.stringify(webhooks));
+  }, [webhooks]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_support_tickets_v1", JSON.stringify(supportTickets));
+  }, [supportTickets]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_agent_profiles_v1", JSON.stringify(agentsLocal));
+  }, [agentsLocal]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_saved_prompts_v1", JSON.stringify(savedPrompts));
+  }, [savedPrompts]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_enterprise_departments_v1", JSON.stringify(enterpriseDepartments));
+  }, [enterpriseDepartments]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_enterprise_sso_v1", JSON.stringify(ssoConfig));
+  }, [ssoConfig]);
+  useEffect(() => {
+    if (!agentsLocal.length) {
+      setSelectedAgentId("");
+      return;
+    }
+    if (!selectedAgentId || !agentsLocal.find((a) => a.id === selectedAgentId)) {
+      setSelectedAgentId(agentsLocal[0].id);
+    }
+  }, [agentsLocal, selectedAgentId]);
 
   const authContext = () => {
     const envToken = String((import.meta.env.VITE_NEUROEDGE_JWT as string) || "").trim();
@@ -404,6 +572,130 @@ const Dashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const requestServiceRestart = async (service: "kernel" | "ml" | "orchestrator" | "frontend") => {
+    try {
+      const res = await fetch(`${apiBase}/admin/restart`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ service, confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "restart request failed");
+      addNotification({ type: "info", message: data?.message || `Restart requested for ${service}` });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Restart request failed: ${err?.message || err}` });
+    }
+  };
+
+  const addDevApiKey = () => {
+    const name = window.prompt("API key name:", "New API Key");
+    if (!name) return;
+    const suffix = Math.random().toString(36).slice(-4);
+    setDevApiKeys((prev) => [
+      {
+        id: `k-${Date.now()}`,
+        name: name.trim(),
+        keyMasked: `neur...${suffix}`,
+        createdAt: Date.now(),
+        revoked: false,
+      },
+      ...prev,
+    ]);
+    addNotification({ type: "success", message: "API key created." });
+  };
+
+  const addWebhook = () => {
+    if (!devWebhook.trim()) {
+      addNotification({ type: "error", message: "Enter a webhook URL first." });
+      return;
+    }
+    setWebhooks((prev) => [
+      ...prev,
+      { id: `wh-${Date.now()}`, url: devWebhook.trim(), event: webhookEvent, active: true },
+    ]);
+    addNotification({ type: "success", message: "Webhook added." });
+  };
+
+  const testWebhook = async (id: string) => {
+    const hook = webhooks.find((w) => w.id === id);
+    if (!hook) return;
+    addNotification({ type: "info", message: `Webhook test sent to ${hook.url}` });
+  };
+
+  const addSupportTicket = () => {
+    const subject = newTicket.trim();
+    if (!subject) return;
+    setSupportTickets((prev) => [
+      { id: `t-${Date.now()}`, subject, priority: "medium", status: "open", assignee: "unassigned" },
+      ...prev,
+    ]);
+    setNewTicket("");
+    addNotification({ type: "success", message: "Support ticket created." });
+  };
+
+  const addAgentProfile = () => {
+    const name = window.prompt("Agent name:", "New Agent");
+    if (!name) return;
+    setAgentsLocal((prev) => [
+      ...prev,
+      {
+        id: `ag-${Date.now()}`,
+        name: name.trim(),
+        memoryDays: 30,
+        tools: ["chat"],
+        permission: "workspace",
+      },
+    ]);
+  };
+
+  const addSavedPrompt = () => {
+    if (!newPromptTitle.trim() || !newPromptText.trim()) {
+      addNotification({ type: "error", message: "Add prompt title and text." });
+      return;
+    }
+    setSavedPrompts((prev) => [
+      { id: `sp-${Date.now()}`, title: newPromptTitle.trim(), text: newPromptText.trim() },
+      ...prev,
+    ]);
+    setNewPromptTitle("");
+    setNewPromptText("");
+    addNotification({ type: "success", message: "Prompt saved." });
+  };
+
+  const selectedAgent = agentsLocal.find((a) => a.id === selectedAgentId) || null;
+
+  const updateAgent = (id: string, patch: Partial<AgentProfile>) => {
+    setAgentsLocal((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  };
+
+  const toggleAgentTool = (id: string, tool: string) => {
+    setAgentsLocal((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const has = a.tools.includes(tool);
+        return { ...a, tools: has ? a.tools.filter((t) => t !== tool) : [...a.tools, tool] };
+      })
+    );
+  };
+
+  const addDepartment = () => {
+    const name = newDepartmentName.trim();
+    const members = Number(newDepartmentMembers);
+    const tokens = Number(newDepartmentTokens);
+    if (!name || !Number.isFinite(members) || members <= 0 || !Number.isFinite(tokens) || tokens <= 0) {
+      addNotification({ type: "error", message: "Enter a valid department, members, and token budget." });
+      return;
+    }
+    setEnterpriseDepartments((prev) => [
+      ...prev,
+      { id: `d-${Date.now()}`, name, members, tokensPerMonth: tokens },
+    ]);
+    setNewDepartmentName("");
+    setNewDepartmentMembers("5");
+    setNewDepartmentTokens("50000");
+    addNotification({ type: "success", message: "Department added." });
+  };
+
   const founderView = (
     <div style={grid}>
       <Card title="Platform Analytics">
@@ -483,6 +775,20 @@ const Dashboard: React.FC = () => {
         <Stat label="Security Alerts" value={String(securityAlerts.length)} />
         <button style={chip} onClick={() => exportData("security_alerts", securityAlerts)}>Export Alerts</button>
       </Card>
+      <Card title="Operations Control">
+        <div style={row}>
+          <span>Restart Kernel</span>
+          <button style={chip} onClick={() => requestServiceRestart("kernel")}>Request</button>
+        </div>
+        <div style={row}>
+          <span>Restart ML</span>
+          <button style={chip} onClick={() => requestServiceRestart("ml")}>Request</button>
+        </div>
+        <div style={row}>
+          <span>Restart Orchestrator</span>
+          <button style={chip} onClick={() => requestServiceRestart("orchestrator")}>Request</button>
+        </div>
+      </Card>
       <Card title="Future Feature Pipeline">
         {futureFeatures.map((f) => (
           <div key={f.id} style={log}>
@@ -517,9 +823,20 @@ const Dashboard: React.FC = () => {
         {offers.map((o) => (
           <div key={o.id} style={row}>
             <span>{o.name} ({o.discountPct}% / {o.audience})</span>
-            <button style={chip} onClick={() => setOffers((prev) => prev.map((x) => (x.id === o.id ? { ...x, active: !x.active } : x)))}>
-              {o.active ? "Disable" : "Enable"}
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select
+                value={o.audience}
+                onChange={(e) => setOffers((prev) => prev.map((x) => (x.id === o.id ? { ...x, audience: e.target.value as Offer["audience"] } : x)))}
+                style={{ ...input, width: 120 }}
+              >
+                <option value="all">all</option>
+                <option value="new_users">new users</option>
+                <option value="enterprise">enterprise</option>
+              </select>
+              <button style={chip} onClick={() => setOffers((prev) => prev.map((x) => (x.id === o.id ? { ...x, active: !x.active } : x)))}>
+                {o.active ? "Disable" : "Enable"}
+              </button>
+            </div>
           </div>
         ))}
       </Card>
@@ -529,9 +846,27 @@ const Dashboard: React.FC = () => {
         ))}
       </Card>
       <Card title="Support Tickets">
-        <div style={log}>#NE-4102 latency spike - open</div>
-        <div style={log}>#NE-4103 billing adjustment - pending</div>
-        <div style={log}>#NE-4104 account verification - triaged</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={newTicket} onChange={(e) => setNewTicket(e.target.value)} placeholder="Ticket subject..." style={input} />
+          <button style={primary} onClick={addSupportTicket}>Add</button>
+        </div>
+        {supportTickets.map((t) => (
+          <div key={t.id} style={row}>
+            <span>{t.id} • {t.subject}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select
+                value={t.status}
+                onChange={(e) => setSupportTickets((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: e.target.value as SupportTicket["status"] } : x)))}
+                style={{ ...input, width: 110 }}
+              >
+                <option value="open">open</option>
+                <option value="triaged">triaged</option>
+                <option value="resolved">resolved</option>
+              </select>
+              <button style={chip} onClick={() => setSupportTickets((prev) => prev.filter((x) => x.id !== t.id))}>Close</button>
+            </div>
+          </div>
+        ))}
       </Card>
       <Card title="Activity & Reports">
         <Stat label="Logs" value={String(adminLogs.length)} />
@@ -545,7 +880,18 @@ const Dashboard: React.FC = () => {
     <div style={grid}>
       <Card title="API Keys">
         <div style={log}>Primary key: {maskKey(String(import.meta.env.VITE_NEUROEDGE_API_KEY || ""))}</div>
-        <button style={chip} onClick={() => addNotification({ type: "info", message: "Rotate keys in secrets manager and re-issue JWT." })}>Rotation Guidance</button>
+        <button style={chip} onClick={addDevApiKey}>+ Create Key</button>
+        {devApiKeys.map((k) => (
+          <div key={k.id} style={row}>
+            <span>{k.name} • {k.keyMasked}</span>
+            <button
+              style={chip}
+              onClick={() => setDevApiKeys((prev) => prev.map((x) => (x.id === k.id ? { ...x, revoked: !x.revoked } : x)))}
+            >
+              {k.revoked ? "Restore" : "Revoke"}
+            </button>
+          </div>
+        ))}
       </Card>
       <Card title="Usage Tracking">
         <Stat label="Requests" value={String(reqTotal)} />
@@ -555,7 +901,21 @@ const Dashboard: React.FC = () => {
       </Card>
       <Card title="Webhook Setup">
         <input value={devWebhook} onChange={(e) => setDevWebhook(e.target.value)} placeholder="https://example.com/webhook" style={input} />
-        <button style={chip} onClick={() => addNotification({ type: "success", message: `Webhook saved: ${devWebhook || "(empty)"}` })}>Save Webhook</button>
+        <select value={webhookEvent} onChange={(e) => setWebhookEvent(e.target.value)} style={input}>
+          <option value="chat.completed">chat.completed</option>
+          <option value="ai.inference.done">ai.inference.done</option>
+          <option value="agent.run.finished">agent.run.finished</option>
+        </select>
+        <button style={chip} onClick={addWebhook}>Save Webhook</button>
+        {webhooks.map((w) => (
+          <div key={w.id} style={row}>
+            <span>{w.event} → {w.url}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button style={chip} onClick={() => testWebhook(w.id)}>Test</button>
+              <button style={chip} onClick={() => setWebhooks((prev) => prev.filter((x) => x.id !== w.id))}>Delete</button>
+            </div>
+          </div>
+        ))}
       </Card>
       <Card title="Model & Env">
         <select value={modelControl.model} onChange={(e) => setModelControl((p) => ({ ...p, model: e.target.value }))} style={input}>
@@ -579,26 +939,84 @@ const Dashboard: React.FC = () => {
   const agentView = (
     <div style={grid}>
       <Card title="Agent Studio">
-        <button style={primary} onClick={() => addNotification({ type: "success", message: "Agent builder opened (UI flow)." })}>+ Create Agent</button>
-        {adminAgents.length === 0 ? <div style={muted}>No live agents reported.</div> : adminAgents.map((a: any, i: number) => (
-          <div key={i} style={log}>{a.name || `Agent-${i + 1}`} • {a.status || "running"}</div>
+        <button style={primary} onClick={addAgentProfile}>+ Create Agent</button>
+        {agentsLocal.length === 0 ? <div style={muted}>No agents configured yet.</div> : agentsLocal.map((a) => (
+          <div key={a.id} style={{ ...row, ...(selectedAgentId === a.id ? { border: "1px solid rgba(125,211,252,0.55)", borderRadius: 8, padding: 6 } : {}) }}>
+            <button style={chip} onClick={() => setSelectedAgentId(a.id)}>{a.name}</button>
+            <button style={chip} onClick={() => setAgentsLocal((prev) => prev.filter((x) => x.id !== a.id))}>Delete</button>
+          </div>
         ))}
+        {adminAgents.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={muted}>Live runtime agents</div>
+            {adminAgents.map((a: any, i: number) => (
+              <div key={`live-${i}`} style={log}>{a.name || `Agent-${i + 1}`} • {a.status || "running"}</div>
+            ))}
+          </div>
+        )}
       </Card>
       <Card title="Knowledge Base & Prompting">
         <input type="file" style={{ color: "var(--ne-fg)" }} />
-        <textarea placeholder="Agent system prompt..." style={{ ...input, minHeight: 120 }} />
+        {selectedAgent ? (
+          <>
+            <input
+              value={selectedAgent.name}
+              onChange={(e) => updateAgent(selectedAgent.id, { name: e.target.value })}
+              style={input}
+            />
+            <textarea
+              value={`You are ${selectedAgent.name}. Operate with ${selectedAgent.permission} permission and ${selectedAgent.memoryDays}d memory.`}
+              readOnly
+              style={{ ...input, minHeight: 120 }}
+            />
+          </>
+        ) : (
+          <div style={muted}>Select an agent to edit its settings.</div>
+        )}
       </Card>
       <Card title="Integrations & Permissions">
-        {["research", "code", "math", "files", "webhooks"].map((tool) => (
-          <div key={tool} style={row}>
-            <span>{tool}</span>
-            <button style={chip}>Enabled</button>
-          </div>
-        ))}
+        {selectedAgent ? (
+          <>
+            <div style={row}>
+              <span>Permission</span>
+              <select
+                value={selectedAgent.permission}
+                onChange={(e) => updateAgent(selectedAgent.id, { permission: e.target.value as AgentProfile["permission"] })}
+                style={{ ...input, width: 140 }}
+              >
+                <option value="workspace">workspace</option>
+                <option value="project">project</option>
+                <option value="read_only">read_only</option>
+              </select>
+            </div>
+            {["research", "code", "math", "files", "webhooks", "chat"].map((tool) => (
+              <div key={tool} style={row}>
+                <span>{tool}</span>
+                <button style={chip} onClick={() => toggleAgentTool(selectedAgent.id, tool)}>
+                  {selectedAgent.tools.includes(tool) ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+            ))}
+          </>
+        ) : (
+          <div style={muted}>No agent selected.</div>
+        )}
       </Card>
       <Card title="Analytics + Memory Control">
         <Stat label="Agent events" value={String(adminLogs.filter((e) => String(e.type).includes("agent")).length)} />
-        <button style={chip} onClick={() => addNotification({ type: "info", message: "Memory retention set to 30 days." })}>Set Memory Policy</button>
+        {selectedAgent ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="number"
+              value={selectedAgent.memoryDays}
+              onChange={(e) => updateAgent(selectedAgent.id, { memoryDays: Number(e.target.value) || 1 })}
+              style={{ ...input, width: 120 }}
+            />
+            <button style={chip} onClick={() => addNotification({ type: "success", message: "Memory policy updated." })}>Save</button>
+          </div>
+        ) : (
+          <div style={muted}>Select an agent to set memory policy.</div>
+        )}
       </Card>
     </div>
   );
@@ -623,6 +1041,20 @@ const Dashboard: React.FC = () => {
         <input type="file" style={{ color: "var(--ne-fg)" }} />
         <button style={chip} onClick={() => addNotification({ type: "info", message: "Notifications configured." })}>Configure Notifications</button>
       </Card>
+      <Card title="Saved Prompts">
+        <input value={newPromptTitle} onChange={(e) => setNewPromptTitle(e.target.value)} placeholder="Prompt title" style={input} />
+        <textarea value={newPromptText} onChange={(e) => setNewPromptText(e.target.value)} placeholder="Prompt text..." style={{ ...input, minHeight: 90 }} />
+        <button style={primary} onClick={addSavedPrompt}>Save Prompt</button>
+        {savedPrompts.map((p) => (
+          <div key={p.id} style={row}>
+            <span>{p.title}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button style={chip} onClick={() => navigator.clipboard?.writeText(p.text)}>Copy</button>
+              <button style={chip} onClick={() => setSavedPrompts((prev) => prev.filter((x) => x.id !== p.id))}>Delete</button>
+            </div>
+          </div>
+        ))}
+      </Card>
     </div>
   );
 
@@ -642,17 +1074,54 @@ const Dashboard: React.FC = () => {
         ))}
       </Card>
       <Card title="Usage by Department">
-        <div style={log}>Engineering: 210k tokens / month</div>
-        <div style={log}>Support: 54k tokens / month</div>
-        <div style={log}>Research: 101k tokens / month</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} placeholder="Department name" style={input} />
+            <input value={newDepartmentMembers} onChange={(e) => setNewDepartmentMembers(e.target.value)} placeholder="Members" style={{ ...input, maxWidth: 100 }} />
+            <input value={newDepartmentTokens} onChange={(e) => setNewDepartmentTokens(e.target.value)} placeholder="Tokens/month" style={{ ...input, maxWidth: 140 }} />
+            <button style={primary} onClick={addDepartment}>Add</button>
+          </div>
+          {enterpriseDepartments.map((d) => (
+            <div key={d.id} style={row}>
+              <span>{d.name}: {d.tokensPerMonth.toLocaleString()} tokens / month</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="number"
+                  value={d.members}
+                  onChange={(e) => setEnterpriseDepartments((prev) => prev.map((x) => (x.id === d.id ? { ...x, members: Number(e.target.value) || 1 } : x)))}
+                  style={{ ...input, width: 80 }}
+                />
+                <button style={chip} onClick={() => setEnterpriseDepartments((prev) => prev.filter((x) => x.id !== d.id))}>Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
       </Card>
       <Card title="Billing, Audit, Compliance">
         <button style={chip} onClick={() => exportData("enterprise_audit", adminAudit)}>Export Audit Logs</button>
         <button style={chip} onClick={() => exportData("enterprise_usage", usage)}>Export Usage</button>
       </Card>
       <Card title="SSO & Governance">
-        <div style={log}>SSO mode: configurable (OIDC/SAML gateway wiring next phase).</div>
-        <button style={chip} onClick={() => addNotification({ type: "info", message: "SSO setup wizard opening soon." })}>Configure SSO</button>
+        <div style={row}>
+          <span>Enable SSO</span>
+          <button style={chip} onClick={() => setSsoConfig((prev: any) => ({ ...prev, enabled: !prev.enabled }))}>
+            {ssoConfig.enabled ? "Enabled" : "Disabled"}
+          </button>
+        </div>
+        <select
+          value={ssoConfig.provider}
+          onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, provider: e.target.value }))}
+          style={input}
+        >
+          <option value="okta">okta</option>
+          <option value="entra">entra</option>
+          <option value="auth0">auth0</option>
+          <option value="google-workspace">google-workspace</option>
+        </select>
+        <input value={ssoConfig.domain} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, domain: e.target.value }))} placeholder="Company domain" style={input} />
+        <input value={ssoConfig.clientId} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, clientId: e.target.value }))} placeholder="Client ID" style={input} />
+        <input value={ssoConfig.metadataUrl} onChange={(e) => setSsoConfig((prev: any) => ({ ...prev, metadataUrl: e.target.value }))} placeholder="Metadata URL" style={input} />
+        <button style={primary} onClick={() => addNotification({ type: "success", message: "SSO configuration saved." })}>Save SSO</button>
       </Card>
     </div>
   );
