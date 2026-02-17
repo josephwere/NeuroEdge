@@ -971,54 +971,56 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           >
             +
           </button>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter") handleSend();
-              if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
-              if (e.key === "Escape") setSuggestions([]);
-            }}
-            placeholder="Message NeuroEdge..."
-            style={{
-              flex: 1,
-              padding: "0.64rem 0.75rem",
-              background: "rgba(15, 23, 42, 0.4)",
-              color: "#e2e8f0",
-              border: "none",
-              borderRadius: 10,
-              outline: "none",
-            }}
-          />
-          {isListening && (
-            <div
-              style={{
-                position: "absolute",
-                left: 66,
-                right: 126,
-                top: "50%",
-                transform: "translateY(-50%)",
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                pointerEvents: "none",
-                opacity: 0.85,
+          <div style={{ flex: 1, position: "relative" }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") handleSend();
+                if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
+                if (e.key === "Escape") setSuggestions([]);
               }}
-            >
-              {Array.from({ length: 22 }).map((_, i) => (
-                <span
-                  key={`mw-${i}`}
-                  style={{
-                    width: 3,
-                    height: 8 + (i % 4) * 4,
-                    borderRadius: 3,
-                    background: "rgba(148,163,184,0.7)",
-                    animation: `neWave 1s ${i * 0.04}s ease-in-out infinite`,
-                  }}
-                />
-              ))}
-            </div>
-          )}
+              placeholder="Message NeuroEdge..."
+              style={{
+                width: "100%",
+                padding: "0.64rem 0.75rem",
+                background: "rgba(15, 23, 42, 0.4)",
+                color: isListening ? "transparent" : "#e2e8f0",
+                caretColor: isListening ? "transparent" : "#e2e8f0",
+                border: "none",
+                borderRadius: 10,
+                outline: "none",
+              }}
+            />
+            {isListening && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "0.18rem 0.5rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  pointerEvents: "none",
+                  opacity: 0.9,
+                  overflow: "hidden",
+                }}
+              >
+                <span style={{ fontSize: "0.72rem", color: "#94a3b8", marginRight: 6 }}>Listening</span>
+                {Array.from({ length: 28 }).map((_, i) => (
+                  <span
+                    key={`mw-${i}`}
+                    style={{
+                      width: 3,
+                      height: 8 + (i % 4) * 4,
+                      borderRadius: 3,
+                      background: "rgba(148,163,184,0.72)",
+                      animation: `neWave 1s ${i * 0.04}s ease-in-out infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={toggleVoiceInput}
             style={{

@@ -656,46 +656,56 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
             >
               ＋
             </button>
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter") send();
-                if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
-                if (e.key === "Escape") setSuggestions([]);
-              }}
-              placeholder="execute • debug • fix • analyze"
-              style={{ flex: 1, padding: "10px", background: "rgba(15, 23, 42, 0.8)", border: "1px solid rgba(148, 163, 184, 0.3)", color: "#e2e8f0", borderRadius: 8, outline: "none" }}
-            />
-            {isListening && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: 56,
-                  right: 118,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 2,
-                  pointerEvents: "none",
-                  opacity: 0.85,
+            <div style={{ flex: 1, position: "relative" }}>
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") send();
+                  if (e.key === "Tab" && suggestions.length) { e.preventDefault(); acceptSuggestion(suggestions[0]); }
+                  if (e.key === "Escape") setSuggestions([]);
                 }}
-              >
-                {Array.from({ length: 18 }).map((_, i) => (
-                  <span
-                    key={`fw-${i}`}
-                    style={{
-                      width: 3,
-                      height: 7 + (i % 4) * 3,
-                      borderRadius: 3,
-                      background: "rgba(148,163,184,0.75)",
-                      animation: `neWave 1s ${i * 0.05}s ease-in-out infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+                placeholder="execute • debug • fix • analyze"
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  background: "rgba(15, 23, 42, 0.8)",
+                  border: "1px solid rgba(148, 163, 184, 0.3)",
+                  color: isListening ? "transparent" : "#e2e8f0",
+                  caretColor: isListening ? "transparent" : "#e2e8f0",
+                  borderRadius: 8,
+                  outline: "none",
+                }}
+              />
+              {isListening && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: "0.18rem 0.45rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 2,
+                    pointerEvents: "none",
+                    opacity: 0.9,
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ fontSize: "0.7rem", color: "#94a3b8", marginRight: 5 }}>Listening</span>
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <span
+                      key={`fw-${i}`}
+                      style={{
+                        width: 3,
+                        height: 7 + (i % 4) * 3,
+                        borderRadius: 3,
+                        background: "rgba(148,163,184,0.75)",
+                        animation: `neWave 1s ${i * 0.05}s ease-in-out infinite`,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               onClick={toggleVoiceInput}
               style={{
