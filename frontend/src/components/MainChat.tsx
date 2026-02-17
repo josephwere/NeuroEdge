@@ -207,18 +207,83 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     }
   };
 
-  const renderMessage = (msg: Message) => {
-    if (msg.isCode) {
-      const codeMatch = msg.text.match(/```(\w+)?\n([\s\S]*?)```/);
-      const language = msg.codeLanguage || (codeMatch ? codeMatch[1] : "text");
-      const code = codeMatch ? codeMatch[2] : msg.text;
-      return (
-        <div key={msg.id} style={{ marginBottom: "0.5rem" }}>
-          <SyntaxHighlighter language={language} style={okaidia} showLineNumbers>{code}</SyntaxHighlighter>
+  const renderRichText = (text: string) => {
+    const nodes: React.ReactNode[] = [];
+    const regex = /```(\w+)?\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = regex.exec(text)) !== null) {
+      if (m.index > lastIndex) {
+        const before = text.slice(lastIndex, m.index).trim();
+        if (before) {
+          nodes.push(
+            <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
+              {before}
+            </div>
+          );
+        }
+      }
+      const lang = (m[1] || "text").trim();
+      const code = m[2] || "";
+      nodes.push(
+        <div key={`c-${idx++}`} style={{ marginTop: "0.5rem" }}>
+          <SyntaxHighlighter language={lang} style={okaidia} showLineNumbers>
+            {code}
+          </SyntaxHighlighter>
+        </div>
+      );
+      lastIndex = regex.lastIndex;
+    }
+    const tail = text.slice(lastIndex).trim();
+    if (tail) {
+      nodes.push(
+        <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
+          {tail}
         </div>
       );
     }
-    return <div key={msg.id} style={{ marginBottom: "4px" }}>{msg.text}</div>;
+    return nodes.length ? nodes : [<div key="empty" />];
+  };
+
+  const renderMessage = (msg: Message) => {
+    const isUser = msg.role === "user";
+    const bubbleStyle: React.CSSProperties = isUser
+      ? {
+          marginLeft: "auto",
+          maxWidth: "78%",
+          background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+          color: "#f8fafc",
+          borderRadius: "16px 16px 4px 16px",
+          padding: "0.65rem 0.85rem",
+          boxShadow: "0 8px 22px rgba(37, 99, 235, 0.25)",
+        }
+      : {
+          marginRight: "auto",
+          maxWidth: "86%",
+          background: "rgba(15, 23, 42, 0.78)",
+          border: "1px solid rgba(148, 163, 184, 0.25)",
+          color: "#e2e8f0",
+          borderRadius: "16px 16px 16px 4px",
+          padding: "0.65rem 0.85rem",
+          boxShadow: "0 8px 22px rgba(15, 23, 42, 0.28)",
+        };
+
+    return (
+      <div key={msg.id} style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginBottom: "0.7rem" }}>
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--ne-muted)",
+            marginLeft: isUser ? "auto" : 0,
+            marginRight: isUser ? 0 : "auto",
+          }}
+        >
+          {isUser ? "You" : "NeuroEdge"}
+        </div>
+        <div style={bubbleStyle}>{renderRichText(msg.text)}</div>
+      </div>
+    );
   };
 
   // --- Render ---

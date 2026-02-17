@@ -18,6 +18,19 @@
 - Stripe meter event reporting (optional): `src/billing/stripe_meter.ts`
 - Usage endpoint: `GET /billing/usage`
 
+### Web Research
+- Research pipeline endpoint: `POST /research`
+- Flow: query -> web search -> page fetch -> parse -> summary with citations
+- Safety controls:
+  - Domain allowlist via `RESEARCH_ALLOWLIST`
+  - Request rate limit via `RESEARCH_RATE_LIMIT_*`
+  - Fetch timeout and page caps via `RESEARCH_HTTP_TIMEOUT_MS`, `RESEARCH_MAX_*`
+
+### Training Data Pipeline
+- Feedback ingestion endpoint: `POST /training/feedback`
+- Sample listing endpoint: `GET /training/samples`
+- JSONL export endpoint: `GET /training/export`
+
 ## Scope Model
 
 Supported scope examples:

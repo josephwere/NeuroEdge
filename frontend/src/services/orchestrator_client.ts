@@ -22,6 +22,14 @@ export interface ExecuteResponse {
   meshStatus?: Array<{ node: string; status: string }>;
 }
 
+interface ResearchResponse {
+  success: boolean;
+  query: string;
+  summary: string;
+  citations?: Array<{ title?: string; url?: string; snippet?: string; domain?: string }>;
+  pagesFetched?: number;
+}
+
 interface OrchestratorClientOptions {
   baseUrl?: string;
   wsUrl?: string;
@@ -75,11 +83,18 @@ export class OrchestratorClient {
     }
 
     const chatLike = this.isChatPrompt(command);
+    const researchLike = chatLike && this.isResearchPrompt(command);
     const aiPromise = this.postJson("/ai", {
       kernelId,
       input: command,
       context: req.context || [],
     });
+    const researchPromise = researchLike
+      ? this.postJson("/research", {
+          query: command,
+          context: req.context || [],
+        })
+      : Promise.resolve(null);
     const execPromise = chatLike
       ? Promise.resolve(null)
       : this.postJson("/execute", {
@@ -87,10 +102,16 @@ export class OrchestratorClient {
           command,
         });
 
-    const [aiResult, execResult] = await Promise.allSettled([aiPromise, execPromise]);
+    const [aiResult, execResult, researchResult] = await Promise.allSettled([
+      aiPromise,
+      execPromise,
+      researchPromise,
+    ]);
 
     const aiResp = aiResult.status === "fulfilled" ? aiResult.value : null;
     const execResp = execResult.status === "fulfilled" ? execResult.value : null;
+    const researchResp: ResearchResponse | null =
+      researchResult.status === "fulfilled" ? (researchResult.value as ResearchResponse | null) : null;
     const executeError =
       execResult.status === "rejected"
         ? execResult.reason instanceof Error
@@ -115,9 +136,9 @@ export class OrchestratorClient {
       }
     }
 
-    const assistantText = String(aiResp?.response || "");
+    const assistantText = String(researchResp?.summary || aiResp?.response || "");
     let finalSuccess = Boolean(
-      (execResp?.success && !executeError) || fallbackChatResp?.success || aiResp?.success
+      (execResp?.success && !executeError) || fallbackChatResp?.success || aiResp?.success || researchResp?.success
     );
     let finalStdout = assistantText || fallbackChatResp?.stdout || execResp?.stdout;
     let finalStderr =
@@ -150,7 +171,9 @@ export class OrchestratorClient {
         },
       ],
       approvals: Array.isArray(execResp?.approvals) ? execResp.approvals : [],
-      meshStatus: [],
+      meshStatus: researchResp?.pagesFetched
+        ? [{ node: "research", status: `Fetched ${researchResp.pagesFetched} pages` }]
+        : [],
     };
   }
 
@@ -169,6 +192,12 @@ export class OrchestratorClient {
     if (text.endsWith("?")) return true;
     if (/\b(what|how|why|when|where|who|help|explain|trend|trending)\b/i.test(text)) return true;
     return text.split(" ").length >= 2;
+  }
+
+  private isResearchPrompt(command: string): boolean {
+    const text = String(command || "").trim().toLowerCase();
+    if (!text) return false;
+    return /\b(trend|trending|latest|news|research|search|crawl|source|sources|citation|citations|web)\b/.test(text);
   }
 
   sendCommand(cmd: { command?: string; payload?: any }): Promise<ExecuteResponse> {
@@ -232,6 +261,16 @@ export class OrchestratorClient {
 
   emitFounderMessage(message: FounderMessage) {
     this.founderHandlers.forEach((handler) => handler(message));
+  }
+
+  async submitTrainingFeedback(input: {
+    query: string;
+    response: string;
+    rating: "up" | "down" | "neutral";
+    tags?: string[];
+    citations?: Array<{ title?: string; url?: string }>;
+  }) {
+    return this.postJson("/training/feedback", input as Record<string, unknown>);
   }
 
   private async postJson(path: string, body: Record<string, unknown>) {

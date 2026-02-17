@@ -28,6 +28,9 @@ import {
   setMeshNodesOnline,
 } from "@observability/metrics";
 import { summarizeUsage } from "@billing/usage";
+import { createRateLimiter } from "@security/rateLimit";
+import { runResearch } from "@research/pipeline";
+import { exportTrainingJSONL, listTrainingSamples, recordTrainingSample } from "@training/dataset";
 
 export function startServer(
   restPort: number,
@@ -124,6 +127,16 @@ export function startServer(
   const meshRegistry = new InferenceRegistry();
   const fedAggregator = new FedAggregator();
   const fedKey = process.env.NEUROEDGE_FED_KEY || "";
+  const researchLimiter = createRateLimiter({
+    keyPrefix: "research",
+    windowMs: Number(process.env.RESEARCH_RATE_LIMIT_WINDOW_MS || 60000),
+    maxRequests: Number(process.env.RESEARCH_RATE_LIMIT_MAX || 20),
+  });
+  const trainingLimiter = createRateLimiter({
+    keyPrefix: "training",
+    windowMs: Number(process.env.TRAINING_RATE_LIMIT_WINDOW_MS || 60000),
+    maxRequests: Number(process.env.TRAINING_RATE_LIMIT_MAX || 60),
+  });
 
   app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities } = req.body || {};
@@ -215,6 +228,73 @@ export function startServer(
     } catch (err: any) {
       res.status(502).json({ error: "Mesh node inference failed", detail: err?.message || String(err) });
     }
+  });
+
+  app.post("/research", requireWorkspace, requireScope("research:run"), researchLimiter, async (req: Request, res: Response) => {
+    const query = String(req.body?.query || req.body?.text || req.body?.input || "").trim();
+    if (!query) {
+      return res.status(400).json({ error: "Missing query" });
+    }
+    try {
+      const result = await runResearch(query);
+      appendEvent({
+        type: "research.run",
+        timestamp: Date.now(),
+        payload: {
+          query,
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          actor: req.auth?.sub || "unknown",
+          pagesFetched: result.pagesFetched,
+          citations: result.citations.map((c) => ({ title: c.title, url: c.url })),
+        },
+      });
+      res.json({
+        success: true,
+        query,
+        summary: result.summary,
+        citations: result.citations,
+        pagesFetched: result.pagesFetched,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Research pipeline failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/training/feedback", requireWorkspace, requireScope("training:write"), trainingLimiter, (req: Request, res: Response) => {
+    const query = String(req.body?.query || "").trim();
+    const responseText = String(req.body?.response || "").trim();
+    const ratingRaw = String(req.body?.rating || "neutral").toLowerCase();
+    const rating = ratingRaw === "up" || ratingRaw === "down" ? ratingRaw : "neutral";
+    if (!query || !responseText) {
+      return res.status(400).json({ error: "Missing query or response" });
+    }
+    const evt = recordTrainingSample({
+      query,
+      response: responseText,
+      rating,
+      orgId: req.auth?.orgId,
+      workspaceId: req.auth?.workspaceId,
+      actor: req.auth?.sub,
+      tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
+      citations: Array.isArray(req.body?.citations) ? req.body.citations : [],
+    });
+    res.json({ success: true, event: evt });
+  });
+
+  app.get("/training/samples", requireWorkspace, requireScope("training:read"), (req: Request, res: Response) => {
+    const limit = Number(req.query.limit) || 200;
+    res.json({
+      success: true,
+      samples: listTrainingSamples(limit),
+    });
+  });
+
+  app.get("/training/export", requireWorkspace, requireScope("training:read"), (req: Request, res: Response) => {
+    const limit = Number(req.query.limit) || 5000;
+    const jsonl = exportTrainingJSONL(limit);
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.send(jsonl);
   });
 
   app.post("/chat", requireWorkspace, requireScope("chat:write"), handleChat);

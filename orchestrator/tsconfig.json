@@ -28,6 +28,8 @@
       "@federation/*": ["federation/*"],
       "@observability/*": ["observability/*"],
       "@billing/*": ["billing/*"],
+      "@research/*": ["research/*"],
+      "@training/*": ["training/*"],
       "@stream/*": ["stream/*"],
       "@types/*": ["types/*"],
       "@server": ["server/index"]

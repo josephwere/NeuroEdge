@@ -105,10 +105,10 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const jwtScopes = parseScopes(claims);
+  const jwtScopes = parseScopes(claims || undefined);
   const apiKeyScopes = parseScopeList(
     process.env.API_KEY_SCOPES ||
-      "chat:write execute:run ai:infer mesh:read mesh:write billing:read storage:write federation:read federation:write"
+      "chat:write execute:run ai:infer research:run mesh:read mesh:write billing:read storage:write federation:read federation:write training:read training:write"
   );
   const scopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : [];
   const requestedOrg = req.header("x-org-id") || undefined;

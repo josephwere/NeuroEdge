@@ -8,6 +8,8 @@ import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { isFounderUser } from "@/services/founderAccess";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface ExecutionResult {
   id: string;
@@ -19,6 +21,7 @@ interface ExecutionResult {
 interface LogLine {
   id: string;
   text: string;
+  role?: "user" | "assistant";
   type?: "info" | "warn" | "error" | "ml" | "mesh";
   codeLanguage?: string;
   isCode?: boolean;
@@ -101,6 +104,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
       const logs: LogLine[] = cached.map(c => ({
         id: c.id,
         text: c.payload.text,
+        role: c.payload.role || "assistant",
         type: c.payload.type,
         timestamp: c.timestamp,
         collapsible: c.payload.isCode,
@@ -190,7 +194,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     const context = chatContext.getAll();
     const commandId = Date.now().toString();
 
-    addMessage(`💻 ${input}`, "info");
+    addMessage(input, "info", undefined, undefined, "user");
     addHistoryMessage({ id: commandId, role: "user", text: input, type: "info" });
     saveToCache({ id: commandId, timestamp: Date.now(), type: "chat", payload: { role: "user", text: input, type: "info" } });
 
@@ -231,13 +235,19 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   };
 
   // --- Helpers ---
-  const addMessage = (text: string, type?: LogLine["type"], codeLanguage?: string, isCode?: boolean) => {
+  const addMessage = (
+    text: string,
+    type?: LogLine["type"],
+    codeLanguage?: string,
+    isCode?: boolean,
+    role: LogLine["role"] = "assistant"
+  ) => {
     const id = Date.now().toString() + Math.random();
-    const msg: LogLine = { id, text, type, codeLanguage, isCode, collapsible: isCode, collapsibleOpen: true, timestamp: Date.now() };
+    const msg: LogLine = { id, text, role, type, codeLanguage, isCode, collapsible: isCode, collapsibleOpen: true, timestamp: Date.now() };
     setMessages(m => [...m, msg]);
     setDisplayed(d => [...d, msg]);
-    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { text, type, codeLanguage, isCode } });
-    addHistoryMessage({ id, role: "assistant", text, type, isCode, codeLanguage });
+    saveToCache({ id, timestamp: Date.now(), type: "chat", payload: { role, text, type, codeLanguage, isCode } });
+    addHistoryMessage({ id, role: role || "assistant", text, type, isCode, codeLanguage });
   };
 
   const addApproval = (app: ApprovalRequest) => {
@@ -249,6 +259,70 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const extractLanguage = (codeBlock: string) => {
     const match = codeBlock.match(/```(\w+)?/);
     return match ? match[1] : "text";
+  };
+
+  const renderRichText = (text: string) => {
+    const nodes: React.ReactNode[] = [];
+    const regex = /```(\w+)?\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = regex.exec(text)) !== null) {
+      if (m.index > lastIndex) {
+        const before = text.slice(lastIndex, m.index).trim();
+        if (before) {
+          nodes.push(
+            <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+              {before}
+            </div>
+          );
+        }
+      }
+      nodes.push(
+        <div key={`c-${idx++}`} style={{ marginTop: "0.45rem" }}>
+          <SyntaxHighlighter language={(m[1] || "text").trim()} style={okaidia} showLineNumbers>
+            {m[2] || ""}
+          </SyntaxHighlighter>
+        </div>
+      );
+      lastIndex = regex.lastIndex;
+    }
+    const tail = text.slice(lastIndex).trim();
+    if (tail) {
+      nodes.push(
+        <div key={`t-${idx++}`} style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+          {tail}
+        </div>
+      );
+    }
+    return nodes.length ? nodes : [<div key="empty" />];
+  };
+
+  const renderBubble = (m: LogLine) => {
+    const isUser = m.role === "user";
+    const bubbleStyle: React.CSSProperties = isUser
+      ? {
+          marginLeft: "auto",
+          maxWidth: "80%",
+          background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+          color: "#f8fafc",
+          borderRadius: "14px 14px 4px 14px",
+          padding: "0.55rem 0.75rem",
+        }
+      : {
+          marginRight: "auto",
+          maxWidth: "86%",
+          background: "rgba(15, 23, 42, 0.8)",
+          border: "1px solid rgba(148, 163, 184, 0.25)",
+          color: "#e2e8f0",
+          borderRadius: "14px 14px 14px 4px",
+          padding: "0.55rem 0.75rem",
+        };
+    return (
+      <div key={m.id} style={{ marginBottom: "0.55rem" }}>
+        <div style={bubbleStyle}>{renderRichText(m.text)}</div>
+      </div>
+    );
   };
 
   // --- Render ---
@@ -346,7 +420,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               scrollableTarget="floatingChatScroll"
               loader={<div style={{ textAlign: "center", color: "#94a3b8" }}>Loading…</div>}
             >
-              {displayed.map(m => <div key={m.id} style={{ marginBottom: "4px" }}>{m.text}</div>)}
+              {displayed.map(renderBubble)}
             </InfiniteScroll>
           </div>
 
