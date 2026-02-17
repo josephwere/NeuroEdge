@@ -1,4 +1,4 @@
-import { eventBus } from "@core/event_bus";
+import { EventBus } from "@core/event_bus";
 
 export interface MLProposal {
   id: string;
@@ -6,21 +6,23 @@ export interface MLProposal {
   reason: string; // Why ML thinks it should run
 }
 
-// Simulated ML reasoning engine
 export class MLReasoner {
-  constructor() {}
+  constructor(private eventBus: EventBus) {}
 
   proposeCommand(command: string): MLProposal {
-    // Placeholder: real ML would analyze context, previous logs, errors
-    const reason = `ML predicts this command will fix build or code issues`;
-    return { id: Date.now().toString(), command, reason };
+    const lower = String(command || "").toLowerCase();
+    let reason = "Command classified as general execution request.";
+    if (lower.includes("test")) reason = "Detected testing workflow. Prefer running tests with verbose output.";
+    else if (lower.includes("build") || lower.includes("compile")) reason = "Detected build workflow. Suggest build checks and dependency validation.";
+    else if (lower.includes("error") || lower.includes("fail")) reason = "Detected failure analysis workflow. Suggest log analysis before execution.";
+    return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, command, reason };
   }
 
   startListening() {
     // Listen for user command requests
-    eventBus.subscribe("dev:user_request", (cmd: string) => {
+    this.eventBus.subscribe("dev:user_request", (cmd: string) => {
       const proposal = this.proposeCommand(cmd);
-      eventBus.emit("ml:proposal", proposal);
+      this.eventBus.emit("ml:proposal", proposal);
     });
   }
 }

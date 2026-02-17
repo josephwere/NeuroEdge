@@ -2,7 +2,6 @@ package engines
 
 import (
 	"fmt"
-	"time"
 
 	"neuroedge/kernel/types"
 )
@@ -36,7 +35,39 @@ func (n *NeuroComputeOptimizer) Name() string {
 
 func (n *NeuroComputeOptimizer) OptimizeCompute(data interface{}) {
 	fmt.Println("[NeuroComputeOptimizer] Running compute optimization...")
-	// Simulate heavy computation optimization
-	time.Sleep(500 * time.Millisecond)
-	fmt.Println("[NeuroComputeOptimizer] Optimization complete:", data)
+	recommendation := map[string]interface{}{
+		"action":          "none",
+		"priority":        "low",
+		"reason":          "insufficient metrics",
+		"scale_factor":    1.0,
+		"target_queue_ms": 200,
+	}
+	if metrics, ok := data.(map[string]interface{}); ok {
+		cpu, _ := metrics["cpu_load"].(float64)
+		queue, _ := metrics["queue_ms"].(float64)
+		mem, _ := metrics["memory_load"].(float64)
+		if cpu > 0.85 || queue > 800 {
+			recommendation["action"] = "scale_up"
+			recommendation["priority"] = "high"
+			recommendation["reason"] = "high cpu/queue pressure"
+			recommendation["scale_factor"] = 1.5
+		} else if cpu < 0.2 && mem < 0.4 && queue < 100 {
+			recommendation["action"] = "scale_down"
+			recommendation["priority"] = "medium"
+			recommendation["reason"] = "sustained under-utilization"
+			recommendation["scale_factor"] = 0.8
+		} else {
+			recommendation["action"] = "rebalance"
+			recommendation["priority"] = "medium"
+			recommendation["reason"] = "maintain throughput with balanced load"
+		}
+	}
+	fmt.Println("[NeuroComputeOptimizer] Optimization complete:", recommendation)
+	if n.EventBus != nil {
+		n.EventBus.Publish(types.Event{
+			Name:   "compute:optimized",
+			Data:   recommendation,
+			Source: n.Name(),
+		})
+	}
 }

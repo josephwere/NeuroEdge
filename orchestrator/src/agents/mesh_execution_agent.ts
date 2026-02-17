@@ -1,7 +1,8 @@
-import { OrchestratorAgent } from "@types";
+import { OrchestratorAgent } from "@core/agent_manager";
 import { EventBus } from "@core/event_bus";
-import { Logger } from "@core/logger";
+import { Logger } from "@utils/logger";
 import { DevExecutionAgent } from "@agents/dev_execution_agent";
+import axios from "axios";
 
 interface ExecutionRequest {
   id: string;
@@ -15,7 +16,7 @@ export class MeshExecutionAgent implements OrchestratorAgent {
   private eventBus: EventBus;
   private logger: Logger;
   private localExecutor: DevExecutionAgent;
-  private remoteNodes: Map<string, any>; // placeholder for remote nodes
+  private remoteNodes: Map<string, { baseUrl: string }>;
 
   constructor(eventBus: EventBus, logger: Logger, localExecutor: DevExecutionAgent) {
     this.eventBus = eventBus;
@@ -51,16 +52,24 @@ export class MeshExecutionAgent implements OrchestratorAgent {
         return;
       }
       this.logger.info(this.name(), `Sending command to node ${req.nodeId}: ${req.command}`);
-      node.execute(req); // assume remote node exposes execute API
+      try {
+        await axios.post(`${node.baseUrl.replace(/\/$/, "")}/execute`, {
+          command: req.command,
+          args: req.args || [],
+        }, { timeout: 10000 });
+      } catch (err: any) {
+        this.logger.warn(this.name(), `Remote node failed (${req.nodeId}), falling back local: ${err?.message || err}`);
+        await this.localExecutor.handleExecution(req);
+      }
     }
   }
 
   // Add/remove remote nodes dynamically
-  addNode(nodeId: string, nodeClient: any) {
-    this.remoteNodes.set(nodeId, nodeClient);
+  addNode(nodeId: string, node: { baseUrl: string }) {
+    this.remoteNodes.set(nodeId, node);
   }
 
   removeNode(nodeId: string) {
     this.remoteNodes.delete(nodeId);
   }
-  }
+}

@@ -13,12 +13,16 @@ export class FloatingChat {
   }
 
   showIntent(intent: ExecutionIntent) {
-    // Simulate floating UI (replace with real UI hook)
-    console.log(`💬 [Floating Chat] Command: ${intent.command}`);
-    console.log(`Reason: ${intent.reason}`);
-    console.log(`Risk: ${intent.riskLevel}`);
-    console.log(`Affects System: ${intent.affectsSystem}`);
-    console.log("Options: [approve] [deny] [edit] [cancel]");
+    this.bus.emit("floating_chat:intent", {
+      id: intent.id,
+      command: intent.command,
+      args: intent.args || [],
+      reason: intent.reason,
+      riskLevel: intent.riskLevel,
+      affectsSystem: intent.affectsSystem,
+      options: ["approve", "deny", "edit", "cancel"],
+      timestamp: Date.now(),
+    });
   }
 
   approve(intent: ExecutionIntent) {

@@ -3,6 +3,7 @@ import { NodeManager, MeshNode } from "@mesh/node_manager";
 import { SecureChannel } from "@mesh/secure_channel";
 import { Logger } from "@utils/logger";
 import { EventBus } from "@core/event_bus";
+import axios from "axios";
 
 export class MeshExecutor {
   private nodes: NodeManager;
@@ -21,15 +22,25 @@ export class MeshExecutor {
     this.logger.info("MeshExecutor", `Sending command to node ${node.id}`);
 
     const payload = this.channel.encrypt(JSON.stringify({ command, context }));
-
-    // Simulate sending over network (replace with real transport e.g., WebSocket)
-    setTimeout(() => {
-      const decrypted = this.channel.decrypt(payload);
-      const parsed = JSON.parse(decrypted);
-      this.logger.info("MeshExecutor", `Node ${node.id} received: ${parsed.command}`);
-      // Emit back result
-      this.eventBus.emit("mesh:result", { nodeId: node.id, output: `Executed: ${parsed.command}` });
-    }, 500);
+    const decrypted = this.channel.decrypt(payload);
+    const parsed = JSON.parse(decrypted);
+    try {
+      const resp = await axios.post(`${node.address.replace(/\/$/, "")}/execute`, {
+        command: parsed.command,
+        context: parsed.context || "",
+      }, { timeout: 10000 });
+      this.eventBus.emit("mesh:result", {
+        nodeId: node.id,
+        output: resp.data?.stdout || resp.data?.response || JSON.stringify(resp.data || {}),
+        success: resp.data?.success !== false,
+      });
+    } catch (err: any) {
+      this.eventBus.emit("mesh:result", {
+        nodeId: node.id,
+        output: err?.message || "remote execution failed",
+        success: false,
+      });
+    }
   }
 
   async broadcastCommand(command: string, context?: string) {
