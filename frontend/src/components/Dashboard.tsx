@@ -183,6 +183,15 @@ interface ComputeAutoPayoutConfig {
   updatedAt?: number;
 }
 
+interface OwnerMeshPolicy {
+  meshDiscoveryEnabled: boolean;
+  lowPowerMode: boolean;
+  computeExecutionConsent: boolean;
+  trainingConsent: boolean;
+  backgroundOnly: boolean;
+  updatedAt?: number;
+}
+
 interface LoanOpsCompany {
   id: string;
   name: string;
@@ -863,6 +872,51 @@ const Dashboard: React.FC = () => {
   const [neuroExpansionPatchRunTests, setNeuroExpansionPatchRunTests] = useState(true);
   const [neuroExpansionPatchTestCommand, setNeuroExpansionPatchTestCommand] = useState("pnpm run typecheck");
   const [neuroExpansionPlaceholderReport, setNeuroExpansionPlaceholderReport] = useState<any>(null);
+  const [meshExpansion, setMeshExpansion] = useState<any>(null);
+  const [meshExpansionNodes, setMeshExpansionNodes] = useState<any[]>([]);
+  const [meshExpansionPolicyDraft, setMeshExpansionPolicyDraft] = useState({
+    enabled: true,
+    autoScanEnabled: true,
+    lowPowerDefault: true,
+    discoveryDefault: true,
+    requireFounderMergeApproval: true,
+    taskExecutionEnabled: true,
+    maxTaskRetries: 2,
+    p2pEnabled: true,
+    p2pAllowStoreAndForward: true,
+    p2pMaxHops: 8,
+    p2pGossipFanout: 3,
+  });
+  const [meshProposalGoal, setMeshProposalGoal] = useState("expand offline mesh routing + reliability");
+  const [meshProposalAssistantId, setMeshProposalAssistantId] = useState("mesh-architect");
+  const [meshReviewReason, setMeshReviewReason] = useState("");
+  const [meshTaskCommand, setMeshTaskCommand] = useState("context.gather");
+  const [meshTaskPayload, setMeshTaskPayload] = useState('{"args":["--quick"]}');
+  const [meshDispatchLimit, setMeshDispatchLimit] = useState("5");
+  const [meshRelayFrom, setMeshRelayFrom] = useState("node-a");
+  const [meshRelayTo, setMeshRelayTo] = useState("node-b");
+  const [meshRelayMessage, setMeshRelayMessage] = useState("offline hello from mesh");
+  const [meshP2PPeerDraft, setMeshP2PPeerDraft] = useState({
+    id: "peer-a",
+    label: "Peer A",
+    transport: "hybrid",
+    status: "active",
+    bandwidthKbps: "256",
+    latencyMs: "0",
+  });
+  const [meshP2PLinkDraft, setMeshP2PLinkDraft] = useState({
+    id: "",
+    from: "peer-a",
+    to: "peer-b",
+    quality: "0.8",
+    cost: "1",
+    status: "active",
+  });
+  const [meshP2PGossipTopic, setMeshP2PGossipTopic] = useState("mesh.health");
+  const [meshP2PGossipPayload, setMeshP2PGossipPayload] = useState('{"status":"ok"}');
+  const [meshP2PRouteFrom, setMeshP2PRouteFrom] = useState("peer-a");
+  const [meshP2PRouteTo, setMeshP2PRouteTo] = useState("peer-b");
+  const [meshP2PRoutePayload, setMeshP2PRoutePayload] = useState('{"message":"hello"}');
   const [neuroExpansionSettingsDraft, setNeuroExpansionSettingsDraft] = useState({
     enabled: true,
     autoDailyScan: true,
@@ -1448,6 +1502,13 @@ const Dashboard: React.FC = () => {
     maxRamPct: 40,
     pauseOnBattery: true,
     pauseOnHighTempC: 80,
+  });
+  const [ownerMeshPolicy, setOwnerMeshPolicy] = useState<OwnerMeshPolicy>({
+    meshDiscoveryEnabled: true,
+    lowPowerMode: true,
+    computeExecutionConsent: false,
+    trainingConsent: false,
+    backgroundOnly: true,
   });
   const [ownerPayoutProfile, setOwnerPayoutProfile] = useState<OwnerPayoutProfile | null>(null);
   const [ownerPayoutRequests, setOwnerPayoutRequests] = useState<OwnerPayoutRequest[]>([]);
@@ -2175,6 +2236,7 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
     if (remote.ssoConfig && typeof remote.ssoConfig === "object") setSsoConfig(remote.ssoConfig);
     if (remote.neuroExpansion && typeof remote.neuroExpansion === "object") setNeuroExpansion(remote.neuroExpansion);
+    if (remote.meshExpansion && typeof remote.meshExpansion === "object") setMeshExpansion(remote.meshExpansion);
   };
 
   const callAction = async (path: string, body: any) => {
@@ -2266,6 +2328,9 @@ const Dashboard: React.FC = () => {
       if (data.deviceProtection && typeof data.deviceProtection === "object") setDeviceProtection(data.deviceProtection);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data?.devices)) setOwnerComputeDevices(data.devices);
+      if (data?.ownerPolicy && typeof data.ownerPolicy === "object") {
+        setOwnerMeshPolicy((p) => ({ ...p, ...data.ownerPolicy }));
+      }
       if (data?.payoutProfile && typeof data.payoutProfile === "object") setOwnerPayoutProfile(data.payoutProfile);
       if (Array.isArray(data?.payoutRequests)) setOwnerPayoutRequests(data.payoutRequests);
       if (data?.wallet && typeof data.wallet === "object") setOwnerWallet(data.wallet);
@@ -2307,6 +2372,12 @@ const Dashboard: React.FC = () => {
       if (data.ssoConfig) setSsoConfig(data.ssoConfig);
       if (data?.neuroExpansion && typeof data.neuroExpansion === "object") {
         setNeuroExpansion(data.neuroExpansion);
+      }
+      if (data?.meshExpansion && typeof data.meshExpansion === "object") {
+        setMeshExpansion(data.meshExpansion);
+      }
+      if (Array.isArray(data?.meshNodes)) {
+        setMeshExpansionNodes(data.meshNodes);
       }
       if (data?.settings && data?.neuroExpansion) {
         const roots = Array.isArray(data.settings?.placeholderScanRoots)
@@ -2371,10 +2442,14 @@ const Dashboard: React.FC = () => {
     refreshMarketReadiness();
     refreshReliabilityProgram();
     refreshNeuroExpansion();
+    refreshMeshExpansion();
     (async () => {
       try {
         const owner = await getJson("/dashboard/compute-owner/bootstrap");
         if (Array.isArray(owner?.devices)) setOwnerComputeDevices(owner.devices);
+        if (owner?.ownerPolicy && typeof owner.ownerPolicy === "object") {
+          setOwnerMeshPolicy((p) => ({ ...p, ...owner.ownerPolicy }));
+        }
         if (owner?.guardrails && typeof owner.guardrails === "object") {
           setOwnerGuardrails((p) => ({ ...p, ...owner.guardrails }));
         }
@@ -2479,9 +2554,13 @@ const Dashboard: React.FC = () => {
       refreshQualityInsights();
       refreshReliabilityProgram();
       refreshNeuroExpansion();
+      refreshMeshExpansion();
       try {
         const owner = await getJson("/dashboard/compute-owner/bootstrap");
         if (Array.isArray(owner?.devices)) setOwnerComputeDevices(owner.devices);
+        if (owner?.ownerPolicy && typeof owner.ownerPolicy === "object") {
+          setOwnerMeshPolicy((p) => ({ ...p, ...owner.ownerPolicy }));
+        }
         if (owner?.guardrails && typeof owner.guardrails === "object") {
           setOwnerGuardrails((p) => ({ ...p, ...owner.guardrails }));
         }
@@ -3024,12 +3103,27 @@ const Dashboard: React.FC = () => {
   const refreshOwnerCompute = async () => {
     const data = await callAction("GET:/dashboard/compute-owner/bootstrap", {});
     if (data?.devices) setOwnerComputeDevices(data.devices);
+    if (data?.ownerPolicy && typeof data.ownerPolicy === "object") {
+      setOwnerMeshPolicy((p) => ({ ...p, ...data.ownerPolicy }));
+    }
     if (data?.guardrails && typeof data.guardrails === "object") {
       setOwnerGuardrails((p) => ({ ...p, ...data.guardrails }));
     }
     if (data?.payoutProfile) setOwnerPayoutProfile(data.payoutProfile);
     if (data?.payoutRequests) setOwnerPayoutRequests(data.payoutRequests);
     if (data?.wallet) setOwnerWallet(data.wallet);
+  };
+
+  const saveOwnerMeshPolicy = async () => {
+    await callAction("/dashboard/compute-owner/policy/save", { policy: ownerMeshPolicy });
+    addNotification({
+      type: "success",
+      message:
+        ownerMeshPolicy.computeExecutionConsent || ownerMeshPolicy.trainingConsent
+          ? "Mesh/training consent saved. Rewards eligibility is active."
+          : "Policy saved. Mesh discovery stays on, but compute/training rewards remain disabled.",
+    });
+    await refreshOwnerCompute();
   };
 
   const telemetryDraftFor = (device: OwnerComputeDevice) =>
@@ -4788,6 +4882,262 @@ const Dashboard: React.FC = () => {
           : "Daily planner generated a new approval proposal.",
       });
       await refreshNeuroExpansion();
+    }
+  };
+
+  const refreshMeshExpansion = async () => {
+    if (!(dashboardRole === "founder" || dashboardRole === "admin")) return;
+    try {
+      const data = await getJson("/admin/dashboard/mesh-expansion/bootstrap");
+      if (data?.meshExpansion) {
+        setMeshExpansion(data.meshExpansion);
+        const p = data.meshExpansion?.policy || {};
+        const p2p = data.meshExpansion?.p2p?.policy || {};
+        setMeshExpansionPolicyDraft((prev) => ({
+          ...prev,
+          ...p,
+          maxTaskRetries: Number(p.maxTaskRetries ?? prev.maxTaskRetries ?? 2),
+          p2pEnabled: Boolean(p2p.enabled ?? prev.p2pEnabled),
+          p2pAllowStoreAndForward: Boolean(
+            p2p.allowStoreAndForward ?? prev.p2pAllowStoreAndForward
+          ),
+          p2pMaxHops: Number(p2p.maxHops ?? prev.p2pMaxHops ?? 8),
+          p2pGossipFanout: Number(p2p.gossipFanout ?? prev.p2pGossipFanout ?? 3),
+        }));
+      }
+      if (Array.isArray(data?.meshNodes)) setMeshExpansionNodes(data.meshNodes);
+    } catch {
+      // ignore permission errors for other roles
+    }
+  };
+
+  const saveMeshExpansionPolicy = async () => {
+    const data = await callAction("/admin/dashboard/mesh-expansion/policy/save", {
+      policy: {
+        ...meshExpansionPolicyDraft,
+        maxTaskRetries: Number(meshExpansionPolicyDraft.maxTaskRetries || 2),
+        p2p: {
+          enabled: Boolean(meshExpansionPolicyDraft.p2pEnabled),
+          allowStoreAndForward: Boolean(meshExpansionPolicyDraft.p2pAllowStoreAndForward),
+          maxHops: Number(meshExpansionPolicyDraft.p2pMaxHops || 8),
+          gossipFanout: Number(meshExpansionPolicyDraft.p2pGossipFanout || 3),
+        },
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Mesh expansion policy saved." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const runMeshExpansionScan = async () => {
+    const data = await callAction("/admin/dashboard/mesh-expansion/scan", {});
+    if (data?.success) {
+      setBackendOutput(data);
+      addNotification({ type: "success", message: "Mesh scan completed." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const proposeMeshExpansion = async () => {
+    if (!meshProposalGoal.trim()) {
+      addNotification({ type: "warn", message: "Enter mesh expansion goal." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/propose", {
+      assistantId: meshProposalAssistantId,
+      goal: meshProposalGoal.trim(),
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Mesh assistant proposal submitted for founder approval." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const reviewMeshProposal = async (id: string, decision: "approve" | "reject") => {
+    const data = await callAction("/admin/dashboard/mesh-expansion/review", {
+      id,
+      decision,
+      reason: meshReviewReason.trim(),
+    });
+    if (data?.success) {
+      addNotification({
+        type: decision === "approve" ? "success" : "warn",
+        message: `Mesh proposal ${decision}d.`,
+      });
+      setMeshReviewReason("");
+      await refreshMeshExpansion();
+    }
+  };
+
+  const mergeMeshProposal = async (id: string) => {
+    const data = await callAction("/admin/dashboard/mesh-expansion/merge", { id });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Mesh proposal merged into approved roadmap." });
+      setBackendOutput(data);
+      await refreshMeshExpansion();
+    }
+  };
+
+  const submitMeshTask = async () => {
+    if (!meshTaskCommand.trim()) {
+      addNotification({ type: "warn", message: "Enter task command." });
+      return;
+    }
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = meshTaskPayload.trim() ? JSON.parse(meshTaskPayload) : {};
+    } catch {
+      addNotification({ type: "error", message: "Task payload must be valid JSON." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/task/submit", {
+      command: meshTaskCommand.trim(),
+      payload: parsed,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Mesh task executed: ${meshTaskCommand}` });
+      setBackendOutput(data);
+      await refreshMeshExpansion();
+    }
+  };
+
+  const queueMeshTask = async () => {
+    if (!meshTaskCommand.trim()) {
+      addNotification({ type: "warn", message: "Enter task command." });
+      return;
+    }
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = meshTaskPayload.trim() ? JSON.parse(meshTaskPayload) : {};
+    } catch {
+      addNotification({ type: "error", message: "Task payload must be valid JSON." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/task/submit-async", {
+      command: meshTaskCommand.trim(),
+      payload: parsed,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Mesh task queued." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const dispatchMeshQueue = async () => {
+    const limit = Math.max(1, Math.min(30, Number(meshDispatchLimit || 5)));
+    const data = await callAction("/admin/dashboard/mesh-expansion/task/dispatch", { limit });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Dispatched mesh queue (${Number(data?.updated?.length || 0)} tasks).` });
+      setBackendOutput(data);
+      await refreshMeshExpansion();
+    }
+  };
+
+  const relayMeshMessage = async () => {
+    if (!meshRelayFrom.trim() || !meshRelayTo.trim() || !meshRelayMessage.trim()) {
+      addNotification({ type: "warn", message: "Enter relay from/to/message." });
+      return;
+    }
+    const data = await callAction("/mesh/message/relay", {
+      fromNodeId: meshRelayFrom.trim(),
+      toNodeId: meshRelayTo.trim(),
+      channel: "mesh",
+      message: meshRelayMessage.trim(),
+    });
+    if (data?.status === "ok" || data?.success) {
+      addNotification({ type: "success", message: "Offline mesh relay message recorded." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const upsertMeshP2PPeer = async () => {
+    const id = meshP2PPeerDraft.id.trim();
+    if (!id) {
+      addNotification({ type: "warn", message: "Enter peer id." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/p2p/peer/upsert", {
+      peer: {
+        id,
+        label: meshP2PPeerDraft.label.trim() || id,
+        transport: meshP2PPeerDraft.transport,
+        status: meshP2PPeerDraft.status,
+        bandwidthKbps: Number(meshP2PPeerDraft.bandwidthKbps || 256),
+        latencyMs: Number(meshP2PPeerDraft.latencyMs || 0),
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `P2P peer saved: ${id}` });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const upsertMeshP2PLink = async () => {
+    const from = meshP2PLinkDraft.from.trim();
+    const to = meshP2PLinkDraft.to.trim();
+    if (!from || !to || from === to) {
+      addNotification({ type: "warn", message: "Enter valid link from/to peers." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/p2p/link/upsert", {
+      link: {
+        id: meshP2PLinkDraft.id.trim(),
+        from,
+        to,
+        status: meshP2PLinkDraft.status,
+        quality: Number(meshP2PLinkDraft.quality || 0.8),
+        cost: Number(meshP2PLinkDraft.cost || 1),
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `P2P link saved: ${from} ↔ ${to}` });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const sendMeshP2PGossip = async () => {
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = meshP2PGossipPayload.trim() ? JSON.parse(meshP2PGossipPayload) : {};
+    } catch {
+      addNotification({ type: "error", message: "Gossip payload must be valid JSON." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/p2p/gossip", {
+      topic: meshP2PGossipTopic.trim() || "mesh.health",
+      payload: parsed,
+      fromPeerId: meshP2PRouteFrom.trim() || "mesh-admin",
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "P2P gossip broadcasted." });
+      await refreshMeshExpansion();
+    }
+  };
+
+  const sendMeshP2PRoutePacket = async () => {
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = meshP2PRoutePayload.trim() ? JSON.parse(meshP2PRoutePayload) : {};
+    } catch {
+      addNotification({ type: "error", message: "Route payload must be valid JSON." });
+      return;
+    }
+    const fromPeerId = meshP2PRouteFrom.trim();
+    const toPeerId = meshP2PRouteTo.trim();
+    if (!fromPeerId || !toPeerId) {
+      addNotification({ type: "warn", message: "Enter route from/to peers." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/mesh-expansion/p2p/route/send", {
+      fromPeerId,
+      toPeerId,
+      payload: parsed,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `P2P packet ${String(data?.packet?.status || "sent")}.` });
+      setBackendOutput(data);
+      await refreshMeshExpansion();
     }
   };
 
@@ -7084,6 +7434,241 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const meshExpansionCard = (
+    <Card title="Mesh Expansion Engine (Founder/Admin)" wide>
+      <div style={muted}>
+        Offline-first AI mesh with assistant-driven expansion proposals. All merge actions require founder approval.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={chip} onClick={refreshMeshExpansion}>Refresh</button>
+        <button style={chip} onClick={runMeshExpansionScan}>Scan Mesh</button>
+        <button style={primary} onClick={saveMeshExpansionPolicy}>Save Policy</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, enabled: !p.enabled }))}>
+          Engine: {meshExpansionPolicyDraft.enabled ? "enabled" : "disabled"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, autoScanEnabled: !p.autoScanEnabled }))}>
+          Auto scan: {meshExpansionPolicyDraft.autoScanEnabled ? "on" : "off"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, lowPowerDefault: !p.lowPowerDefault }))}>
+          Low power default: {meshExpansionPolicyDraft.lowPowerDefault ? "on" : "off"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, discoveryDefault: !p.discoveryDefault }))}>
+          Discovery default: {meshExpansionPolicyDraft.discoveryDefault ? "on" : "off"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, requireFounderMergeApproval: !p.requireFounderMergeApproval }))}>
+          Founder merge gate: {meshExpansionPolicyDraft.requireFounderMergeApproval ? "on" : "off"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, taskExecutionEnabled: !p.taskExecutionEnabled }))}>
+          Task execution: {meshExpansionPolicyDraft.taskExecutionEnabled ? "enabled" : "disabled"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, p2pEnabled: !p.p2pEnabled }))}>
+          P2P overlay: {meshExpansionPolicyDraft.p2pEnabled ? "enabled" : "disabled"}
+        </button>
+        <button style={chip} onClick={() => setMeshExpansionPolicyDraft((p) => ({ ...p, p2pAllowStoreAndForward: !p.p2pAllowStoreAndForward }))}>
+          Store-and-forward: {meshExpansionPolicyDraft.p2pAllowStoreAndForward ? "on" : "off"}
+        </button>
+        <input
+          type="number"
+          min={0}
+          max={5}
+          value={meshExpansionPolicyDraft.maxTaskRetries}
+          onChange={(e) => setMeshExpansionPolicyDraft((p) => ({ ...p, maxTaskRetries: Number(e.target.value) || 0 }))}
+          placeholder="Max task retries"
+          style={input}
+        />
+        <input
+          type="number"
+          min={2}
+          max={32}
+          value={meshExpansionPolicyDraft.p2pMaxHops}
+          onChange={(e) => setMeshExpansionPolicyDraft((p) => ({ ...p, p2pMaxHops: Number(e.target.value) || 8 }))}
+          placeholder="P2P max hops"
+          style={input}
+        />
+        <input
+          type="number"
+          min={1}
+          max={10}
+          value={meshExpansionPolicyDraft.p2pGossipFanout}
+          onChange={(e) => setMeshExpansionPolicyDraft((p) => ({ ...p, p2pGossipFanout: Number(e.target.value) || 3 }))}
+          placeholder="Gossip fanout"
+          style={input}
+        />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+        <Stat label="Assistants" value={String((meshExpansion?.assistants || []).length)} />
+        <Stat label="Proposals" value={String((meshExpansion?.proposals || []).length)} />
+        <Stat label="Tasks" value={String((meshExpansion?.tasks || []).length)} />
+        <Stat label="Mesh Nodes" value={String(meshExpansionNodes.length)} />
+        <Stat label="Relay Messages" value={String((meshExpansion?.relayMessages || []).length)} />
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Assistant Proposal</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+        <input
+          value={meshProposalAssistantId}
+          onChange={(e) => setMeshProposalAssistantId(e.target.value)}
+          placeholder="Assistant ID (mesh-architect)"
+          style={input}
+        />
+        <input
+          value={meshProposalGoal}
+          onChange={(e) => setMeshProposalGoal(e.target.value)}
+          placeholder="Goal"
+          style={input}
+        />
+      </div>
+      <button style={primary} onClick={proposeMeshExpansion}>Propose Mesh Upgrade</button>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Distributed Task Execution (Cloud-like)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+        <input
+          value={meshTaskCommand}
+          onChange={(e) => setMeshTaskCommand(e.target.value)}
+          placeholder="Task command"
+          style={input}
+        />
+        <input
+          value={meshTaskPayload}
+          onChange={(e) => setMeshTaskPayload(e.target.value)}
+          placeholder='{"args":["--quick"]}'
+          style={input}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={chip} onClick={submitMeshTask}>Run Mesh Task Now</button>
+        <button style={chip} onClick={queueMeshTask}>Queue Task</button>
+        <input
+          value={meshDispatchLimit}
+          onChange={(e) => setMeshDispatchLimit(e.target.value)}
+          placeholder="Dispatch limit"
+          style={{ ...input, maxWidth: 140 }}
+        />
+        <button style={chip} onClick={dispatchMeshQueue}>Dispatch Queue</button>
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Offline Mesh Relay Channel</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+        <input value={meshRelayFrom} onChange={(e) => setMeshRelayFrom(e.target.value)} placeholder="from node id" style={input} />
+        <input value={meshRelayTo} onChange={(e) => setMeshRelayTo(e.target.value)} placeholder="to node id" style={input} />
+        <input value={meshRelayMessage} onChange={(e) => setMeshRelayMessage(e.target.value)} placeholder="message" style={input} />
+      </div>
+      <button style={chip} onClick={relayMeshMessage}>Relay Message</button>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>P2P Overlay Controls</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        <input value={meshP2PPeerDraft.id} onChange={(e) => setMeshP2PPeerDraft((p) => ({ ...p, id: e.target.value }))} placeholder="peer id" style={input} />
+        <input value={meshP2PPeerDraft.label} onChange={(e) => setMeshP2PPeerDraft((p) => ({ ...p, label: e.target.value }))} placeholder="peer label" style={input} />
+        <input value={meshP2PPeerDraft.transport} onChange={(e) => setMeshP2PPeerDraft((p) => ({ ...p, transport: e.target.value }))} placeholder="transport (wifi/bluetooth/hybrid)" style={input} />
+        <input value={meshP2PPeerDraft.bandwidthKbps} onChange={(e) => setMeshP2PPeerDraft((p) => ({ ...p, bandwidthKbps: e.target.value }))} placeholder="bandwidth kbps" style={input} />
+        <input value={meshP2PPeerDraft.latencyMs} onChange={(e) => setMeshP2PPeerDraft((p) => ({ ...p, latencyMs: e.target.value }))} placeholder="latency ms" style={input} />
+        <button style={chip} onClick={upsertMeshP2PPeer}>Save Peer</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        <input value={meshP2PLinkDraft.id} onChange={(e) => setMeshP2PLinkDraft((p) => ({ ...p, id: e.target.value }))} placeholder="link id (optional)" style={input} />
+        <input value={meshP2PLinkDraft.from} onChange={(e) => setMeshP2PLinkDraft((p) => ({ ...p, from: e.target.value }))} placeholder="from peer" style={input} />
+        <input value={meshP2PLinkDraft.to} onChange={(e) => setMeshP2PLinkDraft((p) => ({ ...p, to: e.target.value }))} placeholder="to peer" style={input} />
+        <input value={meshP2PLinkDraft.quality} onChange={(e) => setMeshP2PLinkDraft((p) => ({ ...p, quality: e.target.value }))} placeholder="quality 0..1" style={input} />
+        <input value={meshP2PLinkDraft.cost} onChange={(e) => setMeshP2PLinkDraft((p) => ({ ...p, cost: e.target.value }))} placeholder="cost" style={input} />
+        <button style={chip} onClick={upsertMeshP2PLink}>Save Link</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        <input value={meshP2PGossipTopic} onChange={(e) => setMeshP2PGossipTopic(e.target.value)} placeholder="gossip topic" style={input} />
+        <input value={meshP2PGossipPayload} onChange={(e) => setMeshP2PGossipPayload(e.target.value)} placeholder='{"status":"ok"}' style={input} />
+        <button style={chip} onClick={sendMeshP2PGossip}>Send Gossip</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        <input value={meshP2PRouteFrom} onChange={(e) => setMeshP2PRouteFrom(e.target.value)} placeholder="route from peer" style={input} />
+        <input value={meshP2PRouteTo} onChange={(e) => setMeshP2PRouteTo(e.target.value)} placeholder="route to peer" style={input} />
+        <input value={meshP2PRoutePayload} onChange={(e) => setMeshP2PRoutePayload(e.target.value)} placeholder='{"message":"hello"}' style={input} />
+        <button style={chip} onClick={sendMeshP2PRoutePacket}>Send Routed Packet</button>
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Proposal Queue</div>
+      <input
+        value={meshReviewReason}
+        onChange={(e) => setMeshReviewReason(e.target.value)}
+        placeholder="Review reason (optional)"
+        style={input}
+      />
+      <div style={{ display: "grid", gap: 6, maxHeight: 230, overflowY: "auto" }}>
+        {(meshExpansion?.proposals || []).slice(0, 20).map((p: any) => (
+          <div key={p.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <strong>{p.id}</strong>
+              <span>{p.status}</span>
+            </div>
+            <div style={muted}>{p.assistantId} • {p.goal}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+              {String(p.status) === "pending_founder_approval" && (
+                <>
+                  <button style={primary} onClick={() => reviewMeshProposal(p.id, "approve")}>Approve</button>
+                  <button style={chip} onClick={() => reviewMeshProposal(p.id, "reject")}>Reject</button>
+                </>
+              )}
+              {String(p.status) === "approved" && (
+                <button style={chip} onClick={() => mergeMeshProposal(p.id)}>Merge</button>
+              )}
+            </div>
+            {p.neuroExpansionSubmissionId ? (
+              <div style={{ ...muted, marginTop: 6 }}>
+                Codebase handoff: NeuroExpansion submission {String(p.neuroExpansionSubmissionId)}
+              </div>
+            ) : null}
+          </div>
+        ))}
+        {(!meshExpansion?.proposals || meshExpansion.proposals.length === 0) && (
+          <div style={muted}>No mesh proposals yet.</div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Task Log</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 230, overflowY: "auto" }}>
+        {(meshExpansion?.tasks || []).slice(0, 20).map((t: any) => (
+          <div key={t.id} style={log}>
+            {t.id} • {t.command} • node {t.targetNodeId} • {t.status}
+          </div>
+        ))}
+        {(!meshExpansion?.tasks || meshExpansion.tasks.length === 0) && (
+          <div style={muted}>No mesh tasks executed yet.</div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Relay Log</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+        {(meshExpansion?.relayMessages || []).slice(0, 20).map((m: any) => (
+          <div key={m.id} style={log}>
+            {m.fromNodeId} → {m.toNodeId} • {m.channel} • {new Date(Number(m.createdAt || Date.now())).toLocaleString()}
+          </div>
+        ))}
+        {(!meshExpansion?.relayMessages || meshExpansion.relayMessages.length === 0) && (
+          <div style={muted}>No relay messages yet.</div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>P2P Packets</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+        {(meshExpansion?.p2p?.packets || []).slice(0, 20).map((pkt: any) => (
+          <div key={pkt.id} style={log}>
+            {pkt.fromPeerId} → {pkt.toPeerId} • {pkt.status} • hops {pkt.hops}
+          </div>
+        ))}
+        {(!meshExpansion?.p2p?.packets || meshExpansion.p2p.packets.length === 0) && (
+          <div style={muted}>No routed packets yet.</div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>P2P Gossip Log</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+        {(meshExpansion?.p2p?.gossipLog || []).slice(0, 20).map((g: any) => (
+          <div key={g.id} style={log}>
+            {g.topic} • from {g.fromPeerId} • targets {Array.isArray(g.targets) ? g.targets.length : 0}
+          </div>
+        ))}
+        {(!meshExpansion?.p2p?.gossipLog || meshExpansion.p2p.gossipLog.length === 0) && (
+          <div style={muted}>No gossip events yet.</div>
+        )}
+      </div>
+    </Card>
+  );
+
   const ownerComputeCard = (
     <Card title="My Compute Devices & Earnings">
       <div style={muted}>
@@ -7094,8 +7679,36 @@ const Dashboard: React.FC = () => {
         Temp pause {Number(ownerGuardrails.pauseOnHighTempC || 0)}C • Battery pause{" "}
         {ownerGuardrails.pauseOnBattery ? "on" : "off"}
       </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Mesh & Training Consent Policy</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+        <button style={chip} onClick={() => setOwnerMeshPolicy((p) => ({ ...p, meshDiscoveryEnabled: !p.meshDiscoveryEnabled }))}>
+          Mesh discovery: {ownerMeshPolicy.meshDiscoveryEnabled ? "enabled" : "disabled"}
+        </button>
+        <button style={chip} onClick={() => setOwnerMeshPolicy((p) => ({ ...p, lowPowerMode: !p.lowPowerMode }))}>
+          Low-power mode: {ownerMeshPolicy.lowPowerMode ? "on" : "off"}
+        </button>
+        <button
+          style={chip}
+          onClick={() => setOwnerMeshPolicy((p) => ({ ...p, computeExecutionConsent: !p.computeExecutionConsent }))}
+        >
+          Compute/task execution consent: {ownerMeshPolicy.computeExecutionConsent ? "granted" : "blocked"}
+        </button>
+        <button style={chip} onClick={() => setOwnerMeshPolicy((p) => ({ ...p, trainingConsent: !p.trainingConsent }))}>
+          Training consent: {ownerMeshPolicy.trainingConsent ? "granted" : "blocked"}
+        </button>
+        <button style={chip} onClick={() => setOwnerMeshPolicy((p) => ({ ...p, backgroundOnly: !p.backgroundOnly }))}>
+          Background only: {ownerMeshPolicy.backgroundOnly ? "yes" : "no"}
+        </button>
+      </div>
+      <div style={{ ...log, marginTop: 6 }}>
+        Rewards eligibility:{" "}
+        {ownerMeshPolicy.computeExecutionConsent || ownerMeshPolicy.trainingConsent
+          ? "eligible (execution or training consent active)"
+          : "not eligible (enable execution or training consent first)"}
+      </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
         <button style={chip} onClick={refreshOwnerCompute}>Refresh</button>
+        <button style={primary} onClick={saveOwnerMeshPolicy}>Save Consent Policy</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
         <Stat label="My Devices" value={String(ownerComputeDevices.length)} />
@@ -7140,6 +7753,23 @@ const Dashboard: React.FC = () => {
                   : String(d.pauseReason || "").includes("battery")
                     ? "Power Alert: Device auto-paused while on battery."
                     : "Resource Alert: Device auto-throttled due to CPU/RAM guardrails."}
+              </div>
+            )}
+            {String(d.status || "").toLowerCase() === "mesh_only" && (
+              <div
+                style={{
+                  marginTop: 6,
+                  marginBottom: 6,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(59, 130, 246, 0.45)",
+                  background: "rgba(59, 130, 246, 0.12)",
+                  color: "var(--text)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                Discovery-only mode: mesh communication is active, but compute/training is blocked until consent is granted.
               </div>
             )}
             <div>CPU: {Number(d?.stats?.cpuPct || 0)}% • RAM: {Number(d?.stats?.ramPct || 0)}% • Temp: {Number(d?.stats?.tempC || 0)}C</div>
@@ -7699,6 +8329,7 @@ const Dashboard: React.FC = () => {
       {cortexCoreCard}
       {artifactWorkspaceCard}
       {neuroExpansionBuilderCard}
+      {meshExpansionCard}
       {computePayoutAdminCard}
       {loanOpsShieldCard}
       {reliabilityOpsCard}
@@ -9206,6 +9837,7 @@ const Dashboard: React.FC = () => {
       {cortexCoreCard}
       {artifactWorkspaceCard}
       {neuroExpansionBuilderCard}
+      {meshExpansionCard}
       {computePayoutAdminCard}
       {loanOpsShieldCard}
       {reliabilityOpsCard}

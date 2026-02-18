@@ -23,6 +23,12 @@ CACHE_PATH = os.getenv("NEUROEDGE_NODE_CACHE", ".neuroedge_cache.enc")
 CACHE_KEY = os.getenv("NEUROEDGE_NODE_KEY", "")
 MAX_CACHE = int(os.getenv("NEUROEDGE_NODE_CACHE_MAX", "200"))
 NODE_UPDATE_TOKEN = os.getenv("NEUROEDGE_NODE_UPDATE_TOKEN", "")
+NODE_CONSENT_TOKEN = os.getenv("NEUROEDGE_NODE_CONSENT_TOKEN", "")
+MESH_DISCOVERY_ENABLED = os.getenv("NEUROEDGE_MESH_DISCOVERY_ENABLED", "true").lower() == "true"
+NODE_CONSENT_COMPUTE = os.getenv("NEUROEDGE_NODE_CONSENT_COMPUTE", "false").lower() == "true"
+NODE_CONSENT_TRAINING = os.getenv("NEUROEDGE_NODE_CONSENT_TRAINING", "false").lower() == "true"
+NODE_LOW_POWER_MODE = os.getenv("NEUROEDGE_MESH_LOW_POWER_MODE", "true").lower() == "true"
+HEARTBEAT_INTERVAL_SEC = int(os.getenv("NEUROEDGE_MESH_HEARTBEAT_SEC", "25" if NODE_LOW_POWER_MODE else "10"))
 
 app = FastAPI(title="NeuroEdge Mesh Node", version="1.0.0")
 app.add_middleware(
@@ -37,6 +43,12 @@ _cache: Dict[str, Any] = {}
 _fernet: Optional[Fernet] = None
 _last_latency_ms: Optional[float] = None
 _inflight = 0
+_runtime_policy = {
+    "discoveryEnabled": bool(MESH_DISCOVERY_ENABLED),
+    "consentCompute": bool(NODE_CONSENT_COMPUTE),
+    "consentTraining": bool(NODE_CONSENT_TRAINING),
+    "lowPowerMode": bool(NODE_LOW_POWER_MODE),
+}
 
 
 def _init_crypto() -> None:
@@ -93,11 +105,15 @@ def _cache_set(key: str, value: Any) -> None:
 
 
 def _register_node() -> None:
+    if not bool(_runtime_policy.get("discoveryEnabled", True)):
+        return
     payload = {
         "id": NODE_ID,
         "baseUrl": f"http://localhost:{NODE_PORT}",
         "kind": NODE_KIND,
-        "capabilities": ["infer", "cache", "encrypted-storage"],
+        "capabilities": ["mesh-discovery", "cache", "encrypted-storage"]
+        + (["infer"] if bool(_runtime_policy.get("consentCompute")) else []),
+        "policy": dict(_runtime_policy),
     }
     try:
         httpx.post(f"{ORCHESTRATOR_URL}/mesh/register", json=payload, timeout=5.0)
@@ -107,6 +123,9 @@ def _register_node() -> None:
 
 def _heartbeat_loop() -> None:
     while True:
+        if not bool(_runtime_policy.get("discoveryEnabled", True)):
+            time.sleep(max(5, HEARTBEAT_INTERVAL_SEC))
+            continue
         try:
             httpx.post(
                 f"{ORCHESTRATOR_URL}/mesh/heartbeat",
@@ -122,12 +141,13 @@ def _heartbeat_loop() -> None:
                     "latency_ms": _last_latency_ms,
                     "load": _inflight,
                     "ts": time.time(),
+                    "policy": dict(_runtime_policy),
                 },
                 timeout=5.0,
             )
         except Exception:
             print("[edge-node] heartbeat/metrics push failed")
-        time.sleep(10)
+        time.sleep(max(5, HEARTBEAT_INTERVAL_SEC))
 
 
 @app.on_event("startup")
@@ -141,7 +161,12 @@ def _on_startup() -> None:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok", "node": NODE_ID, "kind": NODE_KIND}
+    return {
+        "status": "ok",
+        "node": NODE_ID,
+        "kind": NODE_KIND,
+        "mesh_policy": dict(_runtime_policy),
+    }
 
 
 @app.post("/infer")
@@ -149,6 +174,12 @@ def infer(payload: Any = Body(default=None)) -> Dict[str, Any]:
     """
     Proxy inference to the local ML service on this node.
     """
+    if not bool(_runtime_policy.get("consentCompute")):
+        return {
+            "status": "blocked",
+            "error": "compute consent required",
+            "policy": dict(_runtime_policy),
+        }
     try:
         global _last_latency_ms, _inflight
         _inflight += 1
@@ -167,6 +198,29 @@ def infer(payload: Any = Body(default=None)) -> Dict[str, Any]:
     except Exception as exc:
         _inflight = max(0, _inflight - 1)
         return {"status": "error", "error": str(exc)}
+
+
+@app.get("/consent/status")
+def consent_status() -> Dict[str, Any]:
+    return {"status": "ok", "node": NODE_ID, "policy": dict(_runtime_policy)}
+
+
+@app.post("/consent/update")
+def consent_update(payload: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+    token = (payload or {}).get("token")
+    if NODE_CONSENT_TOKEN and token != NODE_CONSENT_TOKEN:
+        return {"status": "error", "error": "unauthorized"}
+    patch = (payload or {}).get("policy") or {}
+    if "discoveryEnabled" in patch:
+        _runtime_policy["discoveryEnabled"] = bool(patch.get("discoveryEnabled"))
+    if "consentCompute" in patch:
+        _runtime_policy["consentCompute"] = bool(patch.get("consentCompute"))
+    if "consentTraining" in patch:
+        _runtime_policy["consentTraining"] = bool(patch.get("consentTraining"))
+    if "lowPowerMode" in patch:
+        _runtime_policy["lowPowerMode"] = bool(patch.get("lowPowerMode"))
+    _register_node()
+    return {"status": "ok", "policy": dict(_runtime_policy)}
 
 
 @app.post("/update")

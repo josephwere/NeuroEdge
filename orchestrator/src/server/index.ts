@@ -165,6 +165,64 @@ function actorDashboardIdentity(req: Request): { userId: string; userName: strin
   };
 }
 
+function defaultOwnerComputePolicy() {
+  return {
+    meshDiscoveryEnabled: true,
+    lowPowerMode: true,
+    computeExecutionConsent: false,
+    trainingConsent: false,
+    backgroundOnly: true,
+    updatedAt: Date.now(),
+  };
+}
+
+function normalizeOwnerComputePolicy(input: Record<string, any> | null | undefined) {
+  const base = defaultOwnerComputePolicy();
+  const merged: Record<string, any> = { ...base, ...(input || {}) };
+  return {
+    userId: String(merged.userId || "").trim().toLowerCase(),
+    userName: String(merged.userName || "").trim(),
+    orgId: String(merged.orgId || "").trim(),
+    meshDiscoveryEnabled: Boolean(merged.meshDiscoveryEnabled),
+    lowPowerMode: Boolean(merged.lowPowerMode),
+    computeExecutionConsent: Boolean(merged.computeExecutionConsent),
+    trainingConsent: Boolean(merged.trainingConsent),
+    backgroundOnly: Boolean(merged.backgroundOnly),
+    updatedAt: Number(merged.updatedAt || Date.now()),
+  };
+}
+
+function ownerEligibleForComputeRewards(policy: Record<string, any> | null | undefined): boolean {
+  const p = normalizeOwnerComputePolicy(policy || {});
+  return Boolean(p.computeExecutionConsent || p.trainingConsent);
+}
+
+function applyOwnerConsentToDevice(
+  device: Record<string, any>,
+  policy: Record<string, any> | null | undefined
+): Record<string, any> {
+  const p = normalizeOwnerComputePolicy(policy || {});
+  const canCompute = Boolean(p.computeExecutionConsent);
+  if (canCompute) {
+    return {
+      ...device,
+      meshDiscoveryEnabled: p.meshDiscoveryEnabled,
+      lowPowerMode: p.lowPowerMode,
+      status: String(device.status || "") === "mesh_only" ? "active" : device.status,
+      pauseReason:
+        String(device.pauseReason || "") === "consent_required" ? "" : String(device.pauseReason || ""),
+    };
+  }
+  return {
+    ...device,
+    computeEnabled: false,
+    status: ["suspended", "paused"].includes(String(device.status || "")) ? device.status : "mesh_only",
+    pauseReason: String(device.pauseReason || "consent_required"),
+    meshDiscoveryEnabled: p.meshDiscoveryEnabled,
+    lowPowerMode: p.lowPowerMode,
+  };
+}
+
 function verifyPrivilegedDevicePolicy(req: Request): { ok: true } | { ok: false; status: number; error: string; details?: string } {
   if (isFounder(req)) return { ok: true };
   const role = actorRole(req);
@@ -866,6 +924,7 @@ function readDashboardSummary() {
     },
     computeDonation: {
       ownerDevices: [],
+      ownerPolicies: [],
       ownerPayoutProfiles: [],
       payoutRequests: [],
       verificationChallenges: [],
@@ -1047,6 +1106,53 @@ function readDashboardSummary() {
       updatedAt: Date.now(),
     },
     neuroExpansionNotifications: [],
+    meshExpansion: {
+      assistants: [
+        {
+          id: "mesh-architect",
+          name: "Mesh Architect",
+          status: "active",
+          focus: ["topology", "routing", "node-health", "latency-optimization"],
+          canPropose: true,
+          canMerge: false,
+          updatedAt: Date.now(),
+        },
+        {
+          id: "mesh-task-orchestrator",
+          name: "Task Orchestrator",
+          status: "active",
+          focus: ["distributed-tasks", "failover", "retry"],
+          canPropose: true,
+          canMerge: false,
+          updatedAt: Date.now(),
+        },
+      ],
+      policy: {
+        enabled: true,
+        autoScanEnabled: true,
+        lowPowerDefault: true,
+        discoveryDefault: true,
+        requireFounderMergeApproval: true,
+        taskExecutionEnabled: true,
+        maxTaskRetries: 2,
+      },
+      proposals: [],
+      tasks: [],
+      scans: [],
+      p2p: {
+        peers: [],
+        links: [],
+        gossipLog: [],
+        packets: [],
+        policy: {
+          enabled: true,
+          allowStoreAndForward: true,
+          maxHops: 8,
+          gossipFanout: 3,
+        },
+      },
+      updatedAt: Date.now(),
+    },
     deviceProtection: {
       policy: {
         enabled: true,
@@ -1107,6 +1213,83 @@ function mergeDashboardSection(section: string, data: any) {
   return next;
 }
 
+function normalizeMeshExpansionSection(section: Record<string, any>): Record<string, any> {
+  const p2p = (section.p2p || {}) as Record<string, any>;
+  return {
+    assistants: Array.isArray(section.assistants) ? section.assistants : [],
+    policy: {
+      enabled: true,
+      autoScanEnabled: true,
+      lowPowerDefault: true,
+      discoveryDefault: true,
+      requireFounderMergeApproval: true,
+      taskExecutionEnabled: true,
+      maxTaskRetries: 2,
+      ...(section.policy || {}),
+    },
+    proposals: Array.isArray(section.proposals) ? section.proposals : [],
+    tasks: Array.isArray(section.tasks) ? section.tasks : [],
+    scans: Array.isArray(section.scans) ? section.scans : [],
+    relayMessages: Array.isArray(section.relayMessages) ? section.relayMessages : [],
+    p2p: {
+      peers: Array.isArray(p2p.peers) ? p2p.peers : [],
+      links: Array.isArray(p2p.links) ? p2p.links : [],
+      gossipLog: Array.isArray(p2p.gossipLog) ? p2p.gossipLog : [],
+      packets: Array.isArray(p2p.packets) ? p2p.packets : [],
+      policy: {
+        enabled: true,
+        allowStoreAndForward: true,
+        maxHops: 8,
+        gossipFanout: 3,
+        ...(p2p.policy || {}),
+      },
+    },
+    updatedAt: Number(section.updatedAt || Date.now()),
+  };
+}
+
+function buildP2PAdjacency(peers: any[], links: any[]): Map<string, string[]> {
+  const activePeers = new Set(
+    (Array.isArray(peers) ? peers : [])
+      .filter((p: any) => String(p.status || "active") === "active")
+      .map((p: any) => String(p.id || ""))
+      .filter(Boolean)
+  );
+  const adj = new Map<string, string[]>();
+  for (const id of activePeers) adj.set(id, []);
+  for (const link of Array.isArray(links) ? links : []) {
+    const a = String(link.from || "");
+    const b = String(link.to || "");
+    if (!a || !b) continue;
+    if (String(link.status || "active") !== "active") continue;
+    if (!activePeers.has(a) || !activePeers.has(b)) continue;
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a)!.push(b);
+    adj.get(b)!.push(a);
+  }
+  return adj;
+}
+
+function findP2PRoute(adj: Map<string, string[]>, from: string, to: string, maxHops: number): string[] {
+  if (!adj.has(from) || !adj.has(to)) return [];
+  if (from === to) return [from];
+  const queue: Array<{ node: string; path: string[] }> = [{ node: from, path: [from] }];
+  const seen = new Set<string>([from]);
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.path.length - 1 > Math.max(1, maxHops)) continue;
+    for (const nxt of adj.get(current.node) || []) {
+      if (seen.has(nxt)) continue;
+      const path = [...current.path, nxt];
+      if (nxt === to) return path;
+      seen.add(nxt);
+      queue.push({ node: nxt, path });
+    }
+  }
+  return [];
+}
+
 type AccessAction = "allow" | "suspend" | "revoke";
 const DASHBOARD_PERMISSION_CATALOG = [
   { id: "dashboard.bootstrap", group: "dashboard", label: "View Dashboard Data", scope: "admin:read", roles: ["founder", "admin"] },
@@ -1130,6 +1313,7 @@ const DASHBOARD_PERMISSION_CATALOG = [
   { id: "user.protection.manage", group: "device_security", label: "Manage Own Device Protection", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
   { id: "twin.mobile.manage", group: "twin", label: "Manage Mobile Twin Bridge", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
   { id: "neuroexpansion.manage", group: "platform", label: "NeuroExpansion Build + Merge", scope: "admin:write", roles: ["founder", "admin", "developer"] },
+  { id: "mesh_expansion.manage", group: "mesh", label: "Mesh Expansion Engine + Tasks", scope: "admin:write", roles: ["founder", "admin"] },
 ];
 
 function auditDashboardAction(req: Request, domain: string, action: string, payload: Record<string, any> = {}) {
@@ -3224,8 +3408,11 @@ export function startServer(
       const identity = actorDashboardIdentity(req);
       const compute = (dashboard.computeDonation || {}) as Record<string, any>;
       const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
       const payoutProfiles = Array.isArray(compute.ownerPayoutProfiles) ? compute.ownerPayoutProfiles : [];
       const payoutRequests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const ownerPolicy =
+        ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || null;
       const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
       const wallet =
         (Array.isArray(ledger.wallets) ? ledger.wallets : []).find(
@@ -3235,13 +3422,69 @@ export function startServer(
         success: true,
         owner: identity,
         guardrails: compute.resourceGuardrails || {},
-        devices: devices.filter((d: any) => String(d.ownerUserId || "").toLowerCase() === identity.userId),
+        ownerPolicy: normalizeOwnerComputePolicy(ownerPolicy),
+        devices: devices
+          .filter((d: any) => String(d.ownerUserId || "").toLowerCase() === identity.userId)
+          .map((d: any) => applyOwnerConsentToDevice(d, ownerPolicy)),
         payoutProfile:
           payoutProfiles.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || null,
         payoutRequests: payoutRequests.filter((p: any) => String(p.userId || "").toLowerCase() === identity.userId),
         wallet,
         chainPayoutConfig: compute.chainPayoutConfig || {},
       });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/policy/save",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const incoming = (req.body?.policy || {}) as Record<string, any>;
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
+      const nextPolicy = normalizeOwnerComputePolicy({
+        ...(ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || {}),
+        ...incoming,
+        userId: identity.userId,
+        userName: identity.userName,
+        orgId: identity.orgId,
+        updatedAt: Date.now(),
+      });
+      const nextPolicies = ownerPolicies.some((p: any) => String(p.userId || "").toLowerCase() === identity.userId)
+        ? ownerPolicies.map((p: any) =>
+            String(p.userId || "").toLowerCase() === identity.userId ? { ...p, ...nextPolicy } : p
+          )
+        : [{ ...nextPolicy }, ...ownerPolicies];
+      const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const nextDevices = devices.map((d: any) =>
+        String(d.ownerUserId || "").toLowerCase() === identity.userId
+          ? applyOwnerConsentToDevice(
+              {
+                ...d,
+                updatedAt: Date.now(),
+              },
+              nextPolicy
+            )
+          : d
+      );
+      const nextCompute = {
+        ...compute,
+        ownerPolicies: nextPolicies,
+        ownerDevices: nextDevices,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", "policy_save", {
+        computeExecutionConsent: nextPolicy.computeExecutionConsent,
+        trainingConsent: nextPolicy.trainingConsent,
+        meshDiscoveryEnabled: nextPolicy.meshDiscoveryEnabled,
+        lowPowerMode: nextPolicy.lowPowerMode,
+      });
+      res.json({ success: true, ownerPolicy: nextPolicy, computeDonation: nextCompute });
     }
   );
 
@@ -3260,6 +3503,10 @@ export function startServer(
       const compute = (dashboard.computeDonation || {}) as Record<string, any>;
       const guardrails = (compute.resourceGuardrails || {}) as Record<string, any>;
       const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
+      const ownerPolicy =
+        ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) ||
+        normalizeOwnerComputePolicy({});
       const exists = devices.some((d: any) => String(d.id) === id && String(d.ownerUserId).toLowerCase() === identity.userId);
       const now = Date.now();
       const baseDevice = {
@@ -3269,19 +3516,25 @@ export function startServer(
         ownerUserId: identity.userId,
         ownerUserName: identity.userName,
         ownerOrg: identity.orgId,
-        status: String(input.status || "active"),
+        status: String(input.status || "mesh_ready"),
         installToken: String(input.installToken || `inst-${Math.random().toString(36).slice(2, 12)}`),
         enrolledAt: Number(input.enrolledAt || now),
-        computeEnabled: Boolean(input.computeEnabled ?? true),
+        computeEnabled: Boolean(input.computeEnabled ?? false),
         pauseReason: String(input.pauseReason || ""),
         stats: {},
         updatedAt: now,
       };
-      const nextDevice = applyComputeGuardrails(baseDevice, input?.stats || {}, guardrails, now);
+      const nextDevice = applyOwnerConsentToDevice(
+        applyComputeGuardrails(baseDevice, input?.stats || {}, guardrails, now),
+        ownerPolicy
+      );
       const nextDevices = exists
         ? devices.map((d: any) =>
             String(d.id) === id && String(d.ownerUserId).toLowerCase() === identity.userId
-              ? applyComputeGuardrails({ ...d, ...baseDevice }, input?.stats || {}, guardrails, now)
+              ? applyOwnerConsentToDevice(
+                  applyComputeGuardrails({ ...d, ...baseDevice }, input?.stats || {}, guardrails, now),
+                  ownerPolicy
+                )
               : d
           )
         : [nextDevice, ...devices];
@@ -3306,6 +3559,10 @@ export function startServer(
       const compute = (dashboard.computeDonation || {}) as Record<string, any>;
       const guardrails = (compute.resourceGuardrails || {}) as Record<string, any>;
       const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
+      const ownerPolicy =
+        ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) ||
+        normalizeOwnerComputePolicy({});
       const target = devices.find(
         (d: any) => String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
       );
@@ -3315,7 +3572,7 @@ export function startServer(
       const now = Date.now();
       const nextDevices = devices.map((d: any) =>
         String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
-          ? applyComputeGuardrails(d, stats, guardrails, now)
+          ? applyOwnerConsentToDevice(applyComputeGuardrails(d, stats, guardrails, now), ownerPolicy)
           : d
       );
       const updated = nextDevices.find((d: any) => String(d.id) === id) || null;
@@ -3347,6 +3604,10 @@ export function startServer(
       const { dashboard } = readDashboardSummary();
       const compute = (dashboard.computeDonation || {}) as Record<string, any>;
       const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
+      const ownerPolicy =
+        ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) ||
+        normalizeOwnerComputePolicy({});
       const ownDevices = devices.filter((d: any) => String(d.ownerUserId || "").toLowerCase() === identity.userId);
       if (!ownDevices.some((d: any) => String(d.id) === id)) {
         return res.status(403).json({ error: "Forbidden", details: "You can manage only your own devices" });
@@ -3360,13 +3621,16 @@ export function startServer(
         const status = action === "pause" ? "paused" : action === "resume" ? "active" : "suspended";
         nextDevices = devices.map((d: any) =>
           String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
-            ? {
-                ...d,
-                status,
-                computeEnabled: action === "resume",
-                pauseReason: action === "pause" ? "owner_paused" : "",
-                updatedAt: Date.now(),
-              }
+            ? applyOwnerConsentToDevice(
+                {
+                  ...d,
+                  status,
+                  computeEnabled: action === "resume",
+                  pauseReason: action === "pause" ? "owner_paused" : "",
+                  updatedAt: Date.now(),
+                },
+                ownerPolicy
+              )
             : d
         );
       }
@@ -3517,6 +3781,16 @@ export function startServer(
       }
       const { dashboard } = readDashboardSummary();
       const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const ownerPolicies = Array.isArray(compute.ownerPolicies) ? compute.ownerPolicies : [];
+      const ownerPolicy =
+        ownerPolicies.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || null;
+      if (!ownerEligibleForComputeRewards(ownerPolicy)) {
+        return res.status(403).json({
+          error: "Payout eligibility requires compute execution or training consent",
+          code: "payout_not_eligible_without_mesh_or_training",
+          policy: normalizeOwnerComputePolicy(ownerPolicy),
+        });
+      }
       const requests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
       const budget = (compute.payoutBudget || {}) as Record<string, any>;
       const request = {
@@ -5005,6 +5279,670 @@ export function startServer(
     }
   );
 
+  app.get(
+    "/admin/dashboard/mesh-expansion/bootstrap",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      res.json({
+        success: true,
+        meshExpansion: section,
+        meshNodes: meshRegistry.list(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/policy/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const incoming = (req.body?.policy || {}) as Record<string, any>;
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const nextPolicy = {
+        ...section.policy,
+        enabled: Boolean(incoming.enabled ?? section.policy.enabled),
+        autoScanEnabled: Boolean(incoming.autoScanEnabled ?? section.policy.autoScanEnabled),
+        lowPowerDefault: Boolean(incoming.lowPowerDefault ?? section.policy.lowPowerDefault),
+        discoveryDefault: Boolean(incoming.discoveryDefault ?? section.policy.discoveryDefault),
+        requireFounderMergeApproval: Boolean(
+          incoming.requireFounderMergeApproval ?? section.policy.requireFounderMergeApproval
+        ),
+        taskExecutionEnabled: Boolean(incoming.taskExecutionEnabled ?? section.policy.taskExecutionEnabled),
+        maxTaskRetries: Math.max(0, Math.min(5, Number(incoming.maxTaskRetries ?? section.policy.maxTaskRetries ?? 2))),
+      };
+      const nextP2pPolicy = {
+        ...(section.p2p?.policy || {}),
+        enabled: Boolean(incoming?.p2p?.enabled ?? section.p2p?.policy?.enabled ?? true),
+        allowStoreAndForward: Boolean(
+          incoming?.p2p?.allowStoreAndForward ?? section.p2p?.policy?.allowStoreAndForward ?? true
+        ),
+        maxHops: Math.max(2, Math.min(32, Number(incoming?.p2p?.maxHops ?? section.p2p?.policy?.maxHops ?? 8))),
+        gossipFanout: Math.max(
+          1,
+          Math.min(10, Number(incoming?.p2p?.gossipFanout ?? section.p2p?.policy?.gossipFanout ?? 3))
+        ),
+      };
+      const next = {
+        ...section,
+        policy: nextPolicy,
+        p2p: {
+          ...(section.p2p || {}),
+          policy: nextP2pPolicy,
+        },
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "policy_save", { mesh: nextPolicy, p2p: nextP2pPolicy });
+      res.json({ success: true, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/p2p/peer/upsert",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const input = (req.body?.peer || {}) as Record<string, any>;
+      const id = String(input.id || `peer-${Date.now()}`).trim();
+      if (!id) return res.status(400).json({ error: "Missing peer id" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const peers = Array.isArray(section.p2p?.peers) ? section.p2p.peers : [];
+      const exists = peers.some((p: any) => String(p.id) === id);
+      const peer = {
+        id,
+        nodeId: String(input.nodeId || id),
+        label: String(input.label || id),
+        transport: String(input.transport || "hybrid"),
+        status: String(input.status || "active"),
+        bandwidthKbps: Math.max(1, Number(input.bandwidthKbps || 256)),
+        latencyMs: Math.max(0, Number(input.latencyMs || 0)),
+        batteryAware: Boolean(input.batteryAware ?? true),
+        lastSeen: Date.now(),
+      };
+      const nextPeers = exists ? peers.map((p: any) => (String(p.id) === id ? { ...p, ...peer } : p)) : [peer, ...peers];
+      const next = {
+        ...section,
+        p2p: { ...(section.p2p || {}), peers: nextPeers },
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", exists ? "p2p_peer_update" : "p2p_peer_add", { id });
+      res.json({ success: true, meshExpansion: next, peer });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/p2p/link/upsert",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const input = (req.body?.link || {}) as Record<string, any>;
+      const from = String(input.from || "").trim();
+      const to = String(input.to || "").trim();
+      if (!from || !to || from === to) return res.status(400).json({ error: "Invalid from/to for link" });
+      const id = String(input.id || `link-${from}-${to}`).trim();
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const links = Array.isArray(section.p2p?.links) ? section.p2p.links : [];
+      const exists = links.some((l: any) => String(l.id) === id);
+      const link = {
+        id,
+        from,
+        to,
+        status: String(input.status || "active"),
+        quality: Math.max(0, Math.min(1, Number(input.quality ?? 0.8))),
+        cost: Math.max(0, Number(input.cost ?? 1)),
+        lastUpdatedAt: Date.now(),
+      };
+      const nextLinks = exists ? links.map((l: any) => (String(l.id) === id ? { ...l, ...link } : l)) : [link, ...links];
+      const next = {
+        ...section,
+        p2p: { ...(section.p2p || {}), links: nextLinks },
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", exists ? "p2p_link_update" : "p2p_link_add", { id, from, to });
+      res.json({ success: true, meshExpansion: next, link });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/p2p/gossip",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const topic = String(req.body?.topic || "mesh.health").trim();
+      const payload = (req.body?.payload || {}) as Record<string, any>;
+      const fromPeerId = String(req.body?.fromPeerId || "").trim();
+      if (!topic) return res.status(400).json({ error: "Missing topic" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const peers = Array.isArray(section.p2p?.peers) ? section.p2p.peers : [];
+      const activePeers = peers.filter((p: any) => String(p.status || "active") === "active");
+      const fanout = Math.max(1, Math.min(10, Number(section.p2p?.policy?.gossipFanout || 3)));
+      const targets = activePeers
+        .filter((p: any) => String(p.id) !== fromPeerId)
+        .slice(0, fanout)
+        .map((p: any) => String(p.id));
+      const entry = {
+        id: `gossip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        topic,
+        payload,
+        fromPeerId: fromPeerId || "mesh-admin",
+        targets,
+        createdAt: Date.now(),
+      };
+      const next = {
+        ...section,
+        p2p: {
+          ...(section.p2p || {}),
+          gossipLog: [entry, ...(section.p2p?.gossipLog || [])].slice(0, 3000),
+        },
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      appendEvent({ type: "mesh.p2p.gossip", timestamp: Date.now(), payload: entry });
+      res.json({ success: true, gossip: entry, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/p2p/route/send",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const fromPeerId = String(req.body?.fromPeerId || "").trim();
+      const toPeerId = String(req.body?.toPeerId || "").trim();
+      const payload = req.body?.payload ?? {};
+      if (!fromPeerId || !toPeerId) return res.status(400).json({ error: "Missing fromPeerId or toPeerId" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const p2p = section.p2p || {};
+      const peers = Array.isArray(p2p.peers) ? p2p.peers : [];
+      const links = Array.isArray(p2p.links) ? p2p.links : [];
+      const maxHops = Math.max(2, Number(p2p.policy?.maxHops || 8));
+      const adj = buildP2PAdjacency(peers, links);
+      const route = findP2PRoute(adj, fromPeerId, toPeerId, maxHops);
+      const storeForward = Boolean(p2p.policy?.allowStoreAndForward ?? true);
+      const packet = {
+        id: `pkt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromPeerId,
+        toPeerId,
+        payload,
+        route,
+        status: route.length > 0 ? "delivered" : storeForward ? "queued" : "undeliverable",
+        hops: Math.max(0, route.length - 1),
+        createdAt: Date.now(),
+      };
+      const next = {
+        ...section,
+        p2p: {
+          ...p2p,
+          packets: [packet, ...(p2p.packets || [])].slice(0, 5000),
+        },
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      appendEvent({
+        type: "mesh.p2p.packet",
+        timestamp: Date.now(),
+        payload: { id: packet.id, status: packet.status, hops: packet.hops, fromPeerId, toPeerId },
+      });
+      res.json({ success: true, packet, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/scan",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const nodes = meshRegistry.list();
+      const online = nodes.filter((n) => n.online);
+      const consentedCompute = nodes.filter((n) => Boolean(n.consentCompute)).length;
+      const consentedTraining = nodes.filter((n) => Boolean(n.consentTraining)).length;
+      const avgLatencyMs = online.length
+        ? Number(
+            (
+              online.reduce((acc, n) => acc + Number(n.lastLatencyMs || 0), 0) /
+              Math.max(1, online.length)
+            ).toFixed(2)
+          )
+        : 0;
+      const scan = {
+        id: `mesh-scan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: Date.now(),
+        summary: {
+          totalNodes: nodes.length,
+          onlineNodes: online.length,
+          offlineNodes: Math.max(0, nodes.length - online.length),
+          consentedComputeNodes: consentedCompute,
+          consentedTrainingNodes: consentedTraining,
+          avgLatencyMs,
+        },
+        findings: [
+          online.length === 0 ? "No live mesh nodes currently online." : "",
+          consentedCompute === 0
+            ? "No nodes have compute consent; mesh can only run discovery until users opt in."
+            : "",
+          consentedTraining === 0
+            ? "No nodes have training consent; federated training signals are blocked."
+            : "",
+        ].filter(Boolean),
+        recommendations: [
+          "Enable compute consent only for devices that accept rewards and task execution.",
+          "Keep discovery and low-power mode enabled to maintain offline communication fabric.",
+          "Use task retries and failover to mimic cloud-grade execution resilience.",
+        ],
+      };
+      const next = {
+        ...section,
+        scans: [scan, ...section.scans].slice(0, 300),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "scan", scan.summary);
+      res.json({ success: true, scan, meshExpansion: next, meshNodes: nodes });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/propose",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const assistantId = String(req.body?.assistantId || "mesh-architect").trim();
+      const goal = String(req.body?.goal || "improve mesh resilience").trim();
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const nodes = meshRegistry.list();
+      const proposal = {
+        id: `mesh-proposal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        assistantId,
+        goal,
+        status: "pending_founder_approval",
+        createdAt: Date.now(),
+        createdBy: String(req.auth?.sub || "unknown"),
+        plan: {
+          generatedModules: [
+            "orchestrator/src/mesh/optimizer/topology_optimizer.ts",
+            "orchestrator/src/mesh/reliability/failover_scheduler.ts",
+          ],
+          steps: [
+            "scan mesh topology and identify blind spots",
+            "propose failover + retry strategy for offline-first execution",
+            "require founder approval before merge",
+          ],
+          impactEstimate: {
+            currentNodes: nodes.length,
+            targetOfflineResiliencePct: 99.0,
+          },
+        },
+        review: {
+          requiredRole: "founder",
+          approvedBy: "",
+          approvedAt: 0,
+          rejectedReason: "",
+        },
+      };
+      const next = {
+        ...section,
+        proposals: [proposal, ...section.proposals].slice(0, 1000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "proposal_create", {
+        id: proposal.id,
+        assistantId,
+        goal,
+      });
+      res.json({ success: true, proposal, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/review",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.id || "").trim();
+      const decision = String(req.body?.decision || "").toLowerCase();
+      const reason = String(req.body?.reason || "").trim();
+      if (!id || !["approve", "reject"].includes(decision)) {
+        return res.status(400).json({ error: "Missing id or invalid decision" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const role = actorRole(req);
+      const founderRequired = Boolean(section.policy?.requireFounderMergeApproval);
+      if (decision === "approve" && founderRequired && role !== "founder") {
+        return res.status(403).json({
+          error: "Founder approval required",
+          details: "Only founder can approve mesh expansion proposals when strict founder gate is enabled.",
+        });
+      }
+      const proposals = section.proposals.map((p: any) => {
+        if (String(p.id) !== id) return p;
+        if (decision === "approve") {
+          return {
+            ...p,
+            status: "approved",
+            review: {
+              ...(p.review || {}),
+              approvedBy: String(req.auth?.sub || "unknown"),
+              approvedAt: Date.now(),
+              rejectedReason: "",
+            },
+          };
+        }
+        return {
+          ...p,
+          status: "rejected",
+          review: {
+            ...(p.review || {}),
+            rejectedReason: reason || "rejected",
+          },
+        };
+      });
+      const target = proposals.find((p: any) => String(p.id) === id);
+      if (!target) return res.status(404).json({ error: "Proposal not found" });
+      const next = {
+        ...section,
+        proposals,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "proposal_review", { id, decision, reason });
+      res.json({ success: true, proposal: target, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/merge",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "Missing proposal id" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const target = section.proposals.find((p: any) => String(p.id) === id);
+      if (!target) return res.status(404).json({ error: "Proposal not found" });
+      if (!["approved", "merged"].includes(String(target.status || ""))) {
+        return res.status(400).json({ error: "Proposal must be approved before merge" });
+      }
+      const generatedCode = [
+        `// Mesh Expansion Proposal: ${target.id}`,
+        `// Goal: ${target.goal}`,
+        ...(Array.isArray(target?.plan?.steps) ? target.plan.steps.map((s: string) => `// - ${s}`) : []),
+        "",
+        "export const meshExpansionProposal = {",
+        `  id: ${JSON.stringify(String(target.id))},`,
+        `  goal: ${JSON.stringify(String(target.goal || ""))},`,
+        `  mergedAt: ${Date.now()},`,
+        `  mergedBy: ${JSON.stringify(String(req.auth?.sub || "unknown"))},`,
+        "};",
+      ].join("\n");
+      const handoff = submitNeuroExpansion({
+        title: `Mesh Expansion ${target.id}`,
+        featureText: `Mesh expansion proposal merged via founder approval.\nGoal: ${String(target.goal || "")}`,
+        codeText: generatedCode,
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        orgId: String(req.auth?.orgId || "personal"),
+        workspaceId: String(req.auth?.workspaceId || "default"),
+      });
+      const neuroExpansionSubmissionId = handoff.ok ? String(handoff.submission.id) : "";
+      const proposals = section.proposals.map((p: any) =>
+        String(p.id) === id
+          ? {
+              ...p,
+              status: "merged",
+              mergedAt: Date.now(),
+              mergedBy: String(req.auth?.sub || "unknown"),
+              neuroExpansionSubmissionId,
+            }
+          : p
+      );
+      const next = {
+        ...section,
+        proposals,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "proposal_merge", { id });
+      res.json({
+        success: true,
+        proposal: proposals.find((p: any) => String(p.id) === id) || null,
+        neuroExpansionSubmissionId,
+        mergeNote:
+          "Merged into mesh roadmap and handed off to NeuroExpansion queue for guarded patch flow.",
+        meshExpansion: next,
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/task/submit-async",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const command = String(req.body?.command || "").trim();
+      const payload = (req.body?.payload || {}) as Record<string, any>;
+      if (!command) return res.status(400).json({ error: "Missing command" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      if (!Boolean(section.policy?.taskExecutionEnabled)) {
+        return res.status(403).json({ error: "Mesh task execution is disabled by policy" });
+      }
+      const task = {
+        id: `mesh-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        command,
+        payload,
+        targetNodeId: "",
+        status: "queued",
+        attempts: 0,
+        maxRetries: Math.max(0, Number(section.policy?.maxTaskRetries || 2)),
+        createdBy: String(req.auth?.sub || "unknown"),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        result: null as any,
+      };
+      const next = {
+        ...section,
+        tasks: [task, ...section.tasks].slice(0, 4000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "task_queue", { id: task.id, command });
+      res.json({ success: true, task, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/task/dispatch",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const limit = Math.max(1, Math.min(30, Number(req.body?.limit || 5)));
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      const tasks = Array.isArray(section.tasks) ? [...section.tasks] : [];
+      const queued = tasks.filter((t: any) => String(t.status) === "queued").slice(0, limit);
+      const onlineNodes = meshRegistry
+        .list()
+        .filter((n) => Boolean(n.online) && Boolean(n.consentCompute) && (n.capabilities || []).includes("infer"));
+      if (onlineNodes.length === 0) {
+        return res.status(503).json({ error: "No compute-consented mesh node available for dispatch" });
+      }
+      let rr = 0;
+      const updated: any[] = [];
+      for (const task of queued) {
+        let attempts = Number(task.attempts || 0);
+        let success = false;
+        let lastErr = "";
+        let targetNodeId = String(task.targetNodeId || "");
+        while (!success && attempts <= Number(task.maxRetries || 0)) {
+          const node = onlineNodes[rr % onlineNodes.length];
+          rr += 1;
+          attempts += 1;
+          targetNodeId = node.id;
+          try {
+            const base = String(node.baseUrl || "").replace(/\/$/, "");
+            const run = await axios.post(
+              `${base}/infer`,
+              { command: task.command, ...(task.payload || {}) },
+              { timeout: 20000 }
+            );
+            updated.push({
+              ...task,
+              status: "completed",
+              attempts,
+              targetNodeId,
+              result: run.data,
+              updatedAt: Date.now(),
+            });
+            success = true;
+          } catch (err: any) {
+            lastErr = err?.message || String(err);
+          }
+        }
+        if (!success) {
+          updated.push({
+            ...task,
+            status: "failed",
+            attempts,
+            targetNodeId,
+            result: { error: lastErr || "dispatch failed" },
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      const updatedById = new Map(updated.map((u: any) => [String(u.id), u]));
+      const nextTasks = tasks.map((t: any) => updatedById.get(String(t.id)) || t);
+      const next = {
+        ...section,
+        tasks: nextTasks,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "task_dispatch", {
+        processed: updated.length,
+        completed: updated.filter((u: any) => String(u.status) === "completed").length,
+      });
+      res.json({ success: true, updated, meshExpansion: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/mesh-expansion/task/submit",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const command = String(req.body?.command || "").trim();
+      const payload = (req.body?.payload || {}) as Record<string, any>;
+      if (!command) return res.status(400).json({ error: "Missing command" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+      if (!Boolean(section.policy?.taskExecutionEnabled)) {
+        return res.status(403).json({ error: "Mesh task execution is disabled by policy" });
+      }
+      const node = meshRegistry.pickNodeWhere(
+        (n) => Boolean(n.online) && Boolean(n.consentCompute) && (n.capabilities || []).includes("infer")
+      );
+      if (!node) {
+        return res.status(503).json({
+          error: "No compute-consented mesh node available",
+          details: "Tasks require a live node with compute consent enabled.",
+        });
+      }
+      const task = {
+        id: `mesh-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        command,
+        payload,
+        targetNodeId: node.id,
+        status: "running",
+        attempts: 1,
+        maxRetries: Math.max(0, Number(section.policy?.maxTaskRetries || 2)),
+        createdBy: String(req.auth?.sub || "unknown"),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        result: null as any,
+      };
+      let finalTask = { ...task };
+      try {
+        const base = String(node.baseUrl || "").replace(/\/$/, "");
+        const execResp = await axios.post(
+          `${base}/execute`,
+          { command, args: Array.isArray(payload?.args) ? payload.args : [], payload },
+          { timeout: 20000 }
+        );
+        finalTask = {
+          ...finalTask,
+          status: "completed",
+          result: execResp.data,
+          updatedAt: Date.now(),
+        };
+      } catch (err: any) {
+        try {
+          const inferResp = await axios.post(
+            `${String(node.baseUrl || "").replace(/\/$/, "")}/infer`,
+            { command, ...(payload || {}) },
+            { timeout: 20000 }
+          );
+          finalTask = {
+            ...finalTask,
+            status: "completed",
+            result: inferResp.data,
+            updatedAt: Date.now(),
+          };
+        } catch (err2: any) {
+          finalTask = {
+            ...finalTask,
+            status: "failed",
+            result: {
+              error: err2?.message || err?.message || "Mesh task execution failed",
+            },
+            updatedAt: Date.now(),
+          };
+        }
+      }
+      const next = {
+        ...section,
+        tasks: [finalTask, ...section.tasks].slice(0, 2000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("meshExpansion", next);
+      auditDashboardAction(req, "mesh_expansion", "task_submit", {
+        id: finalTask.id,
+        command,
+        targetNodeId: node.id,
+        status: finalTask.status,
+      });
+      res.json({ success: true, task: finalTask, meshExpansion: next });
+    }
+  );
+
   app.post("/admin/dashboard/enterprise/departments/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
     const input = req.body?.department || {};
     const { dashboard } = readDashboardSummary();
@@ -6157,18 +7095,25 @@ export function startServer(
   );
 
   app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
-    const { id, baseUrl, kind, capabilities } = req.body || {};
+    const { id, baseUrl, kind, capabilities, policy } = req.body || {};
     if (!id || !baseUrl) {
       return res.status(400).json({ error: "Missing id or baseUrl" });
     }
+    const nodePolicy = {
+      consentCompute: Boolean(policy?.consentCompute),
+      consentTraining: Boolean(policy?.consentTraining),
+      discoveryEnabled: Boolean(policy?.discoveryEnabled ?? true),
+      lowPowerMode: Boolean(policy?.lowPowerMode ?? true),
+    };
     meshRegistry.register({
       id,
       baseUrl,
       kind: kind || "unknown",
       capabilities: Array.isArray(capabilities) ? capabilities : [],
+      ...nodePolicy,
     } as InferenceNode);
     setMeshNodesOnline(meshRegistry.list().filter((n) => n.online).length);
-    res.json({ status: "ok" });
+    res.json({ status: "ok", policy: nodePolicy });
   });
 
   app.post("/mesh/heartbeat", requireScope("mesh:write"), (req: Request, res: Response) => {
@@ -6180,13 +7125,28 @@ export function startServer(
   });
 
   app.post("/mesh/metrics", requireScope("mesh:write"), (req: Request, res: Response) => {
-    const { id, latency_ms, load, cache_size } = req.body || {};
+    const { id, latency_ms, load, cache_size, policy } = req.body || {};
     if (!id) return res.status(400).json({ error: "Missing id" });
     meshRegistry.updateMetrics(id, {
       latencyMs: typeof latency_ms === "number" ? latency_ms : undefined,
       load: typeof load === "number" ? load : undefined,
       cacheSize: typeof cache_size === "number" ? cache_size : undefined,
     });
+    if (policy && typeof policy === "object") {
+      const node = meshRegistry.get(id);
+      if (node) {
+        meshRegistry.register({
+          id: node.id,
+          baseUrl: node.baseUrl,
+          kind: node.kind,
+          capabilities: node.capabilities || [],
+          consentCompute: Boolean(policy?.consentCompute ?? node.consentCompute),
+          consentTraining: Boolean(policy?.consentTraining ?? node.consentTraining),
+          discoveryEnabled: Boolean(policy?.discoveryEnabled ?? node.discoveryEnabled ?? true),
+          lowPowerMode: Boolean(policy?.lowPowerMode ?? node.lowPowerMode ?? true),
+        });
+      }
+    }
     setMeshNodesOnline(meshRegistry.list().filter((n) => n.online).length);
     res.json({ status: "ok" });
   });
@@ -6194,6 +7154,17 @@ export function startServer(
   app.post("/mesh/train-signal", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, signal } = req.body || {};
     if (!id || !signal) return res.status(400).json({ error: "Missing id or signal" });
+    const node = meshRegistry.get(id);
+    if (!node || !node.online) {
+      return res.status(404).json({ error: "Node not found or offline" });
+    }
+    if (!Boolean(node.consentTraining)) {
+      return res.status(403).json({
+        error: "Training consent required",
+        code: "mesh_training_consent_required",
+        node: id,
+      });
+    }
     appendEvent({
       type: "mesh.train_signal",
       timestamp: Date.now(),
@@ -6236,9 +7207,15 @@ export function startServer(
   });
 
   app.post("/mesh/infer", requireWorkspace, requireScope("ai:infer"), async (req: Request, res: Response) => {
-    const node = meshRegistry.pickNode();
+    const node = meshRegistry.pickNodeWhere(
+      (n) => Boolean(n.discoveryEnabled ?? true) && Boolean(n.consentCompute) && (n.capabilities || []).includes("infer")
+    );
     if (!node) {
-      return res.status(503).json({ error: "No mesh nodes available" });
+      return res.status(403).json({
+        error: "No consented mesh nodes available",
+        code: "mesh_compute_consent_required",
+        detail: "Mesh discovery can run in low-power mode, but compute inference requires explicit consent.",
+      });
     }
     try {
       const response = await axios.post(`${node.baseUrl.replace(/\/$/, "")}/infer`, req.body || {});
@@ -6246,6 +7223,39 @@ export function startServer(
     } catch (err: any) {
       res.status(502).json({ error: "Mesh node inference failed", detail: err?.message || String(err) });
     }
+  });
+
+  app.post("/mesh/message/relay", requireScope("mesh:write"), (req: Request, res: Response) => {
+    const fromNodeId = String(req.body?.fromNodeId || "").trim();
+    const toNodeId = String(req.body?.toNodeId || "").trim();
+    const channel = String(req.body?.channel || "mesh").trim().toLowerCase();
+    const message = String(req.body?.message || "").trim();
+    if (!fromNodeId || !toNodeId || !message) {
+      return res.status(400).json({ error: "Missing fromNodeId, toNodeId, or message" });
+    }
+    const { dashboard } = readDashboardSummary();
+    const section = normalizeMeshExpansionSection((dashboard.meshExpansion || {}) as Record<string, any>);
+    const rec = {
+      id: `mesh-msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fromNodeId,
+      toNodeId,
+      channel,
+      message,
+      status: "relayed",
+      createdAt: Date.now(),
+    };
+    const next = {
+      ...section,
+      relayMessages: [rec, ...(section.relayMessages || [])].slice(0, 5000),
+      updatedAt: Date.now(),
+    };
+    mergeDashboardSection("meshExpansion", next);
+    appendEvent({
+      type: "mesh.message.relay",
+      timestamp: Date.now(),
+      payload: { fromNodeId, toNodeId, channel, messageLen: message.length },
+    });
+    res.json({ status: "ok", relay: rec });
   });
 
   app.post("/research", requireWorkspace, requireScope("research:run"), researchLimiter, async (req: Request, res: Response) => {

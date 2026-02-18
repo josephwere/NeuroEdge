@@ -7,6 +7,10 @@ export interface InferenceNode {
   capabilities: string[];
   lastSeen: number;
   online: boolean;
+  consentCompute?: boolean;
+  consentTraining?: boolean;
+  discoveryEnabled?: boolean;
+  lowPowerMode?: boolean;
   lastLatencyMs?: number;
   load?: number;
   cacheSize?: number;
@@ -24,6 +28,10 @@ export class InferenceRegistry {
       online: true,
       capabilities: node.capabilities || [],
       kind: node.kind || "unknown",
+      consentCompute: Boolean(node.consentCompute),
+      consentTraining: Boolean(node.consentTraining),
+      discoveryEnabled: Boolean(node.discoveryEnabled ?? true),
+      lowPowerMode: Boolean(node.lowPowerMode ?? true),
     };
     if (existing) {
       this.nodes.set(node.id, { ...existing, ...next });
@@ -55,6 +63,10 @@ export class InferenceRegistry {
     return Array.from(this.nodes.values());
   }
 
+  get(id: string): InferenceNode | null {
+    return this.nodes.get(id) || null;
+  }
+
   updateMetrics(id: string, metrics: { latencyMs?: number; load?: number; cacheSize?: number }) {
     const node = this.nodes.get(id);
     if (!node) return;
@@ -69,6 +81,23 @@ export class InferenceRegistry {
   pickNode(): InferenceNode | null {
     this.markOfflineIfStale();
     const online = this.list().filter((n) => n.online);
+    if (online.length === 0) return null;
+    const scored = online.map((n) => ({
+      node: n,
+      score:
+        (n.lastLatencyMs ?? 500) +
+        (n.load ?? 0) * 100 +
+        (n.cacheSize ?? 0) * 0.1,
+    }));
+    scored.sort((a, b) => a.score - b.score);
+    const node = scored[this.rrIndex % scored.length].node;
+    this.rrIndex += 1;
+    return node;
+  }
+
+  pickNodeWhere(filter: (node: InferenceNode) => boolean): InferenceNode | null {
+    this.markOfflineIfStale();
+    const online = this.list().filter((n) => n.online && filter(n));
     if (online.length === 0) return null;
     const scored = online.map((n) => ({
       node: n,
