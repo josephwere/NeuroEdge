@@ -3,6 +3,16 @@ import { useUI } from "@/services/uiStore";
 import { loadBranding } from "@/services/branding";
 
 type AuthMethod = "email" | "google" | "github" | "phone";
+type LoginRole = "user" | "founder" | "admin" | "developer" | "enterprise";
+type LoginPlan = "free" | "pro" | "enterprise";
+
+interface TestAccount {
+  email: string;
+  password: string;
+  name: string;
+  role: LoginRole;
+  plan: LoginPlan;
+}
 
 interface LoginProps {
   embedded?: boolean;
@@ -20,6 +30,64 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   const [branding, setBranding] = useState(() => loadBranding());
   const devFounderEmail = String(import.meta.env.VITE_DEV_FOUNDER_EMAIL || "founder@neuroedge.ai").trim().toLowerCase();
   const devFounderPassword = String(import.meta.env.VITE_DEV_FOUNDER_PASSWORD || "Josboy@254");
+  const testAccountsEnabled =
+    String(import.meta.env.VITE_ENABLE_TEST_ACCOUNTS || "").trim().toLowerCase() === "true" || Boolean(import.meta.env.DEV);
+  const defaultTestAccounts: TestAccount[] = [
+    {
+      email: devFounderEmail,
+      password: devFounderPassword,
+      name: "Joseph Were",
+      role: "founder",
+      plan: "enterprise",
+    },
+    {
+      email: "admin@neuroedge.ai",
+      password: "Admin@1234",
+      name: "NeuroEdge Admin",
+      role: "admin",
+      plan: "enterprise",
+    },
+    {
+      email: "developer@neuroedge.ai",
+      password: "Dev@1234",
+      name: "NeuroEdge Developer",
+      role: "developer",
+      plan: "pro",
+    },
+    {
+      email: "enterprise@neuroedge.ai",
+      password: "Enterprise@1234",
+      name: "Enterprise User",
+      role: "enterprise",
+      plan: "enterprise",
+    },
+    {
+      email: "user@neuroedge.ai",
+      password: "User@1234",
+      name: "Pilot User",
+      role: "user",
+      plan: "free",
+    },
+  ];
+  const testAccounts = React.useMemo<TestAccount[]>(() => {
+    const raw = String(import.meta.env.VITE_TEST_ACCOUNTS_JSON || "").trim();
+    if (!raw) return defaultTestAccounts;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return defaultTestAccounts;
+      return parsed
+        .map((item: any) => ({
+          email: String(item?.email || "").trim().toLowerCase(),
+          password: String(item?.password || ""),
+          name: String(item?.name || "Pilot User"),
+          role: String(item?.role || "user").trim().toLowerCase() as LoginRole,
+          plan: String(item?.plan || "free").trim().toLowerCase() as LoginPlan,
+        }))
+        .filter((x) => x.email && x.password);
+    } catch {
+      return defaultTestAccounts;
+    }
+  }, [devFounderEmail, devFounderPassword]);
 
   React.useEffect(() => {
     const refreshBranding = () => setBranding(loadBranding());
@@ -31,7 +99,7 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
     };
   }, []);
 
-  const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string; role?: "user" | "founder"; plan?: "free" | "pro" | "enterprise" }) => {
+  const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string; role?: LoginRole; plan?: LoginPlan }) => {
     const token = `neuroedge-${payload.provider}-token`;
     setUser({
       name: payload.name,
@@ -55,17 +123,17 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
         return;
       }
       const normalizedEmail = email.trim().toLowerCase();
-      const isDevFounder =
-        Boolean(import.meta.env.DEV) &&
-        normalizedEmail === devFounderEmail &&
-        password === devFounderPassword;
-      if (isDevFounder) {
+      const matchingTestAccount =
+        testAccountsEnabled
+          ? testAccounts.find((acc) => acc.email === normalizedEmail && acc.password === password)
+          : null;
+      if (matchingTestAccount) {
         completeLogin({
-          name: "Joseph Were",
-          email: devFounderEmail,
+          name: matchingTestAccount.name,
+          email: matchingTestAccount.email,
           provider: "email",
-          role: "founder",
-          plan: "enterprise",
+          role: matchingTestAccount.role,
+          plan: matchingTestAccount.plan,
         });
         return;
       }
@@ -181,6 +249,21 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
           Continue Free as Guest
         </button>
 
+        {testAccountsEnabled && method === "email" ? (
+          <div style={testAccountsCard}>
+            <div style={{ fontWeight: 700, fontSize: "0.82rem" }}>Pilot Test Accounts</div>
+            <div style={footnote}>Use these for APK pilot testing. Change/remove in production.</div>
+            {testAccounts.map((acc) => (
+              <div key={acc.email} style={testRow}>
+                <span style={testBadge(acc.role)}>{acc.role}</span>
+                <span style={{ color: "#cbd5e1", fontSize: "0.78rem" }}>
+                  {acc.email} / {acc.password}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <p style={footnote}>
           Phone login supports international E.164 format for all countries.
         </p>
@@ -249,5 +332,29 @@ const secondaryBtn: React.CSSProperties = {
   cursor: "pointer",
 };
 const footnote: React.CSSProperties = { margin: 0, color: "#94a3b8", fontSize: "0.78rem" };
+const testAccountsCard: React.CSSProperties = {
+  marginTop: 6,
+  padding: "0.6rem",
+  borderRadius: 10,
+  border: "1px solid rgba(148,163,184,0.35)",
+  background: "rgba(2,6,23,0.5)",
+  display: "grid",
+  gap: 6,
+};
+const testRow: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+const testBadge = (role: LoginRole): React.CSSProperties => ({
+  borderRadius: 999,
+  padding: "0.12rem 0.45rem",
+  fontSize: "0.66rem",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  border: "1px solid rgba(148,163,184,0.4)",
+  color: role === "founder" ? "#facc15" : role === "admin" ? "#60a5fa" : role === "developer" ? "#34d399" : "#cbd5e1",
+});
 
 export default Login;
