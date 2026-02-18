@@ -63,6 +63,10 @@ import {
 import { buildConsistencySnapshot } from "@quality/consistency";
 import { createInflightGuard, getInflightSnapshot } from "@quality/sreGuard";
 import {
+  getMarketReadinessConfig,
+  updateMarketReadinessConfig,
+} from "@quality/marketReadiness";
+import {
   bulkUpdateFrontierItems,
   frontierTrainingReadinessReport,
   getFrontierProgram,
@@ -82,6 +86,18 @@ import {
   buildExpansionProposal,
   generateModuleWithConfirmation,
 } from "@core/selfExpansion";
+import {
+  applySubmissionPatch,
+  generateSubmissionPrDraft,
+  getNeuroExpansionState,
+  previewSubmissionPatch,
+  mergeNeuroExpansionSubmission,
+  reviewNeuroExpansionSubmission,
+  runDailyNeuroExpansionPlanner,
+  saveNeuroExpansionSettings,
+  scanPlaceholderGaps,
+  submitNeuroExpansion,
+} from "@core/neuroExpansion";
 import { callIdverseWithFallback, IdverseConfig, maskApiKey } from "@integrations/idverse";
 import path from "path";
 import fs from "fs";
@@ -135,6 +151,18 @@ function findDashboardUserByActor(req: Request): any | null {
     users.find((u: any) => String(u.name || "").trim().toLowerCase() === name) ||
     null
   );
+}
+
+function actorDashboardIdentity(req: Request): { userId: string; userName: string; orgId: string } {
+  const record = findDashboardUserByActor(req);
+  const fallbackSub = String(req.auth?.sub || "").trim();
+  const fallbackEmail = actorEmail(req);
+  const fallbackName = actorName(req) || "User";
+  return {
+    userId: String(record?.id || fallbackSub || fallbackEmail || "anonymous").trim().toLowerCase(),
+    userName: String(record?.name || fallbackName || "User").trim(),
+    orgId: String(req.auth?.orgId || record?.orgId || "personal"),
+  };
 }
 
 function verifyPrivilegedDevicePolicy(req: Request): { ok: true } | { ok: false; status: number; error: string; details?: string } {
@@ -241,6 +269,16 @@ function requireRole(roles: string[]) {
   };
 }
 
+function requireAnyScope(needs: string[]) {
+  return (req: Request, res: Response, next: any) => {
+    if (needs.some((s) => hasScope(req, s))) return next();
+    return res.status(403).json({
+      error: "Forbidden",
+      missingAnyScope: needs,
+    });
+  };
+}
+
 function isPaidUser(req: Request): boolean {
   const raw = req.auth?.raw || {};
   const plan = String(
@@ -257,6 +295,201 @@ function isPaidUser(req: Request): boolean {
 
 function generateApiKey(prefix = "ne_sk"): string {
   return `${prefix}-${crypto.randomBytes(24).toString("hex")}`;
+}
+
+function maskEmail(value: string): string {
+  const raw = String(value || "").trim().toLowerCase();
+  const [local, domain] = raw.split("@");
+  if (!local || !domain) return "";
+  if (local.length <= 2) return `${local[0] || "*"}*@${domain}`;
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
+function maskPhone(value: string): string {
+  const digits = String(value || "").replace(/[^\d+]/g, "");
+  if (!digits) return "";
+  const tail = digits.slice(-4);
+  return `***${tail}`;
+}
+
+function normalizePhone(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("+")) return `+${raw.slice(1).replace(/\D/g, "")}`;
+  return raw.replace(/\D/g, "");
+}
+
+function payoutPeriodBucket(periodRaw: string, now = new Date()): string {
+  const period = String(periodRaw || "weekly").toLowerCase();
+  const isoDate = now.toISOString().slice(0, 10);
+  if (period === "hourly") return now.toISOString().slice(0, 13);
+  if (period === "daily") return isoDate;
+  if (period === "monthly") return now.toISOString().slice(0, 7);
+  const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const day = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+function applyComputeGuardrails(
+  existing: Record<string, any>,
+  statsInput: Record<string, any>,
+  guardrails: Record<string, any>,
+  now: number
+): Record<string, any> {
+  const nextStats = {
+    ...(existing.stats || {}),
+    cpuPct: Math.max(0, Math.min(100, Number(statsInput?.cpuPct ?? existing?.stats?.cpuPct ?? 0))),
+    ramPct: Math.max(0, Math.min(100, Number(statsInput?.ramPct ?? existing?.stats?.ramPct ?? 0))),
+    tempC: Math.max(0, Number(statsInput?.tempC ?? existing?.stats?.tempC ?? 0)),
+    uptimeSec: Math.max(0, Number(statsInput?.uptimeSec ?? existing?.stats?.uptimeSec ?? 0)),
+    tasksCompleted: Math.max(0, Number(statsInput?.tasksCompleted ?? existing?.stats?.tasksCompleted ?? 0)),
+    computeHours: Math.max(0, Number(statsInput?.computeHours ?? existing?.stats?.computeHours ?? 0)),
+    earningsUsd: Math.max(0, Number(statsInput?.earningsUsd ?? existing?.stats?.earningsUsd ?? 0)),
+    earnedPoints: Math.max(0, Number(statsInput?.earnedPoints ?? existing?.stats?.earnedPoints ?? 0)),
+    onBattery: Boolean(statsInput?.onBattery ?? existing?.stats?.onBattery ?? false),
+    updatedAt: now,
+  };
+  const maxCpu = Math.max(5, Math.min(100, Number(guardrails?.maxCpuPct ?? 35)));
+  const maxRam = Math.max(5, Math.min(100, Number(guardrails?.maxRamPct ?? 40)));
+  const pauseTemp = Math.max(35, Math.min(120, Number(guardrails?.pauseOnHighTempC ?? 80)));
+  const pauseOnBattery = Boolean(guardrails?.pauseOnBattery ?? true);
+  const cpuHot = nextStats.cpuPct > maxCpu;
+  const ramHot = nextStats.ramPct > maxRam;
+  const tempHot = nextStats.tempC >= pauseTemp;
+  const batteryPause = pauseOnBattery && nextStats.onBattery;
+  const manualPause = String(existing.pauseReason || "") === "owner_paused";
+  const suspended = String(existing.status || "") === "suspended";
+  if (manualPause || suspended) {
+    return { ...existing, stats: nextStats, updatedAt: now };
+  }
+  if (tempHot || batteryPause) {
+    return {
+      ...existing,
+      stats: nextStats,
+      status: "paused",
+      computeEnabled: false,
+      pauseReason: tempHot ? "auto_paused_high_temp" : "auto_paused_battery",
+      lastTelemetryAt: now,
+      updatedAt: now,
+    };
+  }
+  if (cpuHot || ramHot) {
+    return {
+      ...existing,
+      stats: nextStats,
+      status: "throttled",
+      computeEnabled: false,
+      pauseReason: "auto_throttled_resource_guardrail",
+      lastTelemetryAt: now,
+      updatedAt: now,
+    };
+  }
+  const wasAutoControlled =
+    ["auto_paused_high_temp", "auto_paused_battery", "auto_throttled_resource_guardrail"].includes(
+      String(existing.pauseReason || "")
+    ) || ["paused", "throttled"].includes(String(existing.status || ""));
+  if (wasAutoControlled) {
+    return {
+      ...existing,
+      stats: nextStats,
+      status: "active",
+      computeEnabled: true,
+      pauseReason: "",
+      lastTelemetryAt: now,
+      updatedAt: now,
+    };
+  }
+  return { ...existing, stats: nextStats, lastTelemetryAt: now, updatedAt: now };
+}
+
+function parseDeviceLines(input: string): Array<Record<string, any>> {
+  const text = String(input || "").trim();
+  if (!text) return [];
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, i) => {
+      const parts = line.split(/[,\t|]/).map((p) => p.trim());
+      return {
+        externalId: String(parts[0] || `import-${Date.now()}-${i}`),
+        model: String(parts[1] || "unknown"),
+        serial: String(parts[2] || ""),
+        imei: String(parts[3] || ""),
+        ownerRef: String(parts[4] || ""),
+      };
+    });
+}
+
+async function sendOtpChallenge(
+  channelRaw: string,
+  destinationRaw: string,
+  code: string
+): Promise<{ provider: string; channel: string; maskedDestination: string }> {
+  const channel = String(channelRaw || "email").toLowerCase();
+  const provider =
+    channel === "sms"
+      ? String(process.env.OTP_SMS_PROVIDER || process.env.OTP_PROVIDER || "").trim().toLowerCase()
+      : String(process.env.OTP_EMAIL_PROVIDER || process.env.OTP_PROVIDER || "").trim().toLowerCase();
+  const destination = String(destinationRaw || "").trim();
+  if (!destination) throw new Error("Missing OTP destination");
+  if (!provider) throw new Error("OTP provider not configured");
+  if (channel === "sms") {
+    const to = normalizePhone(destination);
+    if (!to) throw new Error("Invalid SMS destination");
+    if (provider === "twilio") {
+      const sid = String(process.env.TWILIO_ACCOUNT_SID || "").trim();
+      const token = String(process.env.TWILIO_AUTH_TOKEN || "").trim();
+      const from = String(process.env.TWILIO_FROM_NUMBER || "").trim();
+      if (!sid || !token || !from) throw new Error("Twilio SMS credentials missing");
+      const body = new URLSearchParams({
+        To: to,
+        From: from,
+        Body: `NeuroEdge verification code: ${code}. Expires in 10 minutes.`,
+      });
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+      const resp = await axios.post(url, body.toString(), {
+        auth: { username: sid, password: token },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        timeout: 12000,
+      });
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new Error(`Twilio SMS failed with status ${resp.status}`);
+      }
+      return { provider: "twilio", channel: "sms", maskedDestination: maskPhone(to) };
+    }
+    throw new Error(`Unsupported SMS provider: ${provider}`);
+  }
+  const toEmail = destination.toLowerCase();
+  if (provider === "resend") {
+    const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+    const from = String(process.env.RESEND_FROM_EMAIL || "").trim();
+    if (!apiKey || !from) throw new Error("Resend email credentials missing");
+    const resp = await axios.post(
+      "https://api.resend.com/emails",
+      {
+        from,
+        to: [toEmail],
+        subject: "NeuroEdge verification code",
+        text: `Your NeuroEdge verification code is ${code}. It expires in 10 minutes.`,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 12000,
+      }
+    );
+    if (resp.status < 200 || resp.status >= 300) {
+      throw new Error(`Resend email failed with status ${resp.status}`);
+    }
+    return { provider: "resend", channel: "email", maskedDestination: maskEmail(toEmail) };
+  }
+  throw new Error(`Unsupported email provider: ${provider}`);
 }
 
 function boolEnv(name: string, fallback: boolean): boolean {
@@ -631,6 +864,91 @@ function readDashboardSummary() {
         },
       ],
     },
+    computeDonation: {
+      ownerDevices: [],
+      ownerPayoutProfiles: [],
+      payoutRequests: [],
+      verificationChallenges: [],
+      resourceGuardrails: {
+        maxCpuPct: 35,
+        maxRamPct: 40,
+        pauseOnBattery: true,
+        pauseOnHighTempC: 80,
+        backgroundOnly: true,
+      },
+      payoutBudget: {
+        period: new Date().toISOString().slice(0, 7),
+        totalRevenueUsd: 0,
+        allocatedUsd: 0,
+        pendingUsd: 0,
+        approvedUsd: 0,
+        sentUsd: 0,
+        reserveUsd: 0,
+        updatedAt: Date.now(),
+      },
+      autoPayoutConfig: {
+        enabled: true,
+        period: "weekly",
+        maxPayoutsPerRun: 200,
+        lastRunBucket: "",
+        lastRunAt: 0,
+      },
+      chainPayoutConfig: {
+        enabled: false,
+        chainName: "NeuroChain",
+        rpcUrl: "",
+        treasuryWallet: "",
+        payoutToken: "WDC",
+        payoutContract: "",
+        minOnchainPayoutWdc: 1,
+        confirmationsRequired: 6,
+        updatedAt: Date.now(),
+      },
+    },
+    loanOps: {
+      companies: [],
+      devices: [],
+      apiKeys: [],
+      integrations: [],
+      intakeLogs: [],
+      disputes: [],
+      legalConsents: [],
+      policy: {
+        consentRequired: true,
+        legalRestrictedModeOnly: true,
+        allowTrustedContactRecovery: true,
+        locationOnTheftWithConsent: true,
+        antiTamperMonitoring: true,
+        attestationRequiredDefault: true,
+        autoRelockOnLoanDefault: true,
+        allowedAttestationProviders: ["android_play_integrity", "ios_devicecheck", "desktop_tpm"],
+      },
+      updatedAt: Date.now(),
+    },
+    userProtection: {
+      profiles: [],
+      incidents: [],
+      policy: {
+        paidMaxDevices: 3,
+        freeMaxDevices: 1,
+        requireConsentForLocation: true,
+      },
+      updatedAt: Date.now(),
+    },
+    mobileTwinBridge: {
+      devices: [],
+      pendingActions: [],
+      actionReceipts: [],
+      policy: {
+        enabled: true,
+        requireAttestation: true,
+        requireExplicitCallPermission: true,
+        maxPendingActions: 2000,
+        actionTtlMs: 24 * 60 * 60 * 1000,
+        allowedPlatforms: ["android", "ios"],
+      },
+      updatedAt: Date.now(),
+    },
     modelControl: {
       model: "neuroedge-13b-instruct",
       temperature: 0.3,
@@ -676,6 +994,7 @@ function readDashboardSummary() {
         active: true,
         permissions: ["read-chat", "execute-scripts"],
         version: "1.0.0",
+        system: true,
       },
       {
         id: "analytics-plugin",
@@ -684,6 +1003,7 @@ function readDashboardSummary() {
         active: false,
         permissions: ["read-metrics"],
         version: "0.9.2",
+        system: true,
       },
       {
         id: "custom-commands",
@@ -692,6 +1012,7 @@ function readDashboardSummary() {
         active: true,
         permissions: ["execute-scripts"],
         version: "1.1.0",
+        system: true,
       },
     ],
     agentsLocal: [
@@ -725,6 +1046,7 @@ function readDashboardSummary() {
       userOverrides: [],
       updatedAt: Date.now(),
     },
+    neuroExpansionNotifications: [],
     deviceProtection: {
       policy: {
         enabled: true,
@@ -802,6 +1124,12 @@ const DASHBOARD_PERMISSION_CATALOG = [
   { id: "enterprise.manage", group: "enterprise", label: "Manage Enterprise Settings", scope: "admin:write", roles: ["founder", "admin"] },
   { id: "idverse.manage", group: "identity", label: "Configure IDVerse", scope: "admin:write", roles: ["founder", "admin"] },
   { id: "training.manage", group: "training", label: "Run Training Studio Jobs", scope: "training:write", roles: ["founder", "admin"] },
+  { id: "compute.owner.manage", group: "compute", label: "Manage Own Compute Donation Devices", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "compute.payout.manage", group: "compute", label: "Approve/Send Compute Payouts", scope: "admin:write", roles: ["founder", "admin"] },
+  { id: "loanops.manage", group: "device_security", label: "Manage LoanOps Device Security", scope: "admin:write", roles: ["founder", "admin", "enterprise"] },
+  { id: "user.protection.manage", group: "device_security", label: "Manage Own Device Protection", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "twin.mobile.manage", group: "twin", label: "Manage Mobile Twin Bridge", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "neuroexpansion.manage", group: "platform", label: "NeuroExpansion Build + Merge", scope: "admin:write", roles: ["founder", "admin", "developer"] },
 ];
 
 function auditDashboardAction(req: Request, domain: string, action: string, payload: Record<string, any> = {}) {
@@ -947,6 +1275,210 @@ export function startServer(
       usage: summarizeUsage(),
     });
   });
+
+  app.post(
+    "/assistant/ops/ask",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    async (req: Request, res: Response) => {
+      const query = String(req.body?.query || "").trim();
+      if (!query) return res.status(400).json({ error: "Missing query" });
+
+      const role = actorRole(req) || "user";
+      const q = query.toLowerCase();
+      const kernelBase = process.env.KERNEL_URL || "http://localhost:8080";
+      const mlBase = process.env.ML_URL || "http://localhost:8090";
+
+      const check = async (name: string, url: string) => {
+        try {
+          await axios.get(url, { timeout: 4000 });
+          return { name, status: "online" as const, detail: "reachable" };
+        } catch (err: any) {
+          return { name, status: "offline" as const, detail: err?.message || "not reachable" };
+        }
+      };
+
+      const services = await Promise.all([
+        Promise.resolve({ name: "orchestrator", status: "online" as const, detail: "serving api" }),
+        check("kernel", `${kernelBase.replace(/\/$/, "")}/health`),
+        check("ml", `${mlBase.replace(/\/$/, "")}/ready`),
+      ]);
+
+      const canDeepTwin = role === "founder" || role === "admin" || role === "developer";
+      let neuroTwinProfile: any = null;
+      let neuroTwinReport: any = null;
+      let twinCoreReport: any = null;
+      if (canDeepTwin) {
+        const [profileRes, reportRes, coreRes] = await Promise.allSettled([
+          axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/profile`, { timeout: 6000 }),
+          axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/report`, { timeout: 7000 }),
+          axios.get(`${mlBase.replace(/\/$/, "")}/twin/report`, { timeout: 7000 }),
+        ]);
+        neuroTwinProfile = profileRes.status === "fulfilled" ? profileRes.value.data : null;
+        neuroTwinReport = reportRes.status === "fulfilled" ? reportRes.value.data : null;
+        twinCoreReport = coreRes.status === "fulfilled" ? coreRes.value.data : null;
+      }
+
+      const recentEvents = listEvents(1200);
+      const updateEvents = recentEvents
+        .filter((e) => /admin\.|dashboard|model_quality|frontier|training|neuroexpansion/i.test(String(e.type || "")))
+        .slice(-12)
+        .reverse()
+        .map((e) => ({
+          type: e.type,
+          when: new Date(Number(e.timestamp || Date.now())).toISOString(),
+        }));
+
+      const textBuckets: string[] = [];
+      for (const e of recentEvents.slice(-600)) {
+        const p = (e && e.payload) || {};
+        const candidates = [
+          (p as any).query,
+          (p as any).prompt,
+          (p as any).message,
+          (p as any).command,
+          (p as any).text,
+        ];
+        for (const c of candidates) {
+          if (typeof c === "string" && c.trim()) textBuckets.push(c.toLowerCase());
+        }
+      }
+      const stopWords = new Set([
+        "the","and","for","with","that","this","from","you","your","are","was","have","what","when","where","how","why","can","could",
+        "would","should","into","about","there","their","they","them","then","than","been","were","will","just","like","want","need",
+      ]);
+      const freq = new Map<string, number>();
+      for (const t of textBuckets) {
+        const tokens = t.split(/[^a-z0-9_+-]+/).filter((x) => x.length >= 3 && !stopWords.has(x));
+        for (const tok of tokens) freq.set(tok, (freq.get(tok) || 0) + 1);
+      }
+      const trendingNeeds = [...freq.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([term, count]) => ({ term, count }));
+
+      const offline = services.filter((s) => s.status !== "online");
+      const wantsNodes = /node|down|status|health|offline|kernel|orchestrator|ml/.test(q);
+      const wantsUpdates = /update|changed|new|release|what has been updated|recent/.test(q);
+      const wantsTrends = /trend|trending|users want|demand|popular/.test(q);
+      const wantsCode = /code|coding|implement|fix|debug|refactor|build/.test(q);
+      const wantsCompetition = /competitor|openai|gemini|claude|copilot|market/.test(q);
+
+      const responseLines: string[] = [];
+      responseLines.push(`I have your request. Here is the latest operational view for ${role}.`);
+      if (wantsNodes || q.includes("which node is down")) {
+        if (offline.length === 0) responseLines.push("All core services are online right now.");
+        else responseLines.push(`Nodes needing attention: ${offline.map((s) => `${s.name} (${s.detail})`).join(", ")}.`);
+      }
+      if (wantsUpdates) {
+        if (updateEvents.length === 0) responseLines.push("No significant admin/system updates were logged recently.");
+        else responseLines.push(`Recent updates logged: ${updateEvents.slice(0, 4).map((u) => `${u.type} @ ${u.when}`).join(" | ")}.`);
+      }
+      if (canDeepTwin && neuroTwinProfile?.profile) {
+        const p = neuroTwinProfile.profile || {};
+        responseLines.push(
+          `NeuroTwin context loaded: owner=${String(p.owner || "unknown")}, tone=${String(p.tone || "n/a")}, style=${String(p.communication_style || "n/a")}.`
+        );
+      }
+      if (canDeepTwin && neuroTwinReport) {
+        const mCount = Array.isArray(neuroTwinReport.recent_meetings) ? neuroTwinReport.recent_meetings.length : 0;
+        const dCount = Array.isArray(neuroTwinReport.recent_decisions) ? neuroTwinReport.recent_decisions.length : 0;
+        responseLines.push(`NeuroTwin memory snapshot: ${mCount} recent meetings, ${dCount} recent decision simulations.`);
+      }
+      if (canDeepTwin && twinCoreReport) {
+        const risk = String(twinCoreReport?.analysis?.risk_level || "unknown");
+        const files = Number(twinCoreReport?.scan?.structure?.total_files || 0);
+        responseLines.push(`TwinCore scan context: risk=${risk}, scanned_files=${files}.`);
+      }
+      if (wantsTrends) {
+        if (trendingNeeds.length === 0) responseLines.push("I do not have enough signal yet for user-demand trends.");
+        else responseLines.push(`Current user-signal trends: ${trendingNeeds.slice(0, 5).map((t) => `${t.term}(${t.count})`).join(", ")}.`);
+      }
+      if (wantsCompetition) {
+        responseLines.push(
+          "Competitors do memory/research/connectors well. They are weaker on local-first mesh ownership and transparent ops controls for normal users."
+        );
+      }
+
+      const codingPlan = wantsCode
+        ? {
+            mode: "safe_plan_only",
+            summary: "Prepared a code execution plan with approval gate.",
+            steps: [
+              "Clarify target module and acceptance criteria",
+              "Generate patch proposal and risk notes",
+              "Run typecheck/test before merge",
+              "Require founder/admin approval for production-impacting changes",
+            ],
+            approval_required: true,
+          }
+        : null;
+
+      if (wantsCode) {
+        responseLines.push("For coding requests, I can prepare a patch plan now and execute only after your approval.");
+      }
+      if (!wantsNodes && !wantsUpdates && !wantsTrends && !wantsCode && !wantsCompetition) {
+        responseLines.push("Ask me node health, updates, trends, market gaps, or a coding task, and I will answer immediately.");
+      }
+
+      const competitorLandscape = {
+        similar_projects_do: [
+          "memory + deep research + connectors",
+          "role-based enterprise controls",
+          "assistant presets and workspace tooling",
+        ],
+        similar_projects_miss: [
+          "default local-first mesh execution",
+          "portable user-owned assistant configs across deployments",
+          "visible trust verification metadata for all high-stakes responses",
+        ],
+        what_people_want: [
+          "higher factual precision",
+          "faster, reliable responses",
+          "privacy and explicit control",
+          "human fallback for sensitive operations",
+        ],
+        future_features: [
+          "voice-first operations cockpit",
+          "autonomous but approval-gated coding copilot",
+          "predictive incident prevention and SRE autopilot",
+          "cross-device twin continuity with secure handoff",
+        ],
+      };
+
+      const answer = responseLines.join("\n\n");
+      appendEvent({
+        type: "assistant.ops.ask",
+        timestamp: Date.now(),
+        payload: {
+          query,
+          role,
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          offlineCount: offline.length,
+        },
+      });
+
+      res.json({
+        success: true,
+        assistant: {
+          response: answer,
+          voice_response: answer,
+          services,
+          neurotwin_profile: neuroTwinProfile,
+          neurotwin_report: neuroTwinReport,
+          twincore_report: twinCoreReport,
+          recent_updates: updateEvents,
+          trending_needs: trendingNeeds,
+          coding_plan: codingPlan,
+          competitor_landscape: competitorLandscape,
+          role,
+          generated_at: new Date().toISOString(),
+        },
+      });
+    }
+  );
 
   app.get("/admin/agents", requireWorkspace, requireScope("admin:read"), (_req: Request, res: Response) => {
     const knownAgents = [
@@ -1248,6 +1780,660 @@ export function startServer(
     auditDashboardAction(req, "device_protection", `${action}_device`, { id, nextStatus });
     res.json({ success: true, deviceProtection: next });
   });
+
+  const normalizeLoanOpsSection = (section: Record<string, any>) => ({
+    ...section,
+    companies: Array.isArray(section.companies) ? section.companies : [],
+    devices: Array.isArray(section.devices) ? section.devices : [],
+    apiKeys: Array.isArray(section.apiKeys) ? section.apiKeys : [],
+    integrations: Array.isArray(section.integrations) ? section.integrations : [],
+    intakeLogs: Array.isArray(section.intakeLogs) ? section.intakeLogs : [],
+    disputes: Array.isArray(section.disputes) ? section.disputes : [],
+    legalConsents: Array.isArray(section.legalConsents) ? section.legalConsents : [],
+    policy: {
+      consentRequired: true,
+      legalRestrictedModeOnly: true,
+      allowTrustedContactRecovery: true,
+      locationOnTheftWithConsent: true,
+      antiTamperMonitoring: true,
+      attestationRequiredDefault: true,
+      autoRelockOnLoanDefault: true,
+      allowedAttestationProviders: ["android_play_integrity", "ios_devicecheck", "desktop_tpm"],
+      ...(section.policy || {}),
+    },
+    updatedAt: Number(section.updatedAt || Date.now()),
+  });
+
+  app.get(
+    "/admin/loan-ops/bootstrap",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const isEnterprise = actorRole(req) === "enterprise";
+      const orgId = String(req.auth?.orgId || "personal");
+      const filterByOrg = (arr: any[]) =>
+        isEnterprise ? arr.filter((x: any) => String(x.orgId || "personal") === orgId) : arr;
+      res.json({
+        success: true,
+        loanOps: {
+          companies: filterByOrg(section.companies),
+          devices: filterByOrg(section.devices),
+          apiKeys: filterByOrg(section.apiKeys),
+          integrations: filterByOrg(section.integrations),
+          intakeLogs: filterByOrg(section.intakeLogs).slice(0, 300),
+          disputes: filterByOrg(section.disputes).slice(0, 300),
+          legalConsents: filterByOrg(section.legalConsents).slice(0, 300),
+          policy: section.policy,
+          updatedAt: Number(section.updatedAt || Date.now()),
+        },
+      });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/company/upsert",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const input = req.body?.company || {};
+      const id = String(input.id || `loan-co-${Date.now()}`).trim();
+      const name = String(input.name || "").trim();
+      if (!name) return res.status(400).json({ error: "Missing company name" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const companies = section.companies;
+      const orgId = String(req.auth?.orgId || "personal");
+      const role = actorRole(req);
+      const exists = companies.some((c: any) => String(c.id) === id);
+      const nextItem = {
+        id,
+        name,
+        orgId: role === "enterprise" ? orgId : String(input.orgId || orgId),
+        contactEmail: String(input.contactEmail || ""),
+        contactPhone: String(input.contactPhone || ""),
+        legalPolicyRef: String(input.legalPolicyRef || ""),
+        attestationRequired: Boolean(input.attestationRequired ?? section.policy?.attestationRequiredDefault ?? true),
+        autoRelockOnLoan: Boolean(input.autoRelockOnLoan ?? section.policy?.autoRelockOnLoanDefault ?? true),
+        mdmProvider: String(input.mdmProvider || "android_enterprise"),
+        oemProvider: String(input.oemProvider || ""),
+        enrollmentMode: String(input.enrollmentMode || "device_owner"),
+        lockWorkflow: String(input.lockWorkflow || "mdm_lock"),
+        status: String(input.status || "active"),
+        updatedAt: Date.now(),
+      };
+      const nextCompanies = exists
+        ? companies.map((c: any) => (String(c.id) === id ? { ...c, ...nextItem } : c))
+        : [nextItem, ...companies];
+      const next = {
+        ...section,
+        companies: nextCompanies,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", exists ? "company_update" : "company_create", { id, name });
+      res.json({ success: true, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/import-text",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const companyId = String(req.body?.companyId || "").trim();
+      const rawText = String(req.body?.text || req.body?.ocrText || "").trim();
+      if (!companyId || !rawText) {
+        return res.status(400).json({ error: "Missing companyId or import text" });
+      }
+      const parsed = parseDeviceLines(rawText);
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const devices = section.devices;
+      const orgId = String(req.auth?.orgId || "personal");
+      const now = Date.now();
+      const imported = parsed.map((d, idx) => ({
+        id: `loan-dev-${now}-${idx}`,
+        companyId,
+        orgId,
+        externalId: d.externalId,
+        model: d.model,
+        serial: d.serial,
+        imei: d.imei,
+        ownerRef: d.ownerRef,
+        loanStatus: "current",
+        restrictedMode: false,
+        protectionTier: "loan_managed",
+        securityState: "protected",
+        updatedAt: now,
+      }));
+      const intakeLog = {
+        id: `intake-${now}-${Math.random().toString(36).slice(2, 7)}`,
+        companyId,
+        orgId,
+        source: "text_or_ocr",
+        importedCount: imported.length,
+        actor: req.auth?.sub || "unknown",
+        actorRole: actorRole(req),
+        createdAt: now,
+      };
+      const next = {
+        ...section,
+        devices: [...imported, ...devices].slice(0, 200000),
+        intakeLogs: [intakeLog, ...section.intakeLogs].slice(0, 5000),
+        updatedAt: now,
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "device_import_text", { companyId, imported: imported.length });
+      res.json({ success: true, imported: imported.length, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/upsert",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const input = req.body?.device || {};
+      const id = String(input.id || `loan-dev-${Date.now()}`).trim();
+      const companyId = String(input.companyId || "").trim();
+      const model = String(input.model || "").trim();
+      if (!companyId || !model) return res.status(400).json({ error: "Missing companyId or model" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const devices = section.devices;
+      const now = Date.now();
+      const orgId = String(req.auth?.orgId || "personal");
+      const exists = devices.some((d: any) => String(d.id) === id);
+      const device = {
+        id,
+        companyId,
+        orgId,
+        externalId: String(input.externalId || ""),
+        model,
+        serial: String(input.serial || ""),
+        imei: String(input.imei || ""),
+        ownerRef: String(input.ownerRef || ""),
+        loanStatus: String(input.loanStatus || "current"),
+        restrictedMode: Boolean(input.restrictedMode || false),
+        restrictionReason: String(input.restrictionReason || ""),
+        protectionTier: String(input.protectionTier || "loan_managed"),
+        securityState: String(input.securityState || "protected"),
+        complianceState: String(input.complianceState || "trusted"),
+        attestationProvider: String(input.attestationProvider || ""),
+        attestationStatus: String(input.attestationStatus || "unknown"),
+        attestationAt: Number(input.attestationAt || 0),
+        reEnrollRequiredAt: Number(input.reEnrollRequiredAt || 0),
+        lockState: String(input.lockState || "unlocked"),
+        tamperAlerts: Number(input.tamperAlerts || 0),
+        updatedAt: now,
+      };
+      const nextDevices = exists
+        ? devices.map((d: any) => (String(d.id) === id ? { ...d, ...device } : d))
+        : [device, ...devices];
+      const next = {
+        ...section,
+        devices: nextDevices,
+        updatedAt: now,
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", exists ? "device_update" : "device_create", { id, companyId });
+      res.json({ success: true, loanOps: next, device });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/loan-status",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.deviceId || "").trim();
+      const loanStatus = String(req.body?.loanStatus || "").trim().toLowerCase();
+      if (!id || !["current", "grace", "overdue", "dispute", "paid_off"].includes(loanStatus)) {
+        return res.status(400).json({ error: "Missing deviceId or invalid loanStatus" });
+      }
+      const overdueDays = Math.max(0, Number(req.body?.overdueDays || 0));
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const devices = section.devices;
+      let updated: any = null;
+      const nextDevices = devices.map((d: any) => {
+        if (String(d.id) !== id) return d;
+        const paidOff = loanStatus === "paid_off";
+        const restricted = !paidOff && loanStatus === "overdue" && overdueDays >= 1;
+        updated = {
+          ...d,
+          loanStatus,
+          overdueDays,
+          restrictedMode: restricted,
+          restrictionReason: restricted ? "loan_overdue" : "",
+          securityState: paidOff ? "user_controlled" : "protected",
+          complianceState: paidOff ? "trusted" : restricted ? "restricted" : String(d.complianceState || "trusted"),
+          lockState: restricted ? "locked" : paidOff ? "unlocked" : String(d.lockState || "unlocked"),
+          ownershipReleasedAt: paidOff ? Date.now() : 0,
+          updatedAt: Date.now(),
+        };
+        return updated;
+      });
+      if (!updated) return res.status(404).json({ error: "Loan device not found" });
+      const next = {
+        ...section,
+        devices: nextDevices,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "loan_status_update", { id, loanStatus, overdueDays });
+      res.json({ success: true, device: updated, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/api-keys/create",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const companyId = String(req.body?.companyId || "").trim();
+      const name = String(req.body?.name || "LoanOps API Key").trim();
+      if (!companyId) return res.status(400).json({ error: "Missing companyId" });
+      const key = generateApiKey("ne_loan");
+      const now = Date.now();
+      const rec = {
+        id: `lkey-${now}-${Math.random().toString(36).slice(2, 7)}`,
+        companyId,
+        orgId: String(req.auth?.orgId || "personal"),
+        name,
+        keyMasked: `${key.slice(0, 8)}...${key.slice(-4)}`,
+        key,
+        scopes: ["loanops:read", "loanops:write", "device:status"],
+        status: "active",
+        createdAt: now,
+        createdBy: req.auth?.sub || "unknown",
+      };
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const next = {
+        ...section,
+        apiKeys: [rec, ...section.apiKeys].slice(0, 10000),
+        updatedAt: now,
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "api_key_create", { companyId, keyId: rec.id });
+      res.json({ success: true, apiKey: key, apiKeyRecord: { ...rec, key: undefined }, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/api-keys/revoke",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "Missing key id" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const keys = section.apiKeys;
+      const nextKeys = keys.map((k: any) =>
+        String(k.id) === id ? { ...k, status: "revoked", revokedAt: Date.now(), key: undefined } : k
+      );
+      const next = { ...section, apiKeys: nextKeys, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "api_key_revoke", { id });
+      res.json({ success: true, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/integration/upsert",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const input = req.body?.integration || {};
+      const id = String(input.id || `loan-int-${Date.now()}`).trim();
+      const companyId = String(input.companyId || "").trim();
+      const systemName = String(input.systemName || "").trim();
+      if (!companyId || !systemName) return res.status(400).json({ error: "Missing companyId or systemName" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const integrations = section.integrations;
+      const exists = integrations.some((i: any) => String(i.id) === id);
+      const nextRec = {
+        id,
+        companyId,
+        orgId: String(req.auth?.orgId || "personal"),
+        systemName,
+        baseUrl: String(input.baseUrl || ""),
+        webhookUrl: String(input.webhookUrl || ""),
+        authMode: String(input.authMode || "api_key"),
+        status: String(input.status || "active"),
+        notes: String(input.notes || ""),
+        updatedAt: Date.now(),
+      };
+      const nextIntegrations = exists
+        ? integrations.map((i: any) => (String(i.id) === id ? { ...i, ...nextRec } : i))
+        : [nextRec, ...integrations];
+      const next = { ...section, integrations: nextIntegrations, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", exists ? "integration_update" : "integration_create", {
+        id,
+        companyId,
+      });
+      res.json({ success: true, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/policy/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const incoming = (req.body?.policy || {}) as Record<string, any>;
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const allowedProviders = Array.isArray(incoming.allowedAttestationProviders)
+        ? incoming.allowedAttestationProviders.map((x: any) => String(x)).filter(Boolean)
+        : section.policy.allowedAttestationProviders;
+      const nextPolicy = {
+        ...section.policy,
+        consentRequired: Boolean(incoming.consentRequired ?? section.policy.consentRequired),
+        legalRestrictedModeOnly: Boolean(incoming.legalRestrictedModeOnly ?? section.policy.legalRestrictedModeOnly),
+        allowTrustedContactRecovery: Boolean(
+          incoming.allowTrustedContactRecovery ?? section.policy.allowTrustedContactRecovery
+        ),
+        locationOnTheftWithConsent: Boolean(
+          incoming.locationOnTheftWithConsent ?? section.policy.locationOnTheftWithConsent
+        ),
+        antiTamperMonitoring: Boolean(incoming.antiTamperMonitoring ?? section.policy.antiTamperMonitoring),
+        attestationRequiredDefault: Boolean(
+          incoming.attestationRequiredDefault ?? section.policy.attestationRequiredDefault
+        ),
+        autoRelockOnLoanDefault: Boolean(
+          incoming.autoRelockOnLoanDefault ?? section.policy.autoRelockOnLoanDefault
+        ),
+        allowedAttestationProviders: allowedProviders.length ? allowedProviders : section.policy.allowedAttestationProviders,
+      };
+      const next = { ...section, policy: nextPolicy, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "policy_save", nextPolicy);
+      res.json({ success: true, loanOps: next, policy: nextPolicy });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/attestation/report",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const deviceId = String(req.body?.deviceId || "").trim();
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const attestation = (req.body?.attestation || {}) as Record<string, any>;
+      const provider = String(attestation.provider || "").trim();
+      const status = String(attestation.status || "failed").trim().toLowerCase();
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      let updated: any = null;
+      const nextDevices = section.devices.map((d: any) => {
+        if (String(d.id) !== deviceId) return d;
+        const ok = status === "passed" || status === "trusted";
+        updated = {
+          ...d,
+          attestationProvider: provider,
+          attestationStatus: ok ? "passed" : "failed",
+          attestationAt: Date.now(),
+          attestationNonce: String(attestation.nonce || ""),
+          attestationEvidenceRef: String(attestation.evidenceRef || ""),
+          complianceState: ok ? "trusted" : "re-enroll-required",
+          reEnrollRequiredAt: ok ? 0 : Date.now(),
+          securityState: ok ? "protected" : "re-enroll-required",
+          updatedAt: Date.now(),
+        };
+        return updated;
+      });
+      if (!updated) return res.status(404).json({ error: "Loan device not found" });
+      const next = { ...section, devices: nextDevices, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      appendSignedSecurityEvent("aegis.loan.attestation_report", {
+        deviceId,
+        provider,
+        status: updated.attestationStatus,
+        complianceState: updated.complianceState,
+      });
+      res.json({ success: true, device: updated, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/boot-check",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const deviceId = String(req.body?.deviceId || "").trim();
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const integrityOk = Boolean(req.body?.integrityOk ?? false);
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      let updated: any = null;
+      const nextDevices = section.devices.map((d: any) => {
+        if (String(d.id) !== deviceId) return d;
+        const company = section.companies.find((c: any) => String(c.id) === String(d.companyId));
+        const attestationRequired = Boolean(
+          company?.attestationRequired ?? section.policy.attestationRequiredDefault ?? true
+        );
+        const autoRelock = Boolean(company?.autoRelockOnLoan ?? section.policy.autoRelockOnLoanDefault ?? true);
+        const unpaidLoan = !["paid_off"].includes(String(d.loanStatus || "").toLowerCase());
+        const attestationFail = attestationRequired && String(d.attestationStatus || "") !== "passed";
+        const restricted = unpaidLoan && autoRelock && (!integrityOk || attestationFail);
+        updated = {
+          ...d,
+          lastBootCheckAt: Date.now(),
+          bootIntegrityOk: integrityOk,
+          complianceState: restricted ? "re-enroll-required" : "trusted",
+          restrictedMode: restricted ? true : Boolean(d.restrictedMode),
+          securityState: restricted ? "re-enroll-required" : d.securityState || "protected",
+          lockState: restricted ? "locked" : String(d.lockState || "unlocked"),
+          updatedAt: Date.now(),
+        };
+        return updated;
+      });
+      if (!updated) return res.status(404).json({ error: "Loan device not found" });
+      const next = { ...section, devices: nextDevices, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      appendSignedSecurityEvent("aegis.loan.boot_check", {
+        deviceId,
+        integrityOk,
+        complianceState: updated.complianceState,
+        lockState: updated.lockState,
+      });
+      res.json({ success: true, device: updated, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/reenroll",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const deviceId = String(req.body?.deviceId || "").trim();
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      let updated: any = null;
+      const nextDevices = section.devices.map((d: any) => {
+        if (String(d.id) !== deviceId) return d;
+        updated = {
+          ...d,
+          complianceState: "trusted",
+          securityState: "protected",
+          lockState: "unlocked",
+          reEnrollRequiredAt: 0,
+          reenrolledAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        return updated;
+      });
+      if (!updated) return res.status(404).json({ error: "Loan device not found" });
+      const next = { ...section, devices: nextDevices, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "device_reenroll", { deviceId });
+      res.json({ success: true, device: updated, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/device/lock-trigger",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const deviceId = String(req.body?.deviceId || "").trim();
+      const lock = Boolean(req.body?.lock ?? true);
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const reason = String(req.body?.reason || (lock ? "loan_policy_lock" : "manual_unlock"));
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      let updated: any = null;
+      const nextDevices = section.devices.map((d: any) => {
+        if (String(d.id) !== deviceId) return d;
+        updated = {
+          ...d,
+          lockState: lock ? "locked" : "unlocked",
+          securityState: lock ? "restricted" : "protected",
+          restrictedMode: lock ? true : Boolean(d.restrictedMode && String(d.loanStatus || "") !== "paid_off"),
+          restrictionReason: lock ? reason : String(d.restrictionReason || ""),
+          lockUpdatedAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        return updated;
+      });
+      if (!updated) return res.status(404).json({ error: "Loan device not found" });
+      const next = { ...section, devices: nextDevices, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      appendSignedSecurityEvent("aegis.loan.lock_trigger", {
+        deviceId,
+        lock,
+        reason,
+        actor: req.auth?.sub || "unknown",
+      });
+      res.json({ success: true, device: updated, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/dispute/open",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const deviceId = String(req.body?.deviceId || "").trim();
+      const companyId = String(req.body?.companyId || "").trim();
+      if (!deviceId || !companyId) return res.status(400).json({ error: "Missing deviceId or companyId" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const dispute = {
+        id: `loan-dispute-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        deviceId,
+        companyId,
+        orgId: String(req.auth?.orgId || "personal"),
+        status: "open",
+        reason: String(req.body?.reason || "customer_dispute"),
+        evidenceRef: String(req.body?.evidenceRef || ""),
+        openedBy: req.auth?.sub || "unknown",
+        openedAt: Date.now(),
+        resolvedAt: 0,
+      };
+      const next = {
+        ...section,
+        disputes: [dispute, ...section.disputes].slice(0, 10000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "dispute_open", { disputeId: dispute.id, deviceId, companyId });
+      res.json({ success: true, dispute, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/dispute/resolve",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const disputeId = String(req.body?.disputeId || "").trim();
+      const resolution = String(req.body?.resolution || "resolved");
+      if (!disputeId) return res.status(400).json({ error: "Missing disputeId" });
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      let resolved: any = null;
+      const nextDisputes = section.disputes.map((d: any) => {
+        if (String(d.id) !== disputeId) return d;
+        resolved = {
+          ...d,
+          status: "resolved",
+          resolution,
+          resolvedBy: req.auth?.sub || "unknown",
+          resolvedAt: Date.now(),
+        };
+        return resolved;
+      });
+      if (!resolved) return res.status(404).json({ error: "Dispute not found" });
+      const next = { ...section, disputes: nextDisputes, updatedAt: Date.now() };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "dispute_resolve", { disputeId, resolution });
+      res.json({ success: true, dispute: resolved, loanOps: next });
+    }
+  );
+
+  app.post(
+    "/admin/loan-ops/legal-consent/record",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "enterprise"]),
+    (req: Request, res: Response) => {
+      const companyId = String(req.body?.companyId || "").trim();
+      const subjectRef = String(req.body?.subjectRef || "").trim();
+      const consentType = String(req.body?.consentType || "").trim();
+      if (!companyId || !subjectRef || !consentType) {
+        return res.status(400).json({ error: "Missing companyId, subjectRef, or consentType" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const section = normalizeLoanOpsSection((dashboard.loanOps || {}) as Record<string, any>);
+      const consent = {
+        id: `loan-consent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        companyId,
+        orgId: String(req.auth?.orgId || "personal"),
+        subjectRef,
+        consentType,
+        legalBasis: String(req.body?.legalBasis || "contract"),
+        evidenceRef: String(req.body?.evidenceRef || ""),
+        recordedBy: req.auth?.sub || "unknown",
+        recordedAt: Date.now(),
+      };
+      const next = {
+        ...section,
+        legalConsents: [consent, ...section.legalConsents].slice(0, 10000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("loanOps", next);
+      auditDashboardAction(req, "loan_ops", "legal_consent_record", {
+        companyId,
+        subjectRef,
+        consentType,
+      });
+      res.json({ success: true, consent, loanOps: next });
+    }
+  );
 
   app.post("/admin/device-protection/activity/ingest", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "enterprise"]), (req: Request, res: Response) => {
     const input = req.body?.activity || {};
@@ -2028,6 +3214,1113 @@ export function startServer(
     res.json({ success: true, rewardsLedger: nextLedger });
   });
 
+  app.get(
+    "/dashboard/compute-owner/bootstrap",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const identity = actorDashboardIdentity(req);
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const payoutProfiles = Array.isArray(compute.ownerPayoutProfiles) ? compute.ownerPayoutProfiles : [];
+      const payoutRequests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+      const wallet =
+        (Array.isArray(ledger.wallets) ? ledger.wallets : []).find(
+          (w: any) => String(w.userId || "").toLowerCase() === identity.userId
+        ) || null;
+      res.json({
+        success: true,
+        owner: identity,
+        guardrails: compute.resourceGuardrails || {},
+        devices: devices.filter((d: any) => String(d.ownerUserId || "").toLowerCase() === identity.userId),
+        payoutProfile:
+          payoutProfiles.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || null,
+        payoutRequests: payoutRequests.filter((p: any) => String(p.userId || "").toLowerCase() === identity.userId),
+        wallet,
+        chainPayoutConfig: compute.chainPayoutConfig || {},
+      });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/device/upsert",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const input = req.body?.device || {};
+      const id = String(input.id || `owner-dev-${Date.now()}`).trim();
+      const hostname = String(input.hostname || "").trim();
+      if (!id || !hostname) return res.status(400).json({ error: "Missing device id or hostname" });
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const guardrails = (compute.resourceGuardrails || {}) as Record<string, any>;
+      const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const exists = devices.some((d: any) => String(d.id) === id && String(d.ownerUserId).toLowerCase() === identity.userId);
+      const now = Date.now();
+      const baseDevice = {
+        id,
+        hostname,
+        os: String(input.os || "unknown"),
+        ownerUserId: identity.userId,
+        ownerUserName: identity.userName,
+        ownerOrg: identity.orgId,
+        status: String(input.status || "active"),
+        installToken: String(input.installToken || `inst-${Math.random().toString(36).slice(2, 12)}`),
+        enrolledAt: Number(input.enrolledAt || now),
+        computeEnabled: Boolean(input.computeEnabled ?? true),
+        pauseReason: String(input.pauseReason || ""),
+        stats: {},
+        updatedAt: now,
+      };
+      const nextDevice = applyComputeGuardrails(baseDevice, input?.stats || {}, guardrails, now);
+      const nextDevices = exists
+        ? devices.map((d: any) =>
+            String(d.id) === id && String(d.ownerUserId).toLowerCase() === identity.userId
+              ? applyComputeGuardrails({ ...d, ...baseDevice }, input?.stats || {}, guardrails, now)
+              : d
+          )
+        : [nextDevice, ...devices];
+      const nextCompute = { ...compute, ownerDevices: nextDevices, updatedAt: now };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", exists ? "device_update" : "device_add", { id, hostname });
+      res.json({ success: true, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/device/telemetry",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const id = String(req.body?.id || "").trim();
+      const stats = (req.body?.stats || {}) as Record<string, any>;
+      if (!id) return res.status(400).json({ error: "Missing device id" });
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const guardrails = (compute.resourceGuardrails || {}) as Record<string, any>;
+      const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const target = devices.find(
+        (d: any) => String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
+      );
+      if (!target) {
+        return res.status(403).json({ error: "Forbidden", details: "You can update telemetry only for your own device" });
+      }
+      const now = Date.now();
+      const nextDevices = devices.map((d: any) =>
+        String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
+          ? applyComputeGuardrails(d, stats, guardrails, now)
+          : d
+      );
+      const updated = nextDevices.find((d: any) => String(d.id) === id) || null;
+      const nextCompute = { ...compute, ownerDevices: nextDevices, updatedAt: now };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", "device_telemetry", {
+        id,
+        cpuPct: Number(updated?.stats?.cpuPct || 0),
+        ramPct: Number(updated?.stats?.ramPct || 0),
+        tempC: Number(updated?.stats?.tempC || 0),
+        status: String(updated?.status || "unknown"),
+      });
+      res.json({ success: true, device: updated, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/device/action",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const id = String(req.body?.id || "").trim();
+      const action = String(req.body?.action || "").trim().toLowerCase();
+      if (!id || !["pause", "resume", "suspend", "delete"].includes(action)) {
+        return res.status(400).json({ error: "Missing id or invalid action" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const devices = Array.isArray(compute.ownerDevices) ? compute.ownerDevices : [];
+      const ownDevices = devices.filter((d: any) => String(d.ownerUserId || "").toLowerCase() === identity.userId);
+      if (!ownDevices.some((d: any) => String(d.id) === id)) {
+        return res.status(403).json({ error: "Forbidden", details: "You can manage only your own devices" });
+      }
+      let nextDevices = devices;
+      if (action === "delete") {
+        nextDevices = devices.filter(
+          (d: any) => !(String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId)
+        );
+      } else {
+        const status = action === "pause" ? "paused" : action === "resume" ? "active" : "suspended";
+        nextDevices = devices.map((d: any) =>
+          String(d.id) === id && String(d.ownerUserId || "").toLowerCase() === identity.userId
+            ? {
+                ...d,
+                status,
+                computeEnabled: action === "resume",
+                pauseReason: action === "pause" ? "owner_paused" : "",
+                updatedAt: Date.now(),
+              }
+            : d
+        );
+      }
+      const nextCompute = { ...compute, ownerDevices: nextDevices, updatedAt: Date.now() };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", `device_${action}`, { id });
+      res.json({ success: true, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/payment/request-verify",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    async (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const channel = String(req.body?.channel || "email").toLowerCase();
+      const destination =
+        channel === "sms"
+          ? String(req.body?.phone || req.body?.destination || "").trim()
+          : String(req.body?.email || req.body?.destination || actorEmail(req)).trim().toLowerCase();
+      if (!destination) {
+        return res.status(400).json({
+          error: "Missing destination",
+          details: channel === "sms" ? "Provide phone number for SMS OTP" : "Provide email for OTP",
+        });
+      }
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const challenges = Array.isArray(compute.verificationChallenges) ? compute.verificationChallenges : [];
+      const challenge = {
+        id: `verify-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        userId: identity.userId,
+        channel,
+        code,
+        destinationMasked: channel === "sms" ? maskPhone(destination) : maskEmail(destination),
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        used: false,
+        createdAt: Date.now(),
+      };
+      let delivery: { provider: string; channel: string; maskedDestination: string };
+      try {
+        delivery = await sendOtpChallenge(channel, destination, code);
+      } catch (err: any) {
+        return res.status(502).json({
+          error: "OTP delivery failed",
+          details: err?.message || String(err),
+        });
+      }
+      const nextCompute = {
+        ...compute,
+        verificationChallenges: [challenge, ...challenges].slice(0, 2000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", "payment_verify_requested", {
+        channel,
+        challengeId: challenge.id,
+        provider: delivery.provider,
+      });
+      res.json({
+        success: true,
+        verification: {
+          challengeId: challenge.id,
+          channel: delivery.channel,
+          provider: delivery.provider,
+          maskedDestination: delivery.maskedDestination,
+          expiresAt: challenge.expiresAt,
+        },
+      });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/payment/verify-save",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const challengeId = String(req.body?.challengeId || "").trim();
+      const code = String(req.body?.code || "").trim();
+      const profile = req.body?.profile || {};
+      if (!challengeId || !code) return res.status(400).json({ error: "Missing challengeId or code" });
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const challenges = Array.isArray(compute.verificationChallenges) ? compute.verificationChallenges : [];
+      const idx = challenges.findIndex(
+        (c: any) =>
+          String(c.id) === challengeId &&
+          String(c.userId || "").toLowerCase() === identity.userId &&
+          String(c.code) === code &&
+          !Boolean(c.used) &&
+          Number(c.expiresAt || 0) > Date.now()
+      );
+      if (idx < 0) return res.status(403).json({ error: "Forbidden", details: "Invalid or expired verification" });
+      const nextChallenges = [...challenges];
+      nextChallenges[idx] = { ...nextChallenges[idx], used: true, usedAt: Date.now() };
+      const currentProfiles = Array.isArray(compute.ownerPayoutProfiles) ? compute.ownerPayoutProfiles : [];
+      const safeProfile = {
+        userId: identity.userId,
+        userName: identity.userName,
+        verifiedAt: Date.now(),
+        paymentMethod: String(profile.paymentMethod || "bank"),
+        bankName: String(profile.bankName || ""),
+        accountName: String(profile.accountName || ""),
+        accountNumberMasked: String(profile.accountNumberMasked || ""),
+        swiftCode: String(profile.swiftCode || ""),
+        cardHolder: String(profile.cardHolder || ""),
+        cardLast4: String(profile.cardLast4 || ""),
+        billingCountry: String(profile.billingCountry || ""),
+        wdcWalletAddress: String(profile.wdcWalletAddress || ""),
+        neuroChainAddress: String(profile.neuroChainAddress || ""),
+      };
+      const existing = currentProfiles.some((p: any) => String(p.userId || "").toLowerCase() === identity.userId);
+      const nextProfiles = existing
+        ? currentProfiles.map((p: any) => (String(p.userId || "").toLowerCase() === identity.userId ? safeProfile : p))
+        : [safeProfile, ...currentProfiles];
+      const nextCompute = {
+        ...compute,
+        verificationChallenges: nextChallenges,
+        ownerPayoutProfiles: nextProfiles,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", "payment_profile_saved_verified", {
+        paymentMethod: safeProfile.paymentMethod,
+      });
+      res.json({ success: true, payoutProfile: safeProfile, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/dashboard/compute-owner/payout/request",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const target = String(req.body?.target || "cash").toLowerCase();
+      const amountUsd = Math.max(0, Number(req.body?.amountUsd || 0));
+      const amountWdc = Math.max(0, Number(req.body?.amountWdc || 0));
+      const points = Math.max(0, Number(req.body?.points || 0));
+      if (amountUsd <= 0 && amountWdc <= 0 && points <= 0) {
+        return res.status(400).json({ error: "Request a positive payout amount" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const requests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const budget = (compute.payoutBudget || {}) as Record<string, any>;
+      const request = {
+        id: `payout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId: identity.userId,
+        userName: identity.userName,
+        target,
+        amountUsd,
+        amountWdc,
+        points,
+        status: "pending_approval",
+        createdAt: Date.now(),
+        approvedAt: 0,
+        sentAt: 0,
+      };
+      const nextBudget = {
+        ...budget,
+        pendingUsd: Number((Number(budget.pendingUsd || 0) + amountUsd).toFixed(2)),
+        updatedAt: Date.now(),
+      };
+      const nextCompute = {
+        ...compute,
+        payoutRequests: [request, ...requests].slice(0, 5000),
+        payoutBudget: nextBudget,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_owner", "payout_request", {
+        requestId: request.id,
+        amountUsd,
+        amountWdc,
+        points,
+        target,
+      });
+      res.json({ success: true, request, computeDonation: nextCompute });
+    }
+  );
+
+  app.get(
+    "/dashboard/protection/bootstrap",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const incidents = Array.isArray(section.incidents) ? section.incidents : [];
+      const profile =
+        profiles.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || {
+          userId: identity.userId,
+          userName: identity.userName,
+          planTier: isPaidUser(req) ? "paid" : "free",
+          maxDevices: isPaidUser(req) ? 3 : 1,
+          trustedContacts: [],
+          devices: [],
+          antiTheftConsent: false,
+          locationConsent: false,
+          cameraEvidenceConsent: false,
+          updatedAt: Date.now(),
+        };
+      res.json({
+        success: true,
+        profile,
+        incidents: incidents.filter((i: any) => String(i.userId || "").toLowerCase() === identity.userId),
+        policy: section.policy || { paidMaxDevices: 3, freeMaxDevices: 1, requireConsentForLocation: true },
+      });
+    }
+  );
+
+  app.post(
+    "/dashboard/protection/device/upsert",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const input = req.body?.device || {};
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const idx = profiles.findIndex((p: any) => String(p.userId || "").toLowerCase() === identity.userId);
+      const now = Date.now();
+      const current =
+        idx >= 0
+          ? profiles[idx]
+          : {
+              userId: identity.userId,
+              userName: identity.userName,
+              planTier: isPaidUser(req) ? "paid" : "free",
+              maxDevices: isPaidUser(req) ? 3 : 1,
+              trustedContacts: [],
+              devices: [],
+              antiTheftConsent: false,
+              locationConsent: false,
+              cameraEvidenceConsent: false,
+              updatedAt: now,
+            };
+      const policy = (section.policy || {}) as Record<string, any>;
+      const maxDevices =
+        hasRole(req, ["founder", "admin"])
+          ? 50
+          : current.planTier === "paid"
+            ? Math.max(1, Number(policy.paidMaxDevices || 3))
+            : Math.max(1, Number(policy.freeMaxDevices || 1));
+      const devices = Array.isArray(current.devices) ? current.devices : [];
+      const id = String(input.id || `usr-dev-${Date.now()}`).trim();
+      const exists = devices.some((d: any) => String(d.id) === id);
+      if (!exists && devices.length >= maxDevices) {
+        return res.status(400).json({
+          error: "Device limit reached",
+          details: `Plan allows up to ${maxDevices} protected device(s).`,
+        });
+      }
+      const rec = {
+        id,
+        label: String(input.label || input.hostname || `Device ${devices.length + 1}`),
+        platform: String(input.platform || "unknown"),
+        deviceRef: String(input.deviceRef || req.auth?.deviceId || ""),
+        status: String(input.status || "protected"),
+        createdAt: exists ? Number(devices.find((d: any) => String(d.id) === id)?.createdAt || now) : now,
+        updatedAt: now,
+      };
+      const nextDevices = exists ? devices.map((d: any) => (String(d.id) === id ? { ...d, ...rec } : d)) : [rec, ...devices];
+      const nextProfile = {
+        ...current,
+        planTier: isPaidUser(req) ? "paid" : current.planTier,
+        maxDevices,
+        devices: nextDevices,
+        updatedAt: now,
+      };
+      const nextProfiles = idx >= 0 ? profiles.map((p: any, i: number) => (i === idx ? nextProfile : p)) : [nextProfile, ...profiles];
+      const next = { ...section, profiles: nextProfiles, incidents: Array.isArray(section.incidents) ? section.incidents : [], updatedAt: now };
+      mergeDashboardSection("userProtection", next);
+      auditDashboardAction(req, "user_protection", exists ? "device_update" : "device_add", { id, maxDevices });
+      res.json({ success: true, profile: nextProfile, userProtection: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/protection/device/action",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const id = String(req.body?.id || "").trim();
+      const action = String(req.body?.action || "").trim().toLowerCase();
+      if (!id || !["pause", "resume", "remove"].includes(action)) {
+        return res.status(400).json({ error: "Missing id or invalid action" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const idx = profiles.findIndex((p: any) => String(p.userId || "").toLowerCase() === identity.userId);
+      if (idx < 0) return res.status(404).json({ error: "Protection profile not found" });
+      const profile = profiles[idx];
+      const devices = Array.isArray(profile.devices) ? profile.devices : [];
+      const nextDevices =
+        action === "remove"
+          ? devices.filter((d: any) => String(d.id) !== id)
+          : devices.map((d: any) =>
+              String(d.id) === id
+                ? { ...d, status: action === "pause" ? "paused" : "protected", updatedAt: Date.now() }
+                : d
+            );
+      const nextProfile = { ...profile, devices: nextDevices, updatedAt: Date.now() };
+      const nextProfiles = profiles.map((p: any, i: number) => (i === idx ? nextProfile : p));
+      const next = { ...section, profiles: nextProfiles, incidents: Array.isArray(section.incidents) ? section.incidents : [], updatedAt: Date.now() };
+      mergeDashboardSection("userProtection", next);
+      auditDashboardAction(req, "user_protection", `device_${action}`, { id });
+      res.json({ success: true, profile: nextProfile, userProtection: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/protection/trusted-contact/upsert",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const input = req.body?.contact || {};
+      const name = String(input.name || "").trim();
+      const endpoint = String(input.endpoint || "").trim();
+      if (!name || !endpoint) return res.status(400).json({ error: "Missing contact name or endpoint" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const idx = profiles.findIndex((p: any) => String(p.userId || "").toLowerCase() === identity.userId);
+      if (idx < 0) return res.status(404).json({ error: "Protection profile not found" });
+      const profile = profiles[idx];
+      const contacts = Array.isArray(profile.trustedContacts) ? profile.trustedContacts : [];
+      const cid = String(input.id || `contact-${Date.now()}`).trim();
+      const exists = contacts.some((c: any) => String(c.id) === cid);
+      const rec = {
+        id: cid,
+        name,
+        endpoint,
+        channel: String(input.channel || "email"),
+        verified: Boolean(input.verified || false),
+        updatedAt: Date.now(),
+      };
+      const nextContacts = exists ? contacts.map((c: any) => (String(c.id) === cid ? { ...c, ...rec } : c)) : [rec, ...contacts];
+      const nextProfile = { ...profile, trustedContacts: nextContacts.slice(0, 5), updatedAt: Date.now() };
+      const nextProfiles = profiles.map((p: any, i: number) => (i === idx ? nextProfile : p));
+      const next = { ...section, profiles: nextProfiles, incidents: Array.isArray(section.incidents) ? section.incidents : [], updatedAt: Date.now() };
+      mergeDashboardSection("userProtection", next);
+      auditDashboardAction(req, "user_protection", exists ? "trusted_contact_update" : "trusted_contact_add", { id: cid });
+      res.json({ success: true, profile: nextProfile, userProtection: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/protection/settings/save",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const idx = profiles.findIndex((p: any) => String(p.userId || "").toLowerCase() === identity.userId);
+      if (idx < 0) return res.status(404).json({ error: "Protection profile not found" });
+      const profile = profiles[idx];
+      const nextProfile = {
+        ...profile,
+        antiTheftConsent: Boolean(req.body?.antiTheftConsent ?? profile.antiTheftConsent),
+        locationConsent: Boolean(req.body?.locationConsent ?? profile.locationConsent),
+        cameraEvidenceConsent: Boolean(req.body?.cameraEvidenceConsent ?? profile.cameraEvidenceConsent),
+        updatedAt: Date.now(),
+      };
+      const nextProfiles = profiles.map((p: any, i: number) => (i === idx ? nextProfile : p));
+      const next = { ...section, profiles: nextProfiles, incidents: Array.isArray(section.incidents) ? section.incidents : [], updatedAt: Date.now() };
+      mergeDashboardSection("userProtection", next);
+      auditDashboardAction(req, "user_protection", "settings_save", {
+        antiTheftConsent: nextProfile.antiTheftConsent,
+        locationConsent: nextProfile.locationConsent,
+        cameraEvidenceConsent: nextProfile.cameraEvidenceConsent,
+      });
+      res.json({ success: true, profile: nextProfile, userProtection: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/protection/incident/report",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const deviceId = String(req.body?.deviceId || "").trim();
+      const eventType = String(req.body?.eventType || "tamper_attempt").trim();
+      const location = req.body?.location || null;
+      const cameraEvidenceRef = String(req.body?.cameraEvidenceRef || "").trim();
+      const note = String(req.body?.note || "").trim();
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.userProtection || {}) as Record<string, any>;
+      const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+      const profile =
+        profiles.find((p: any) => String(p.userId || "").toLowerCase() === identity.userId) || null;
+      if (!profile) return res.status(404).json({ error: "Protection profile not found" });
+      const hasDevice = (Array.isArray(profile.devices) ? profile.devices : []).some((d: any) => String(d.id) === deviceId);
+      if (!hasDevice) return res.status(403).json({ error: "Forbidden", details: "Device not in your protection profile" });
+      const incident = {
+        id: `upr-inc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId: identity.userId,
+        userName: identity.userName,
+        deviceId,
+        eventType,
+        location: profile.locationConsent ? location : null,
+        cameraEvidenceRef: profile.cameraEvidenceConsent ? cameraEvidenceRef : "",
+        note,
+        trustedFanoutTargets: Array.isArray(profile.trustedContacts)
+          ? profile.trustedContacts.map((c: any) => ({ id: c.id, channel: c.channel, endpoint: c.endpoint }))
+          : [],
+        createdAt: Date.now(),
+      };
+      const incidents = Array.isArray(section.incidents) ? section.incidents : [];
+      const next = {
+        ...section,
+        profiles,
+        incidents: [incident, ...incidents].slice(0, 10000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("userProtection", next);
+      appendSignedSecurityEvent("aegis.user.incident.reported", {
+        userId: identity.userId,
+        deviceId,
+        eventType,
+        withLocation: Boolean(incident.location),
+        withEvidence: Boolean(incident.cameraEvidenceRef),
+      });
+      res.json({
+        success: true,
+        incident,
+        note:
+          "Incident recorded. Evidence/location forwarding requires user consent and compatible on-device telemetry agent.",
+      });
+    }
+  );
+
+  app.get(
+    "/dashboard/twin/mobile/bootstrap",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const pendingActions = Array.isArray(section.pendingActions) ? section.pendingActions : [];
+      const actionReceipts = Array.isArray(section.actionReceipts) ? section.actionReceipts : [];
+      const isPrivileged = hasRole(req, ["founder", "admin"]);
+      const visibleDevices = isPrivileged ? devices : devices.filter((d: any) => String(d.ownerUserId || "") === identity.userId);
+      const visibleActions = isPrivileged
+        ? pendingActions
+        : pendingActions.filter((a: any) => String(a.ownerUserId || "") === identity.userId);
+      const visibleReceipts = isPrivileged
+        ? actionReceipts
+        : actionReceipts.filter((a: any) => String(a.ownerUserId || "") === identity.userId);
+      res.json({
+        success: true,
+        mobileTwinBridge: {
+          policy: section.policy || {},
+          devices: visibleDevices,
+          pendingActions: visibleActions.slice(0, 500),
+          actionReceipts: visibleReceipts.slice(0, 500),
+          updatedAt: Number(section.updatedAt || Date.now()),
+        },
+      });
+    }
+  );
+
+  app.post(
+    "/dashboard/twin/mobile/device/register",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const input = req.body?.device || {};
+      const id = String(input.id || `mtd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`).trim();
+      const platform = String(input.platform || "").trim().toLowerCase();
+      if (!id || !platform) return res.status(400).json({ error: "Missing device id/platform" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const policy = (section.policy || {}) as Record<string, any>;
+      const allowedPlatforms = Array.isArray(policy.allowedPlatforms) ? policy.allowedPlatforms : ["android", "ios"];
+      if (!allowedPlatforms.includes(platform)) {
+        return res.status(400).json({ error: "Unsupported platform", details: `Allowed: ${allowedPlatforms.join(", ")}` });
+      }
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const exists = devices.some((d: any) => String(d.id) === id);
+      const now = Date.now();
+      const rec = {
+        id,
+        ownerUserId: String(input.ownerUserId || identity.userId),
+        ownerName: String(input.ownerName || identity.userName),
+        deviceName: String(input.deviceName || `${platform} device`),
+        platform,
+        appVersion: String(input.appVersion || ""),
+        osVersion: String(input.osVersion || ""),
+        pushToken: String(input.pushToken || ""),
+        attestationProvider: String(input.attestationProvider || ""),
+        attestationStatus: String(input.attestationStatus || "unknown"),
+        permissions: {
+          microphone: Boolean(input.permissions?.microphone || false),
+          contacts: Boolean(input.permissions?.contacts || false),
+          call_screening: Boolean(input.permissions?.call_screening || false),
+          notifications: Boolean(input.permissions?.notifications || false),
+          accessibility: Boolean(input.permissions?.accessibility || false),
+        },
+        capabilities: {
+          call_assist: Boolean(input.capabilities?.call_assist || false),
+          voip_answer: Boolean(input.capabilities?.voip_answer || false),
+          whatsapp_call_assist: Boolean(input.capabilities?.whatsapp_call_assist || false),
+          video_avatar: Boolean(input.capabilities?.video_avatar || false),
+        },
+        status: String(input.status || "online"),
+        lastSeenAt: now,
+        createdAt: exists ? Number(devices.find((d: any) => String(d.id) === id)?.createdAt || now) : now,
+        updatedAt: now,
+      };
+      const nextDevices = exists ? devices.map((d: any) => (String(d.id) === id ? { ...d, ...rec } : d)) : [rec, ...devices];
+      const next = {
+        ...section,
+        devices: nextDevices.slice(0, 5000),
+        pendingActions: Array.isArray(section.pendingActions) ? section.pendingActions : [],
+        actionReceipts: Array.isArray(section.actionReceipts) ? section.actionReceipts : [],
+        policy: {
+          enabled: true,
+          requireAttestation: true,
+          requireExplicitCallPermission: true,
+          maxPendingActions: 2000,
+          actionTtlMs: 24 * 60 * 60 * 1000,
+          allowedPlatforms: ["android", "ios"],
+          ...policy,
+        },
+        updatedAt: now,
+      };
+      mergeDashboardSection("mobileTwinBridge", next);
+      auditDashboardAction(req, "twin_mobile_bridge", exists ? "device_update" : "device_register", { id, platform });
+      res.json({ success: true, device: rec, mobileTwinBridge: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/twin/mobile/device/sync",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const id = String(req.body?.deviceId || "").trim();
+      if (!id) return res.status(400).json({ error: "Missing deviceId" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const idx = devices.findIndex((d: any) => String(d.id) === id);
+      if (idx < 0) return res.status(404).json({ error: "Device not found" });
+      const existing = devices[idx];
+      if (!hasRole(req, ["founder", "admin"]) && String(existing.ownerUserId || "") !== identity.userId) {
+        return res.status(403).json({ error: "Forbidden", details: "Not your device" });
+      }
+      const now = Date.now();
+      const nextDevice = {
+        ...existing,
+        permissions: {
+          ...(existing.permissions || {}),
+          ...(req.body?.permissions || {}),
+        },
+        capabilities: {
+          ...(existing.capabilities || {}),
+          ...(req.body?.capabilities || {}),
+        },
+        pushToken: String(req.body?.pushToken || existing.pushToken || ""),
+        attestationProvider: String(req.body?.attestationProvider || existing.attestationProvider || ""),
+        attestationStatus: String(req.body?.attestationStatus || existing.attestationStatus || "unknown"),
+        status: String(req.body?.status || existing.status || "online"),
+        lastSeenAt: now,
+        updatedAt: now,
+      };
+      const nextDevices = devices.map((d: any, i: number) => (i === idx ? nextDevice : d));
+      const next = {
+        ...section,
+        devices: nextDevices,
+        pendingActions: Array.isArray(section.pendingActions) ? section.pendingActions : [],
+        actionReceipts: Array.isArray(section.actionReceipts) ? section.actionReceipts : [],
+        policy: section.policy || {},
+        updatedAt: now,
+      };
+      mergeDashboardSection("mobileTwinBridge", next);
+      auditDashboardAction(req, "twin_mobile_bridge", "device_sync", { id });
+      res.json({ success: true, device: nextDevice, mobileTwinBridge: next });
+    }
+  );
+
+  app.post(
+    "/dashboard/twin/mobile/action/enqueue",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const deviceId = String(req.body?.deviceId || "").trim();
+      const actionType = String(req.body?.actionType || "").trim();
+      if (!deviceId || !actionType) return res.status(400).json({ error: "Missing deviceId/actionType" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const device = devices.find((d: any) => String(d.id) === deviceId);
+      if (!device) return res.status(404).json({ error: "Device not found" });
+      if (!hasRole(req, ["founder", "admin"]) && String(device.ownerUserId || "") !== identity.userId) {
+        return res.status(403).json({ error: "Forbidden", details: "Not your device" });
+      }
+      const policy = (section.policy || {}) as Record<string, any>;
+      if (!Boolean(policy.enabled ?? true)) return res.status(400).json({ error: "Mobile bridge disabled by policy" });
+      if (Boolean(policy.requireAttestation ?? true) && String(device.attestationStatus || "") !== "trusted") {
+        return res.status(400).json({ error: "Device attestation required", details: "Device is not attested/trusted" });
+      }
+      if (
+        Boolean(policy.requireExplicitCallPermission ?? true) &&
+        (actionType === "answer_phone_call" || actionType === "answer_whatsapp_call" || actionType === "answer_video_call")
+      ) {
+        const perms = (device.permissions || {}) as Record<string, any>;
+        if (!Boolean(perms.call_screening)) {
+          return res.status(400).json({
+            error: "Missing permission",
+            details: "Call screening permission is required on device before call-assist actions",
+          });
+        }
+      }
+      const pending = Array.isArray(section.pendingActions) ? section.pendingActions : [];
+      const maxPending = Math.max(100, Number(policy.maxPendingActions || 2000));
+      const now = Date.now();
+      const ttlMs = Math.max(60_000, Number(process.env.MOBILE_TWIN_ACTION_TTL_MS || policy.actionTtlMs || 24 * 60 * 60 * 1000));
+      const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+      const action = {
+        id: `mta-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        deviceId,
+        ownerUserId: String(device.ownerUserId || identity.userId),
+        actionType,
+        payload,
+        status: "queued",
+        expiresAt: now + ttlMs,
+        createdAt: now,
+        createdBy: req.auth?.sub || identity.userId,
+      };
+      const freshPending = pending.filter((a: any) => Number(a.expiresAt || 0) > now && String(a.status || "") === "queued");
+      const nextPending = [action, ...freshPending].slice(0, maxPending);
+      const next = {
+        ...section,
+        devices,
+        pendingActions: nextPending,
+        actionReceipts: Array.isArray(section.actionReceipts) ? section.actionReceipts : [],
+        policy: {
+          enabled: true,
+          requireAttestation: true,
+          requireExplicitCallPermission: true,
+          maxPendingActions: 2000,
+          actionTtlMs: 24 * 60 * 60 * 1000,
+          allowedPlatforms: ["android", "ios"],
+          ...policy,
+        },
+        updatedAt: now,
+      };
+      mergeDashboardSection("mobileTwinBridge", next);
+      auditDashboardAction(req, "twin_mobile_bridge", "action_enqueue", { deviceId, actionType, actionId: action.id });
+      res.json({ success: true, action, mobileTwinBridge: next });
+    }
+  );
+
+  app.get(
+    "/dashboard/twin/mobile/actions/pending",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const deviceId = String(req.query?.deviceId || "").trim();
+      if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const device = devices.find((d: any) => String(d.id) === deviceId);
+      if (!device) return res.status(404).json({ error: "Device not found" });
+      if (!hasRole(req, ["founder", "admin"]) && String(device.ownerUserId || "") !== identity.userId) {
+        return res.status(403).json({ error: "Forbidden", details: "Not your device" });
+      }
+      const now = Date.now();
+      const pending = Array.isArray(section.pendingActions) ? section.pendingActions : [];
+      const actions = pending.filter(
+        (a: any) => String(a.deviceId) === deviceId && String(a.status || "") === "queued" && Number(a.expiresAt || 0) > now
+      );
+      res.json({ success: true, actions: actions.slice(0, 200) });
+    }
+  );
+
+  app.post(
+    "/dashboard/twin/mobile/action/receipt",
+    requireWorkspace,
+    requireScope("chat:write"),
+    requireRole(["founder", "admin", "developer", "enterprise", "user"]),
+    (req: Request, res: Response) => {
+      const identity = actorDashboardIdentity(req);
+      const actionId = String(req.body?.actionId || "").trim();
+      const deviceId = String(req.body?.deviceId || "").trim();
+      const status = String(req.body?.status || "completed").trim().toLowerCase();
+      if (!actionId || !deviceId) return res.status(400).json({ error: "Missing actionId/deviceId" });
+      const { dashboard } = readDashboardSummary();
+      const section = (dashboard.mobileTwinBridge || {}) as Record<string, any>;
+      const devices = Array.isArray(section.devices) ? section.devices : [];
+      const device = devices.find((d: any) => String(d.id) === deviceId);
+      if (!device) return res.status(404).json({ error: "Device not found" });
+      if (!hasRole(req, ["founder", "admin"]) && String(device.ownerUserId || "") !== identity.userId) {
+        return res.status(403).json({ error: "Forbidden", details: "Not your device" });
+      }
+      const now = Date.now();
+      const pending = Array.isArray(section.pendingActions) ? section.pendingActions : [];
+      const target = pending.find((a: any) => String(a.id) === actionId && String(a.deviceId) === deviceId);
+      if (!target) return res.status(404).json({ error: "Action not found" });
+      const nextPending = pending.map((a: any) =>
+        String(a.id) === actionId ? { ...a, status: status === "failed" ? "failed" : "completed", completedAt: now } : a
+      );
+      const receipts = Array.isArray(section.actionReceipts) ? section.actionReceipts : [];
+      const receipt = {
+        id: `mtr-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        actionId,
+        deviceId,
+        ownerUserId: String(device.ownerUserId || ""),
+        status: status === "failed" ? "failed" : "completed",
+        result: req.body?.result || {},
+        error: String(req.body?.error || ""),
+        createdAt: now,
+      };
+      const next = {
+        ...section,
+        devices,
+        pendingActions: nextPending,
+        actionReceipts: [receipt, ...receipts].slice(0, 5000),
+        policy: section.policy || {},
+        updatedAt: now,
+      };
+      mergeDashboardSection("mobileTwinBridge", next);
+      auditDashboardAction(req, "twin_mobile_bridge", "action_receipt", {
+        deviceId,
+        actionId,
+        status: receipt.status,
+      });
+      res.json({ success: true, receipt, mobileTwinBridge: next });
+    }
+  );
+
+  app.get(
+    "/admin/dashboard/compute-payouts",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const payoutRequests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      res.json({
+        success: true,
+        payoutBudget: compute.payoutBudget || {},
+        payoutRequests: payoutRequests.slice(0, 2000),
+        autoPayoutConfig: compute.autoPayoutConfig || {},
+        chainPayoutConfig: compute.chainPayoutConfig || {},
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/compute-payouts/approve",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const requestId = String(req.body?.requestId || "").trim();
+      if (!requestId) return res.status(400).json({ error: "Missing requestId" });
+      const settlement = String(req.body?.settlement || "scheduled").toLowerCase();
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const requests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const budget = (compute.payoutBudget || {}) as Record<string, any>;
+      let approved: any = null;
+      const nextRequests = requests.map((r: any) => {
+        if (String(r.id) !== requestId) return r;
+        const immediateSend = settlement === "instant" || settlement === "immediate";
+        approved = {
+          ...r,
+          status: immediateSend ? "approved_sent" : "approved_pending_payout",
+          approvedAt: Date.now(),
+          sentAt: immediateSend ? Date.now() : 0,
+          settlement,
+          txRef: immediateSend ? `txn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` : "",
+          approvedBy: req.auth?.sub || "unknown",
+        };
+        return approved;
+      });
+      if (!approved) return res.status(404).json({ error: "Payout request not found" });
+      const nextBudget = {
+        ...budget,
+        pendingUsd: Math.max(0, Number((Number(budget.pendingUsd || 0) - Number(approved.amountUsd || 0)).toFixed(2))),
+        approvedUsd: Number((Number(budget.approvedUsd || 0) + Number(approved.amountUsd || 0)).toFixed(2)),
+        sentUsd: Number(
+          (
+            Number(budget.sentUsd || 0) +
+            (approved.status === "approved_sent" ? Number(approved.amountUsd || 0) : 0)
+          ).toFixed(2)
+        ),
+        updatedAt: Date.now(),
+      };
+      const ledger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+      const wallets = Array.isArray(ledger.wallets) ? ledger.wallets : [];
+      const nextWallets = wallets.map((w: any) => {
+        if (String(w.userId || "").toLowerCase() !== String(approved.userId || "").toLowerCase()) return w;
+        if (approved.status !== "approved_sent") return { ...w, updatedAt: Date.now() };
+        return {
+          ...w,
+          pendingCashUsd: Math.max(0, Number((Number(w.pendingCashUsd || 0) - Number(approved.amountUsd || 0)).toFixed(2))),
+          pendingWdc: Math.max(0, Number((Number(w.pendingWdc || 0) - Number(approved.amountWdc || 0)).toFixed(6))),
+          points: Math.max(0, Number(w.points || 0) - Number(approved.points || 0)),
+          updatedAt: Date.now(),
+        };
+      });
+      const nextLedger = { ...ledger, wallets: nextWallets, config: ledger.config || {} };
+      const nextCompute = {
+        ...compute,
+        payoutRequests: nextRequests,
+        payoutBudget: nextBudget,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("rewardsLedger", nextLedger);
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_payouts", "approve_send", {
+        requestId,
+        settlement,
+        status: approved.status,
+        amountUsd: approved.amountUsd,
+      });
+      res.json({ success: true, approved, payoutBudget: nextBudget, rewardsLedger: nextLedger, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/compute-payouts/reject",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const requestId = String(req.body?.requestId || "").trim();
+      const reason = String(req.body?.reason || "").trim();
+      if (!requestId) return res.status(400).json({ error: "Missing requestId" });
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const requests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const budget = (compute.payoutBudget || {}) as Record<string, any>;
+      let rejected: any = null;
+      const nextRequests = requests.map((r: any) => {
+        if (String(r.id) !== requestId) return r;
+        rejected = {
+          ...r,
+          status: "rejected",
+          rejectedAt: Date.now(),
+          rejectReason: reason,
+          rejectedBy: req.auth?.sub || "unknown",
+        };
+        return rejected;
+      });
+      if (!rejected) return res.status(404).json({ error: "Payout request not found" });
+      const nextBudget = {
+        ...budget,
+        pendingUsd: Math.max(0, Number((Number(budget.pendingUsd || 0) - Number(rejected.amountUsd || 0)).toFixed(2))),
+        updatedAt: Date.now(),
+      };
+      const nextCompute = {
+        ...compute,
+        payoutRequests: nextRequests,
+        payoutBudget: nextBudget,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_payouts", "reject", { requestId, reason });
+      res.json({ success: true, rejected, payoutBudget: nextBudget, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/compute-payouts/budget/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const incoming = req.body?.budget || {};
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const current = (compute.payoutBudget || {}) as Record<string, any>;
+      const nextBudget = {
+        ...current,
+        period: String(incoming.period || current.period || new Date().toISOString().slice(0, 7)),
+        totalRevenueUsd: Math.max(0, Number(incoming.totalRevenueUsd ?? current.totalRevenueUsd ?? 0)),
+        allocatedUsd: Math.max(0, Number(incoming.allocatedUsd ?? current.allocatedUsd ?? 0)),
+        reserveUsd: Math.max(0, Number(incoming.reserveUsd ?? current.reserveUsd ?? 0)),
+        updatedAt: Date.now(),
+      };
+      const nextCompute = { ...compute, payoutBudget: nextBudget, updatedAt: Date.now() };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_payouts", "budget_save", nextBudget);
+      res.json({ success: true, payoutBudget: nextBudget, computeDonation: nextCompute });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/compute-payouts/scheduler/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const incoming = req.body?.scheduler || {};
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const current = (compute.autoPayoutConfig || {}) as Record<string, any>;
+      const periodRaw = String(incoming.period || current.period || "weekly").toLowerCase();
+      const period = ["hourly", "daily", "weekly", "monthly"].includes(periodRaw) ? periodRaw : "weekly";
+      const nextScheduler = {
+        ...current,
+        enabled: Boolean(incoming.enabled ?? current.enabled ?? true),
+        period,
+        maxPayoutsPerRun: Math.max(1, Math.min(500, Number(incoming.maxPayoutsPerRun ?? current.maxPayoutsPerRun ?? 200))),
+        updatedAt: Date.now(),
+      };
+      const nextCompute = { ...compute, autoPayoutConfig: nextScheduler, updatedAt: Date.now() };
+      mergeDashboardSection("computeDonation", nextCompute);
+      auditDashboardAction(req, "compute_payouts", "scheduler_save", nextScheduler);
+      res.json({ success: true, scheduler: nextScheduler, computeDonation: nextCompute });
+    }
+  );
+
   app.post("/admin/dashboard/model/save", requireWorkspace, requireScope("admin:write"), requireRole(["founder"]), (req: Request, res: Response) => {
     const modelControl = req.body?.modelControl || {};
     mergeDashboardSection("modelControl", modelControl);
@@ -2427,7 +4720,12 @@ export function startServer(
   app.get("/admin/dashboard/extensions", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (_req: Request, res: Response) => {
     const { dashboard } = readDashboardSummary();
     const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
-    res.json({ success: true, extensions });
+    const builtInIds = new Set(["code-linter", "analytics-plugin", "custom-commands"]);
+    const normalized = extensions.map((x: any) => ({
+      ...x,
+      system: x?.system === true || builtInIds.has(String(x?.id || "")),
+    }));
+    res.json({ success: true, extensions: normalized });
   });
 
   app.post("/admin/dashboard/extensions/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
@@ -2436,8 +4734,12 @@ export function startServer(
     if (!name) return res.status(400).json({ error: "Missing extension name" });
     const { dashboard } = readDashboardSummary();
     const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    const builtInIds = new Set(["code-linter", "analytics-plugin", "custom-commands"]);
     const id = String(input.id || `ext-${Date.now()}`);
+    const existing: any = extensions.find((x: any) => String(x?.id || "") === id);
     const exists = extensions.some((x: any) => x.id === id);
+    const identity = actorDashboardIdentity(req);
+    const existingIsSystem = existing?.system === true || builtInIds.has(id);
     const sanitized = {
       id,
       name,
@@ -2445,6 +4747,12 @@ export function startServer(
       active: input.active !== false,
       permissions: Array.isArray(input.permissions) ? input.permissions.map((p: any) => String(p)) : [],
       version: String(input.version || "1.0.0"),
+      system: existingIsSystem,
+      createdBy: String(existing?.createdBy || identity.userId || ""),
+      createdByName: String(existing?.createdByName || identity.userName || ""),
+      createdByEmail: String(existing?.createdByEmail || actorEmail(req) || ""),
+      createdAt: Number(existing?.createdAt || Date.now()),
+      updatedAt: Date.now(),
     };
     const next = exists
       ? extensions.map((x: any) => (x.id === id ? { ...x, ...sanitized } : x))
@@ -2454,27 +4762,248 @@ export function startServer(
     res.json({ success: true, extensions: next });
   });
 
-  app.post("/admin/dashboard/extensions/toggle", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+  app.post("/admin/dashboard/extensions/toggle", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (req: Request, res: Response) => {
     const id = String(req.body?.id || "");
     if (!id) return res.status(400).json({ error: "Missing id" });
     const { dashboard } = readDashboardSummary();
     const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
-    const next = extensions.map((x: any) => (x.id === id ? { ...x, active: !x.active } : x));
+    const next = extensions.map((x: any) => (x.id === id ? { ...x, active: !x.active, updatedAt: Date.now() } : x));
     mergeDashboardSection("extensions", next);
     auditDashboardAction(req, "extensions", "toggle", { id });
     res.json({ success: true, extensions: next });
   });
 
-  app.post("/admin/dashboard/extensions/delete", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin", "developer"]), (req: Request, res: Response) => {
+  app.post("/admin/dashboard/extensions/delete", requireWorkspace, requireScope("chat:write"), requireRole(["founder", "admin", "developer", "user"]), (req: Request, res: Response) => {
     const id = String(req.body?.id || "");
     if (!id) return res.status(400).json({ error: "Missing id" });
     const { dashboard } = readDashboardSummary();
     const extensions = Array.isArray(dashboard.extensions) ? dashboard.extensions : [];
+    const builtInIds = new Set(["code-linter", "analytics-plugin", "custom-commands"]);
+    const target: any = extensions.find((x: any) => String(x?.id || "") === id);
+    if (!target) return res.status(404).json({ error: "Extension not found" });
+    if (target?.system === true || builtInIds.has(id)) {
+      return res.status(403).json({ error: "System extensions cannot be deleted" });
+    }
+    const role = actorRole(req);
+    if (role === "user") {
+      const identity = actorDashboardIdentity(req);
+      const actorEmailValue = actorEmail(req);
+      const ownsById = String(target?.createdBy || "").toLowerCase() === String(identity.userId || "").toLowerCase();
+      const ownsByEmail =
+        actorEmailValue.length > 0 &&
+        String(target?.createdByEmail || "").toLowerCase() === actorEmailValue.toLowerCase();
+      if (!ownsById && !ownsByEmail) {
+        return res.status(403).json({ error: "Users can delete only extensions they created" });
+      }
+    }
     const next = extensions.filter((x: any) => x.id !== id);
     mergeDashboardSection("extensions", next);
     auditDashboardAction(req, "extensions", "delete", { id });
     res.json({ success: true, extensions: next });
   });
+
+  app.get(
+    "/admin/dashboard/neuroexpansion/bootstrap",
+    requireWorkspace,
+    requireAnyScope(["admin:read", "chat:write"]),
+    requireRole(["founder", "admin", "developer"]),
+    (_req: Request, res: Response) => {
+      res.json({ success: true, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/settings/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const settings = saveNeuroExpansionSettings(req.body?.settings || {});
+      auditDashboardAction(req, "neuroexpansion", "settings.save", { settings });
+      res.json({ success: true, settings, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/submit",
+    requireWorkspace,
+    requireAnyScope(["admin:write", "chat:write"]),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const result = submitNeuroExpansion({
+        title: String(req.body?.title || ""),
+        featureText: String(req.body?.featureText || ""),
+        codeText: String(req.body?.codeText || ""),
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        orgId: String(req.auth?.orgId || "personal"),
+        workspaceId: String(req.auth?.workspaceId || "default"),
+      });
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      auditDashboardAction(req, "neuroexpansion", "submit", {
+        id: result.submission.id,
+        severity: result.submission.scan.severity,
+        status: result.submission.status,
+      });
+      res.json({ success: true, submission: result.submission, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/review",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const decision = String(req.body?.decision || "").toLowerCase();
+      if (decision !== "approve" && decision !== "reject") {
+        return res.status(400).json({ error: "decision must be approve or reject" });
+      }
+      const result = reviewNeuroExpansionSubmission({
+        id: String(req.body?.id || ""),
+        decision: decision as "approve" | "reject",
+        reason: String(req.body?.reason || ""),
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+      });
+      if (!result.ok) return res.status(404).json({ error: result.error });
+      auditDashboardAction(req, "neuroexpansion", "review", {
+        id: result.submission.id,
+        decision,
+      });
+      res.json({ success: true, submission: result.submission, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/merge",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const result = mergeNeuroExpansionSubmission({
+        id: String(req.body?.id || ""),
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        testsRequested: Boolean(req.body?.testsRequested ?? true),
+      });
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      auditDashboardAction(req, "neuroexpansion", "merge", {
+        id: result.submission.id,
+        targetPath: result.submission.merge?.targetPath || "",
+      });
+      res.json({ success: true, submission: result.submission, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/scan-placeholders",
+    requireWorkspace,
+    requireAnyScope(["admin:read", "chat:write"]),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const report = scanPlaceholderGaps();
+      auditDashboardAction(req, "neuroexpansion", "scan_placeholders", {
+        totalFindings: report.totalFindings,
+      });
+      res.json({ success: true, report, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/daily/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const result = runDailyNeuroExpansionPlanner();
+      auditDashboardAction(req, "neuroexpansion", "daily_run", {
+        skipped: Boolean((result as any).skipped),
+        reason: (result as any).reason || "",
+      });
+      res.json({ success: true, result, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.get(
+    "/admin/dashboard/neuroexpansion/notifications",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const notifications = Array.isArray(dashboard.neuroExpansionNotifications)
+        ? dashboard.neuroExpansionNotifications
+        : [];
+      res.json({ success: true, notifications: notifications.slice(0, 200) });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/patch/preview",
+    requireWorkspace,
+    requireAnyScope(["admin:read", "chat:write"]),
+    requireRole(["founder", "admin", "developer"]),
+    async (req: Request, res: Response) => {
+      const id = String(req.body?.id || "");
+      if (!id) return res.status(400).json({ error: "Missing submission id" });
+      const result = await previewSubmissionPatch(id);
+      if (!result.ok) return res.status(400).json(result);
+      auditDashboardAction(req, "neuroexpansion", "patch.preview", { id });
+      res.json({ success: true, ...result, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/patch/apply",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const id = String(req.body?.id || "");
+      if (!id) return res.status(400).json({ error: "Missing submission id" });
+      const result = await applySubmissionPatch({
+        id,
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        runTests: Boolean(req.body?.runTests ?? true),
+        testCommand: String(req.body?.testCommand || "pnpm run typecheck"),
+      });
+      if (!result.ok) return res.status(400).json(result);
+      auditDashboardAction(req, "neuroexpansion", "patch.apply", {
+        id,
+        checkpointId: result.checkpoint?.id || "",
+      });
+      res.json({ success: true, ...result, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/neuroexpansion/pr/generate",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const id = String(req.body?.id || "");
+      if (!id) return res.status(400).json({ error: "Missing submission id" });
+      const result = await generateSubmissionPrDraft({
+        id,
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        baseBranch: String(req.body?.baseBranch || "main"),
+        materializeBranch: Boolean(req.body?.materializeBranch ?? false),
+        push: Boolean(req.body?.push ?? false),
+        remote: String(req.body?.remote || "origin"),
+      });
+      if (!result.ok) return res.status(400).json(result);
+      auditDashboardAction(req, "neuroexpansion", "pr.generate", {
+        id,
+        branchName: result.pr?.branchName || "",
+        materialized: Boolean(result.pr?.materialized),
+      });
+      res.json({ success: true, ...result, neuroExpansion: getNeuroExpansionState() });
+    }
+  );
 
   app.post("/admin/dashboard/enterprise/departments/upsert", requireWorkspace, requireScope("admin:write"), requireRole(["founder", "admin"]), (req: Request, res: Response) => {
     const input = req.body?.department || {};
@@ -3025,6 +5554,156 @@ export function startServer(
       res.json(resp.data);
     } catch (err: any) {
       res.status(502).json({ error: "NeuroTwin report failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/channels/bootstrap", requireWorkspace, requireScope("chat:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/channels/bootstrap`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin channel bootstrap failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/channels/connect", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/channels/connect`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin channel connect failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/channels/disconnect", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/channels/disconnect`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin channel disconnect failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/channels/policy", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/channels/policy`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin channel policy failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/availability", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/availability`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin availability update failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/auto-reply/draft", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/auto-reply/draft`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin auto-reply draft failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/auto-reply/approve", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/auto-reply/approve`, req.body || {}, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin auto-reply approve failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/auto-reply/logs", requireWorkspace, requireScope("chat:read"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const limit = Number(req.query?.limit || 50);
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/auto-reply/logs`, {
+        timeout: 45000,
+        params: { limit: Number.isFinite(limit) ? limit : 50 },
+      });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin auto-reply logs failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/market-map", requireWorkspace, requireScope("chat:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/market-map`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin market map failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/channels/send-test", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/channels/send-test`, req.body || {}, {
+        timeout: 45000,
+      });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin channel send test failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/call-assistant/config", requireWorkspace, requireScope("chat:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/call-assistant/config`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin call assistant config failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/call-assistant/config", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/call-assistant/config`, req.body || {}, {
+        timeout: 45000,
+      });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin call assistant config save failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/neurotwin/clone/customization", requireWorkspace, requireScope("chat:read"), async (_req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/neurotwin/clone/customization`, { timeout: 45000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin clone customization failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.post("/neurotwin/clone/customization", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/neurotwin/clone/customization`, req.body || {}, {
+        timeout: 45000,
+      });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "NeuroTwin clone customization save failed", detail: err?.message || String(err) });
     }
   });
 
@@ -4641,6 +7320,232 @@ export function startServer(
   );
 
   app.get(
+    "/admin/reliability/program",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      const state = readState() as any;
+      const program = state.reliabilityProgram || {
+        slo: {
+          availabilityPct: 99.9,
+          p95LatencyMs: 2500,
+          errorBudgetPct: 0.1,
+          windowDays: 30,
+          owner: "sre",
+          updatedAt: 0,
+        },
+        canary: {
+          enabled: true,
+          trafficPct: 5,
+          autoRollback: true,
+          lastRun: null,
+        },
+        statusPage: {
+          mode: "operational",
+          message: "All systems operational.",
+          updatedAt: 0,
+        },
+        incidents: [],
+      };
+      res.json({ success: true, program });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/slo",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const prev = (readState() as any).reliabilityProgram || {};
+      const incoming = req.body?.slo || {};
+      const slo = {
+        availabilityPct: Math.max(90, Math.min(100, Number(incoming.availabilityPct ?? 99.9))),
+        p95LatencyMs: Math.max(100, Number(incoming.p95LatencyMs ?? 2500)),
+        errorBudgetPct: Math.max(0.01, Math.min(10, Number(incoming.errorBudgetPct ?? 0.1))),
+        windowDays: Math.max(1, Math.min(365, Number(incoming.windowDays ?? 30))),
+        owner: String(incoming.owner || "sre"),
+        updatedAt: Date.now(),
+      };
+      const next = { ...prev, slo };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.slo.updated",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), slo },
+      });
+      res.json({ success: true, slo });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/canary/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const prev = (readState() as any).reliabilityProgram || {};
+      const baseline = buildReliabilitySnapshot(24);
+      const trafficPct = Math.max(1, Math.min(100, Number(req.body?.trafficPct ?? prev?.canary?.trafficPct ?? 5)));
+      const autoRollback = Boolean(req.body?.autoRollback ?? prev?.canary?.autoRollback ?? true);
+      const rollbackTriggered =
+        Number(baseline.successRate || 1) < 0.985 ||
+        Number(baseline.errorRate || 0) > 0.015 ||
+        Number(baseline.p95LatencyMs || 0) > 3000;
+      const result = {
+        id: `canary-${Date.now()}`,
+        trafficPct,
+        autoRollback,
+        rollbackTriggered: autoRollback && rollbackTriggered,
+        health: baseline,
+        recommendedAction:
+          autoRollback && rollbackTriggered
+            ? "rollback_to_previous_stable"
+            : "promote_or_continue_observation",
+        at: Date.now(),
+      };
+      const canary = {
+        enabled: true,
+        trafficPct,
+        autoRollback,
+        lastRun: result,
+      };
+      const next = { ...prev, canary };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.canary.run",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), result },
+      });
+      res.json({ success: true, result, canary });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/status-page",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const prev = (readState() as any).reliabilityProgram || {};
+      const modeRaw = String(req.body?.mode || prev?.statusPage?.mode || "operational");
+      const mode = ["operational", "degraded", "major_outage", "maintenance"].includes(modeRaw)
+        ? modeRaw
+        : "operational";
+      const statusPage = {
+        mode,
+        message: String(req.body?.message || prev?.statusPage?.message || "Status updated."),
+        updatedAt: Date.now(),
+      };
+      const next = { ...prev, statusPage };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.status_page.updated",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), statusPage },
+      });
+      res.json({ success: true, statusPage });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/incident",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const prev = (readState() as any).reliabilityProgram || {};
+      const incidents = Array.isArray(prev?.incidents) ? prev.incidents : [];
+      const incident = {
+        id: `inc-${Date.now()}`,
+        title: String(req.body?.title || "Unnamed incident"),
+        severity: ["sev1", "sev2", "sev3", "sev4"].includes(String(req.body?.severity || "sev3"))
+          ? String(req.body?.severity)
+          : "sev3",
+        status: ["open", "monitoring", "resolved"].includes(String(req.body?.status || "open"))
+          ? String(req.body?.status)
+          : "open",
+        summary: String(req.body?.summary || ""),
+        owner: String(req.body?.owner || req.auth?.sub || "oncall"),
+        createdAt: Date.now(),
+      };
+      const next = { ...prev, incidents: [incident, ...incidents].slice(0, 200) };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.incident.created",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), incident },
+      });
+      res.json({ success: true, incident });
+    }
+  );
+
+  app.get(
+    "/admin/market-readiness/config",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        config: getMarketReadinessConfig(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/market-readiness/config",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const config = updateMarketReadinessConfig(req.body || {});
+      appendEvent({
+        type: "admin.market_readiness.updated",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          role: actorRole(req),
+          config,
+        },
+      });
+      res.json({ success: true, config });
+    }
+  );
+
+  app.get(
+    "/admin/market-readiness/summary",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      const trust = buildTrustSignalsSummary(72);
+      const reliability = buildReliabilitySnapshot(24);
+      const retrieval = buildRetrievalFreshnessSummary(72);
+      const benchmarkRegression = computeBenchmarkRegression(30);
+      const config = getMarketReadinessConfig();
+      res.json({
+        success: true,
+        summary: {
+          config,
+          trust,
+          reliability,
+          retrieval,
+          benchmarkRegression,
+          readinessScore: Number(
+            (
+              ((1 - Number(trust.hallucinationRiskScore || 1)) * 0.35) +
+              (Number(reliability.successRate || 0) * 0.35) +
+              ((1 - Number(retrieval.staleCitationRate || 1)) * 0.3)
+            ).toFixed(4)
+          ),
+        },
+      });
+    }
+  );
+
+  app.get(
     "/admin/frontier-program",
     requireWorkspace,
     requireScope("admin:read"),
@@ -4818,6 +7723,8 @@ export function startServer(
   let lastTickAt = 0;
   let autoEvalRunning = false;
   let autoEvalLastTickAt = 0;
+  let payoutSchedulerRunning = false;
+  let payoutSchedulerLastTickAt = 0;
 
   const runNightlyAutoRefresh = async () => {
     const cfg = getAutoRefreshConfig();
@@ -4978,6 +7885,114 @@ export function startServer(
     }
   };
 
+  const runAutoPayoutScheduler = async () => {
+    if (payoutSchedulerRunning) return;
+    const tickMs = Math.max(30_000, Number(process.env.AUTO_PAYOUT_TICK_MS || 60_000));
+    const nowMs = Date.now();
+    if (nowMs - payoutSchedulerLastTickAt < tickMs) return;
+    payoutSchedulerLastTickAt = nowMs;
+    payoutSchedulerRunning = true;
+    try {
+      const { dashboard } = readDashboardSummary();
+      const compute = (dashboard.computeDonation || {}) as Record<string, any>;
+      const rewardsLedger = (dashboard.rewardsLedger || {}) as Record<string, any>;
+      const requests = Array.isArray(compute.payoutRequests) ? compute.payoutRequests : [];
+      const pending = requests.filter((r: any) => String(r.status || "") === "approved_pending_payout");
+      if (pending.length === 0) return;
+      const config = (compute.autoPayoutConfig || {}) as Record<string, any>;
+      const period = String(
+        config.period ||
+          dashboard?.cryptoRewards?.payoutSchedule ||
+          process.env.AUTO_PAYOUT_PERIOD ||
+          "weekly"
+      ).toLowerCase();
+      const enabled = Boolean(config.enabled ?? boolEnv("AUTO_PAYOUT_ENABLED", true));
+      if (!enabled) return;
+      const bucket = payoutPeriodBucket(period);
+      if (String(config.lastRunBucket || "") === bucket) return;
+      const maxPayoutsPerRun = Math.max(1, Math.min(500, Number(config.maxPayoutsPerRun || 200)));
+      const processSet = pending
+        .sort((a: any, b: any) => Number(a.createdAt || 0) - Number(b.createdAt || 0))
+        .slice(0, maxPayoutsPerRun);
+      const processIds = new Set(processSet.map((r: any) => String(r.id)));
+      let sentUsdDelta = 0;
+      const nextRequests = requests.map((r: any) => {
+        if (!processIds.has(String(r.id))) return r;
+        sentUsdDelta += Number(r.amountUsd || 0);
+        return {
+          ...r,
+          status: "approved_sent",
+          sentAt: nowMs,
+          settlement: "scheduled_auto",
+          txRef: `auto-${nowMs}-${Math.random().toString(36).slice(2, 9)}`,
+          schedulerBucket: bucket,
+        };
+      });
+      const wallets = Array.isArray(rewardsLedger.wallets) ? rewardsLedger.wallets : [];
+      const deltas = new Map<string, { usd: number; wdc: number; points: number }>();
+      for (const row of processSet) {
+        const userId = String(row.userId || "").toLowerCase();
+        const curr = deltas.get(userId) || { usd: 0, wdc: 0, points: 0 };
+        curr.usd += Number(row.amountUsd || 0);
+        curr.wdc += Number(row.amountWdc || 0);
+        curr.points += Number(row.points || 0);
+        deltas.set(userId, curr);
+      }
+      const nextWallets = wallets.map((w: any) => {
+        const d = deltas.get(String(w.userId || "").toLowerCase());
+        if (!d) return w;
+        return {
+          ...w,
+          pendingCashUsd: Math.max(0, Number((Number(w.pendingCashUsd || 0) - d.usd).toFixed(2))),
+          pendingWdc: Math.max(0, Number((Number(w.pendingWdc || 0) - d.wdc).toFixed(6))),
+          points: Math.max(0, Number(w.points || 0) - d.points),
+          updatedAt: nowMs,
+        };
+      });
+      const budget = (compute.payoutBudget || {}) as Record<string, any>;
+      const nextBudget = {
+        ...budget,
+        sentUsd: Number((Number(budget.sentUsd || 0) + sentUsdDelta).toFixed(2)),
+        updatedAt: nowMs,
+      };
+      const nextCompute = {
+        ...compute,
+        payoutRequests: nextRequests,
+        payoutBudget: nextBudget,
+        autoPayoutConfig: {
+          ...config,
+          enabled,
+          period,
+          maxPayoutsPerRun,
+          lastRunBucket: bucket,
+          lastRunAt: nowMs,
+        },
+        updatedAt: nowMs,
+      };
+      const nextLedger = { ...rewardsLedger, wallets: nextWallets, config: rewardsLedger.config || {} };
+      mergeDashboardSection("rewardsLedger", nextLedger);
+      mergeDashboardSection("computeDonation", nextCompute);
+      appendEvent({
+        type: "compute.payout.scheduler.run",
+        timestamp: nowMs,
+        payload: {
+          period,
+          bucket,
+          processed: processSet.length,
+          sentUsdDelta: Number(sentUsdDelta.toFixed(2)),
+        },
+      });
+    } catch (err: any) {
+      appendEvent({
+        type: "compute.payout.scheduler.error",
+        timestamp: Date.now(),
+        payload: { error: err?.message || String(err) },
+      });
+    } finally {
+      payoutSchedulerRunning = false;
+    }
+  };
+
   setInterval(() => {
     void runNightlyAutoRefresh();
   }, 30_000);
@@ -4985,6 +8000,22 @@ export function startServer(
   setInterval(() => {
     void runNightlyAutoEval();
   }, 30_000);
+
+  setInterval(() => {
+    void runAutoPayoutScheduler();
+  }, 30_000);
+
+  setInterval(() => {
+    try {
+      runDailyNeuroExpansionPlanner();
+    } catch (err: any) {
+      appendEvent({
+        type: "neuroexpansion.daily.error",
+        timestamp: Date.now(),
+        payload: { error: err?.message || String(err) },
+      });
+    }
+  }, 15 * 60 * 1000);
 
   app.listen(restPort, () => {
     logger.info(

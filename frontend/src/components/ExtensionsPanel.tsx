@@ -8,6 +8,9 @@ export interface Extension {
   active: boolean;
   permissions: string[];
   version?: string;
+  system?: boolean;
+  createdBy?: string;
+  createdByEmail?: string;
 }
 
 const ExtensionsPanel: React.FC = () => {
@@ -99,8 +102,10 @@ const ExtensionsPanel: React.FC = () => {
     return h;
   };
 
-  const role = String(authContext().userRole || "user").toLowerCase();
-  const canManage = role === "founder" || role === "admin" || role === "developer";
+  const auth = authContext();
+  const role = String(auth.userRole || "user").toLowerCase();
+  const actorId = String(auth.userEmail || "").trim().toLowerCase();
+  const canCreate = role === "founder" || role === "admin" || role === "developer";
 
   const baseUrl = useMemo(
     () => String(import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:7070").replace(/\/$/, ""),
@@ -153,6 +158,15 @@ const ExtensionsPanel: React.FC = () => {
     } catch (err: any) {
       setError(err?.message || "Delete failed");
     }
+  };
+
+  const canDeleteExtension = (ext: Extension): boolean => {
+    if (ext.system) return false;
+    if (role === "founder" || role === "admin" || role === "developer") return true;
+    if (role === "user") {
+      return String(ext.createdByEmail || "").trim().toLowerCase() === actorId;
+    }
+    return false;
   };
 
   const handleCreate = async () => {
@@ -210,11 +224,10 @@ const ExtensionsPanel: React.FC = () => {
           placeholder="Permissions comma-separated"
           style={inputStyle}
         />
-        <button onClick={handleCreate} style={primaryActionStyle} disabled={!canManage}>➕ Load New Extension</button>
+        <button onClick={handleCreate} style={primaryActionStyle} disabled={!canCreate}>➕ Load New Extension</button>
       </div>
 
       {error ? <div style={errorStyle}>{error}</div> : null}
-      {!canManage ? <div style={errorStyle}>Read-only mode: manage actions require founder/admin/developer role.</div> : null}
 
       <div style={listStyle}>
         {extensions.map((ext) => (
@@ -226,12 +239,14 @@ const ExtensionsPanel: React.FC = () => {
             </div>
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <span style={statusPillStyle(ext.active)}>{ext.active ? "Active" : "Inactive"}</span>
-              <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)} disabled={!canManage}>
+              <button onClick={() => toggleExtension(ext.id)} style={actionButtonStyle(ext.active)}>
                 {ext.active ? "Deactivate" : "Activate"}
               </button>
-              <button onClick={() => deleteExtension(ext.id)} style={dangerButtonStyle} disabled={!canManage}>
-                Delete
-              </button>
+              {canDeleteExtension(ext) ? (
+                <button onClick={() => deleteExtension(ext.id)} style={dangerButtonStyle}>
+                  Delete
+                </button>
+              ) : null}
             </div>
           </div>
         ))}
