@@ -31,6 +31,7 @@
       "@integrations/*": ["integrations/*"],
       "@research/*": ["research/*"],
       "@training/*": ["training/*"],
+      "@quality/*": ["quality/*"],
       "@stream/*": ["stream/*"],
       "@types/*": ["types/*"],
       "@server": ["server/index"]

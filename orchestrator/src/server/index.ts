@@ -32,7 +32,44 @@ import {
 import { summarizeUsage } from "@billing/usage";
 import { createRateLimiter } from "@security/rateLimit";
 import { runResearch } from "@research/pipeline";
-import { exportTrainingJSONL, listTrainingSamples, recordTrainingSample } from "@training/dataset";
+import {
+  exportTrainingJSONL,
+  listTrainingSamples,
+  recordTrainingSample,
+  recordTrainingSampleGuarded,
+} from "@training/dataset";
+import {
+  getEvalCoverageCatalog,
+  runEvalBatch,
+  runEvalSuite,
+  runRedTeamSuite,
+  type EvalSuiteName,
+} from "@quality/evalRunner";
+import { buildReliabilitySnapshot } from "@quality/reliability";
+import {
+  getModelRouterConfig,
+  saveModelRouterConfig,
+  summarizeModelOutcomes,
+  recordModelOutcome,
+} from "@quality/modelQuality";
+import { buildRetrievalFreshnessSummary } from "@quality/retrievalFreshness";
+import { buildTrustSignalsSummary } from "@quality/trustSignals";
+import {
+  buildBenchmarkTrend,
+  computeBenchmarkRegression,
+  getBenchmarkBaselines,
+  saveBenchmarkBaselines,
+} from "@quality/benchmarkTracker";
+import { buildConsistencySnapshot } from "@quality/consistency";
+import { createInflightGuard, getInflightSnapshot } from "@quality/sreGuard";
+import {
+  bulkUpdateFrontierItems,
+  frontierTrainingReadinessReport,
+  getFrontierProgram,
+  resetFrontierProgram,
+  upsertFrontierItem,
+  upsertFrontierMilestone,
+} from "@quality/frontierProgram";
 import {
   doctrineShieldMiddleware,
   doctrineVersion,
@@ -3427,6 +3464,18 @@ export function startServer(
     windowMs: Number(process.env.EXECUTE_RATE_LIMIT_WINDOW_MS || 60000),
     maxRequests: Number(process.env.EXECUTE_RATE_LIMIT_MAX || 80),
   });
+  const aiInflightGuard = createInflightGuard(
+    "ai",
+    Math.max(8, Number(process.env.AI_MAX_INFLIGHT || 120))
+  );
+  const chatInflightGuard = createInflightGuard(
+    "chat",
+    Math.max(8, Number(process.env.CHAT_MAX_INFLIGHT || 120))
+  );
+  const executeInflightGuard = createInflightGuard(
+    "execute",
+    Math.max(4, Number(process.env.EXECUTE_MAX_INFLIGHT || 60))
+  );
 
   app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities } = req.body || {};
@@ -3559,7 +3608,7 @@ export function startServer(
     if (!query || !responseText) {
       return res.status(400).json({ error: "Missing query or response" });
     }
-    const evt = recordTrainingSample({
+    const result = recordTrainingSampleGuarded({
       query,
       response: responseText,
       rating,
@@ -3569,7 +3618,23 @@ export function startServer(
       tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
       citations: Array.isArray(req.body?.citations) ? req.body.citations : [],
     });
-    res.json({ success: true, event: evt });
+    if (!result.accepted) {
+      return res.status(422).json({
+        success: false,
+        error: "Training sample rejected by quality gate",
+        reason: result.reason || "rejected",
+      });
+    }
+    const model = String(req.body?.model || "").trim();
+    if (model) {
+      recordModelOutcome({
+        model,
+        rating,
+        domain: String(req.body?.domain || "general"),
+        confidence: Number(req.body?.confidence || 0),
+      });
+    }
+    res.json({ success: true, event: result.event });
   });
 
   app.get(
@@ -4212,12 +4277,474 @@ export function startServer(
     res.send(jsonl);
   });
 
-  app.post("/chat", requireWorkspace, requireScope("chat:write"), aiLimiter, handleChat);
-  app.post("/execute", requireWorkspace, requireScope("execute:run"), executeLimiter, handleExecution);
-  app.post("/ai", requireWorkspace, requireScope("ai:infer"), aiLimiter, handleAIInference);
-  app.post("/brainstorm", requireWorkspace, requireScope("chat:write"), aiLimiter, handleBrainstorm);
-  app.post("/dev/assist", requireWorkspace, requireScope("chat:write"), executeLimiter, handleDevAssistant);
-  app.post("/ai/stream", requireWorkspace, requireScope("ai:infer"), aiLimiter, async (req: Request, res: Response) => {
+  app.get(
+    "/admin/reliability/overview",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowHours = Math.max(1, Math.min(24 * 30, Number(req.query.windowHours) || 24));
+      const snapshot = buildReliabilitySnapshot(windowHours);
+      res.json({
+        success: true,
+        snapshot,
+        orgId: req.auth?.orgId || "personal",
+        workspaceId: req.auth?.workspaceId || "default",
+      });
+    }
+  );
+
+  app.post(
+    "/admin/evals/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const suite = String(req.body?.suite || "core").toLowerCase() as EvalSuiteName;
+      const allowedSuites: EvalSuiteName[] = ["core", "reasoning", "coding", "research"];
+      if (!allowedSuites.includes(suite)) {
+        return res.status(400).json({ error: "Invalid eval suite", allowed: allowedSuites });
+      }
+      const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
+      if (!apiKey) {
+        return res.status(400).json({ error: "Missing API key for eval runner. Set NEUROEDGE_API_KEY." });
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "x-org-id": req.auth?.orgId || "personal",
+        "x-workspace-id": req.auth?.workspaceId || "default",
+      };
+      const report = await runEvalSuite(suite, restBase, headers);
+      appendEvent({
+        type: "quality.eval.completed",
+        timestamp: Date.now(),
+        payload: {
+          suite,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          report,
+        },
+      });
+      res.json({ success: true, report });
+    }
+  );
+
+  app.get(
+    "/admin/evals/latest",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+      const reports = listEvents(6000)
+        .filter((evt) => evt.type === "quality.eval.completed")
+        .slice(-limit)
+        .map((evt) => ({
+          timestamp: evt.timestamp,
+          ...(evt.payload || {}),
+        }));
+      res.json({ success: true, reports });
+    }
+  );
+
+  app.post(
+    "/admin/redteam/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
+      if (!apiKey) {
+        return res.status(400).json({ error: "Missing API key for red-team runner. Set NEUROEDGE_API_KEY." });
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "x-org-id": req.auth?.orgId || "personal",
+        "x-workspace-id": req.auth?.workspaceId || "default",
+      };
+      const report = await runRedTeamSuite(restBase, headers);
+      appendEvent({
+        type: "quality.redteam.completed",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          report,
+        },
+      });
+      res.json({ success: true, report });
+    }
+  );
+
+  app.get(
+    "/admin/redteam/latest",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+      const reports = listEvents(6000)
+        .filter((evt) => evt.type === "quality.redteam.completed")
+        .slice(-limit)
+        .map((evt) => ({
+          timestamp: evt.timestamp,
+          ...(evt.payload || {}),
+        }));
+      res.json({ success: true, reports });
+    }
+  );
+
+  app.get(
+    "/admin/evals/coverage",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        coverage: getEvalCoverageCatalog(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/evals/run-batch",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const suitesRaw = Array.isArray(req.body?.suites) ? req.body.suites : ["core", "reasoning", "coding", "research"];
+      const suites = suitesRaw
+        .map((s: any) => String(s || "").toLowerCase())
+        .filter((s: string) => ["core", "reasoning", "coding", "research"].includes(s)) as EvalSuiteName[];
+      if (suites.length === 0) {
+        return res.status(400).json({ error: "No valid suites provided" });
+      }
+      const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
+      if (!apiKey) {
+        return res.status(400).json({ error: "Missing API key for eval runner. Set NEUROEDGE_API_KEY." });
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "x-org-id": req.auth?.orgId || "personal",
+        "x-workspace-id": req.auth?.workspaceId || "default",
+      };
+      const report = await runEvalBatch(suites, restBase, headers);
+      appendEvent({
+        type: "quality.eval.batch.completed",
+        timestamp: Date.now(),
+        payload: {
+          suites,
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          report,
+        },
+      });
+      res.json({ success: true, report });
+    }
+  );
+
+  app.get(
+    "/admin/retrieval/freshness",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowHours = Math.max(1, Math.min(24 * 30, Number(req.query.windowHours) || 72));
+      const summary = buildRetrievalFreshnessSummary(windowHours);
+      res.json({ success: true, summary });
+    }
+  );
+
+  app.get(
+    "/admin/trust/signals",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowHours = Math.max(1, Math.min(24 * 30, Number(req.query.windowHours) || 72));
+      const summary = buildTrustSignalsSummary(windowHours);
+      res.json({ success: true, summary });
+    }
+  );
+
+  app.get(
+    "/admin/trust/consistency",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowHours = Math.max(1, Math.min(24 * 30, Number(req.query.windowHours) || 72));
+      const summary = buildConsistencySnapshot(windowHours);
+      res.json({ success: true, summary });
+    }
+  );
+
+  app.get(
+    "/admin/quality/benchmark/trends",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowDays = Math.max(1, Math.min(365, Number(req.query.windowDays) || 30));
+      res.json({
+        success: true,
+        trend: buildBenchmarkTrend(windowDays),
+      });
+    }
+  );
+
+  app.get(
+    "/admin/quality/benchmark/regression",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const windowDays = Math.max(1, Math.min(365, Number(req.query.windowDays) || 30));
+      res.json({
+        success: true,
+        regression: computeBenchmarkRegression(windowDays),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/quality/benchmark/baselines",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const baselines = Array.isArray(req.body?.baselines) ? req.body.baselines : [];
+      if (baselines.length === 0) {
+        return res.status(400).json({ error: "Missing baselines" });
+      }
+      const next = saveBenchmarkBaselines(
+        baselines.map((b: any) => ({
+          suite: String(b?.suite || ""),
+          minAccuracy: Number(b?.minAccuracy || 0),
+          maxP95LatencyMs: Number(b?.maxP95LatencyMs || 0),
+        }))
+      );
+      res.json({ success: true, baselines: next });
+    }
+  );
+
+  app.get(
+    "/admin/quality/benchmark/baselines",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({ success: true, baselines: getBenchmarkBaselines() });
+    }
+  );
+
+  app.get(
+    "/admin/model-quality/summary",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        router: getModelRouterConfig(),
+        outcomes: summarizeModelOutcomes(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/model-quality/router",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const variants = Array.isArray(req.body?.variants) ? req.body.variants : [];
+      if (variants.length === 0) {
+        return res.status(400).json({ error: "Missing variants" });
+      }
+      const normalized = variants
+        .map((v: any) => ({
+          id: String(v?.id || "").trim(),
+          weight: Math.max(1, Number(v?.weight || 1)),
+          domains: Array.isArray(v?.domains) ? v.domains.map((d: any) => String(d).toLowerCase()) : ["general"],
+          enabled: Boolean(v?.enabled ?? true),
+        }))
+        .filter((v: any) => !!v.id);
+      if (normalized.length === 0) {
+        return res.status(400).json({ error: "No valid variants" });
+      }
+      const cfg = saveModelRouterConfig({ variants: normalized });
+      res.json({ success: true, config: cfg });
+    }
+  );
+
+  app.post(
+    "/admin/quality/hardening/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    async (req: Request, res: Response) => {
+      const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
+      if (!apiKey) {
+        return res.status(400).json({ error: "Missing API key for hardening run. Set NEUROEDGE_API_KEY." });
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "x-org-id": req.auth?.orgId || "personal",
+        "x-workspace-id": req.auth?.workspaceId || "default",
+      };
+      const batch = await runEvalBatch(["core", "reasoning", "coding", "research"], restBase, headers);
+      const redteam = await runRedTeamSuite(restBase, headers);
+      const reliability = buildReliabilitySnapshot(24);
+      const retrieval = buildRetrievalFreshnessSummary(72);
+      const trust = buildTrustSignalsSummary(72);
+      const consistency = buildConsistencySnapshot(72);
+      const benchmarkRegression = computeBenchmarkRegression(30);
+      const report = { batch, redteam, reliability, retrieval, trust, consistency, benchmarkRegression };
+      appendEvent({
+        type: "quality.hardening.completed",
+        timestamp: Date.now(),
+        payload: {
+          actor: req.auth?.sub || "unknown",
+          orgId: req.auth?.orgId || "personal",
+          workspaceId: req.auth?.workspaceId || "default",
+          report,
+        },
+      });
+      res.json({ success: true, report });
+    }
+  );
+
+  app.get(
+    "/admin/sre/concurrency",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        inflight: getInflightSnapshot(),
+      });
+    }
+  );
+
+  app.get(
+    "/admin/frontier-program",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        program: getFrontierProgram(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/frontier-program/item",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "Missing item id" });
+      const program = upsertFrontierItem({
+        id,
+        group: req.body?.group,
+        title: req.body?.title,
+        description: req.body?.description,
+        status: req.body?.status,
+        priority: req.body?.priority,
+        owner: req.body?.owner,
+        targetQuarter: req.body?.targetQuarter,
+        notes: req.body?.notes,
+      } as any);
+      res.json({ success: true, program });
+    }
+  );
+
+  app.post(
+    "/admin/frontier-program/items/bulk",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x: any) => String(x)) : [];
+      if (ids.length === 0) return res.status(400).json({ error: "Missing item ids" });
+      const program = bulkUpdateFrontierItems({
+        ids,
+        status: req.body?.status,
+        owner: req.body?.owner,
+        priority: req.body?.priority,
+        notes: req.body?.notes,
+      } as any);
+      res.json({ success: true, program });
+    }
+  );
+
+  app.post(
+    "/admin/frontier-program/milestone",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "Missing milestone id" });
+      const program = upsertFrontierMilestone({
+        id,
+        name: req.body?.name,
+        quarter: req.body?.quarter,
+        owner: req.body?.owner,
+        status: req.body?.status,
+        successCriteria: Array.isArray(req.body?.successCriteria) ? req.body.successCriteria : [],
+      } as any);
+      res.json({ success: true, program });
+    }
+  );
+
+  app.get(
+    "/admin/frontier-program/readiness",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        readiness: frontierTrainingReadinessReport(),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/frontier-program/reset",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder"]),
+    (_req: Request, res: Response) => {
+      const program = resetFrontierProgram();
+      res.json({ success: true, program });
+    }
+  );
+
+  app.post("/chat", requireWorkspace, requireScope("chat:write"), aiLimiter, chatInflightGuard, handleChat);
+  app.post("/execute", requireWorkspace, requireScope("execute:run"), executeLimiter, executeInflightGuard, handleExecution);
+  app.post("/ai", requireWorkspace, requireScope("ai:infer"), aiLimiter, aiInflightGuard, handleAIInference);
+  app.post("/brainstorm", requireWorkspace, requireScope("chat:write"), aiLimiter, chatInflightGuard, handleBrainstorm);
+  app.post("/dev/assist", requireWorkspace, requireScope("chat:write"), executeLimiter, executeInflightGuard, handleDevAssistant);
+  app.post("/ai/stream", requireWorkspace, requireScope("ai:infer"), aiLimiter, aiInflightGuard, async (req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -4289,6 +4816,8 @@ export function startServer(
 
   let autoRefreshRunning = false;
   let lastTickAt = 0;
+  let autoEvalRunning = false;
+  let autoEvalLastTickAt = 0;
 
   const runNightlyAutoRefresh = async () => {
     const cfg = getAutoRefreshConfig();
@@ -4356,8 +4885,105 @@ export function startServer(
     }
   };
 
+  const runNightlyAutoEval = async () => {
+    const enabled = boolEnv("AUTO_EVAL_NIGHTLY", true);
+    if (!enabled || autoEvalRunning) return;
+    const tickMs = Math.max(30_000, Number(process.env.AUTO_EVAL_TICK_MS || 60_000));
+    const nowMs = Date.now();
+    if (nowMs - autoEvalLastTickAt < tickMs) return;
+    autoEvalLastTickAt = nowMs;
+
+    const hourUtc = Math.max(0, Math.min(23, Number(process.env.AUTO_EVAL_HOUR_UTC || 2)));
+    const minuteUtc = Math.max(0, Math.min(59, Number(process.env.AUTO_EVAL_MINUTE_UTC || 30)));
+    const now = new Date();
+    if (now.getUTCHours() !== hourUtc || now.getUTCMinutes() < minuteUtc) return;
+
+    const dayKey = now.toISOString().slice(0, 10);
+    const state = readState();
+    const summary = (state.summary || {}) as Record<string, any>;
+    if (String(summary.lastNightlyEvalDay || "") === dayKey) return;
+
+    const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || "").trim();
+    if (!apiKey) {
+      appendEvent({
+        type: "quality.eval.nightly.skipped",
+        timestamp: Date.now(),
+        payload: {
+          reason: "missing_api_key",
+          env: "NEUROEDGE_API_KEY",
+          hourUtc,
+          minuteUtc,
+        },
+      });
+      writeState({
+        ...state,
+        summary: {
+          ...summary,
+          lastNightlyEvalDay: dayKey,
+          lastNightlyEvalSkipped: true,
+          lastNightlyEvalReason: "missing_api_key",
+          updatedAt: Date.now(),
+        },
+      });
+      return;
+    }
+
+    autoEvalRunning = true;
+    try {
+      const baseUrl = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "x-org-id": "personal",
+        "x-workspace-id": "default",
+      };
+      const core = await runEvalSuite("core", baseUrl, headers);
+      const reasoning = await runEvalSuite("reasoning", baseUrl, headers);
+      const coding = await runEvalSuite("coding", baseUrl, headers);
+      const research = await runEvalSuite("research", baseUrl, headers);
+      const redteam = await runRedTeamSuite(baseUrl, headers);
+      const reliability = buildReliabilitySnapshot(24);
+      const report = { core, reasoning, coding, research, redteam, reliability };
+      appendEvent({
+        type: "quality.eval.nightly.completed",
+        timestamp: Date.now(),
+        payload: {
+          dayKey,
+          hourUtc,
+          minuteUtc,
+          report,
+        },
+      });
+      writeState({
+        ...state,
+        summary: {
+          ...summary,
+          lastNightlyEvalDay: dayKey,
+          lastNightlyEvalAt: Date.now(),
+          lastNightlyEval: report,
+          updatedAt: Date.now(),
+        },
+      });
+    } catch (err: any) {
+      appendEvent({
+        type: "quality.eval.nightly.error",
+        timestamp: Date.now(),
+        payload: {
+          dayKey,
+          error: err?.message || String(err),
+        },
+      });
+    } finally {
+      autoEvalRunning = false;
+    }
+  };
+
   setInterval(() => {
     void runNightlyAutoRefresh();
+  }, 30_000);
+
+  setInterval(() => {
+    void runNightlyAutoEval();
   }, 30_000);
 
   app.listen(restPort, () => {

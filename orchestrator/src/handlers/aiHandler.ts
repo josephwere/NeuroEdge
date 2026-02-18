@@ -1,11 +1,13 @@
 // orchestrator/src/handlers/aiHandler.ts
 import { Request, Response } from "express";
 import axios from "axios";
+import crypto from "crypto";
 import { appendEvent, listEvents } from "@storage/hybrid_db";
 import { traceLLMCall } from "@observability/tracing";
 import { recordTokenUsage } from "@billing/usage";
 import { trackTokenUsage } from "@observability/metrics";
 import { runResearch } from "@research/pipeline";
+import { chooseModelVariant, recordModelOutcome } from "@quality/modelQuality";
 
 function parseSharedPattern(text: string): { total: number; people: number } | null {
   const m = text
@@ -72,6 +74,29 @@ function citationModeRequired(text: string): boolean {
   return strict && isFactualPrompt(text);
 }
 
+function detectSafetyBlockReason(text: string): string | null {
+  const t = String(text || "").toLowerCase();
+  if (!t.trim()) return null;
+  const policyRules: Array<{ re: RegExp; reason: string }> = [
+    {
+      re: /\b(ignore previous instructions|bypass safety|disable guardrails|reveal secret)\b/,
+      reason: "prompt_injection_attempt",
+    },
+    {
+      re: /\b(write malware|steal passwords|keylogger|ransomware|exploit zero day)\b/,
+      reason: "malware_generation_request",
+    },
+    {
+      re: /\b(harmful chemical|weaponize|build bomb|bioweapon)\b/,
+      reason: "harmful_instruction_request",
+    },
+  ];
+  for (const rule of policyRules) {
+    if (rule.re.test(t)) return rule.reason;
+  }
+  return null;
+}
+
 type CortexDomain = "medicine" | "agriculture" | "market" | "general";
 
 function detectCortexDomain(text: string): CortexDomain {
@@ -136,10 +161,15 @@ function retrieveMemoryHints(text: string): string[] {
   });
 }
 
-async function callInstructionModel(input: string, memoryHints: string[], style: "concise" | "balanced" | "detailed"): Promise<string | null> {
+async function callInstructionModel(
+  input: string,
+  memoryHints: string[],
+  style: "concise" | "balanced" | "detailed",
+  modelName?: string
+): Promise<string | null> {
   const baseUrl = String(process.env.LLM_API_URL || "").trim();
   if (!baseUrl) return null;
-  const model = String(process.env.LLM_MODEL_NAME || "neuroedge-7b-instruct");
+  const model = String(modelName || process.env.LLM_MODEL_NAME || "neuroedge-7b-instruct");
   const apiKey = String(process.env.LLM_API_KEY || "");
   const timeoutMs = Math.max(1500, Number(process.env.LLM_TIMEOUT_MS || 12000));
   const controller = new AbortController();
@@ -302,6 +332,10 @@ function buildAssistantResponse(input: string, action: string, context: any[] = 
   return "Understood. Give me a bit more detail and I will respond with a concrete answer, not just intent classification.";
 }
 
+function sha(value: string): string {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
 /**
  * Handles AI inference requests via ML service.
  */
@@ -312,6 +346,28 @@ export async function handleAIInference(req: Request, res: Response) {
 
   if (!input && Object.keys(payload).length === 0) {
     return res.status(400).json({ error: "Missing input" });
+  }
+
+  const safetyReason = detectSafetyBlockReason(String(input || ""));
+  if (safetyReason) {
+    appendEvent({
+      type: "policy.blocked_ai",
+      timestamp: Date.now(),
+      payload: {
+        reason: safetyReason,
+        actor: req.auth?.sub || "unknown",
+        orgId: req.auth?.orgId || "personal",
+        workspaceId: req.auth?.workspaceId || "default",
+        inputPreview: String(input || "").slice(0, 180),
+      },
+    });
+    return res.status(400).json({
+      success: false,
+      error: "Request blocked by safety policy",
+      reason: safetyReason,
+      response:
+        "I can help with safe, legal alternatives. Rephrase your request for defensive/security, educational, or compliance guidance.",
+    });
   }
 
   const mlUrl = process.env.ML_URL || "http://localhost:8090";
@@ -327,6 +383,14 @@ export async function handleAIInference(req: Request, res: Response) {
   const style = getStyle(req);
   const citationRequired = citationModeRequired(text);
   const contextArr = Array.isArray(req.body?.context) ? req.body.context : [];
+  const domain = detectCortexDomain(String(input || ""));
+  const modelPick = chooseModelVariant({
+    domain,
+    actor: req.auth?.sub || "anonymous",
+    workspaceId: req.auth?.workspaceId || "default",
+    text: String(input || ""),
+  });
+  const selectedModel = modelPick.variant;
   const key = cacheKey(String(input || ""), contextArr);
   const cached = aiCache.get(key);
   if (cached && Date.now() - cached.ts < getCacheTtlMs()) {
@@ -413,7 +477,6 @@ export async function handleAIInference(req: Request, res: Response) {
     const memoryHints = retrieveMemoryHints(String(input || ""));
     const researchTool = toolOutputs.find((t) => t.name === "research" && t.success);
     const mathTool = toolOutputs.find((t) => t.name === "math" && t.success);
-    const domain = detectCortexDomain(String(input || ""));
     const cortexMode =
       style === "concise" ? "fast" : style === "detailed" ? "deep_research" : "step_by_step";
 
@@ -464,7 +527,12 @@ export async function handleAIInference(req: Request, res: Response) {
     }
 
     if (!assistant) {
-      const llmText = await callInstructionModel(String(input || ""), memoryHints, style);
+      const llmText = await callInstructionModel(
+        String(input || ""),
+        memoryHints,
+        style,
+        selectedModel
+      );
       assistant = String(
         llmText ||
           mlData?.response ||
@@ -494,7 +562,7 @@ export async function handleAIInference(req: Request, res: Response) {
       risk: "low",
       response: assistant,
       confidence: verification.ok ? 0.84 : 0.52,
-      model: process.env.LLM_MODEL_NAME || process.env.ML_MODEL_NAME || "neuroedge-ml",
+      model: selectedModel || process.env.LLM_MODEL_NAME || process.env.ML_MODEL_NAME || "neuroedge-ml",
       tools: toolOutputs.map((t) => ({
         name: t.name,
         success: t.success,
@@ -505,6 +573,31 @@ export async function handleAIInference(req: Request, res: Response) {
       ml: { ...mlData, mesh: usedMesh },
       timestamp: new Date().toISOString(),
     };
+    appendEvent({
+      type: "ai.response",
+      timestamp: Date.now(),
+      payload: {
+        queryHash: sha(String(input || "").trim().toLowerCase()),
+        responseHash: sha(assistant),
+        intent: responsePayload.intent,
+        confidence: responsePayload.confidence,
+        model: responsePayload.model,
+        citationCount: Array.isArray(responsePayload.citations)
+          ? responsePayload.citations.length
+          : 0,
+        toolCount: Array.isArray(responsePayload.tools)
+          ? responsePayload.tools.length
+          : 0,
+        verificationOk: verification.ok,
+      },
+    });
+    recordModelOutcome({
+      model: selectedModel || process.env.LLM_MODEL_NAME || process.env.ML_MODEL_NAME || "neuroedge-ml",
+      rating: "neutral",
+      domain,
+      latencyMs: Date.now() - startedAt,
+      confidence: verification.ok ? 0.84 : 0.52,
+    });
     aiCache.set(key, { ts: Date.now(), data: responsePayload });
     res.json(responsePayload);
   } catch (err) {
@@ -556,6 +649,20 @@ export async function handleAIInference(req: Request, res: Response) {
       },
       timestamp: new Date().toISOString(),
     };
+    appendEvent({
+      type: "ai.response",
+      timestamp: Date.now(),
+      payload: {
+        queryHash: sha(String(input || "").trim().toLowerCase()),
+        responseHash: sha(assistant),
+        intent: responsePayload.intent,
+        confidence: responsePayload.confidence,
+        model: "rule-based-fallback",
+        citationCount: 0,
+        toolCount: 1,
+        verificationOk: false,
+      },
+    });
     aiCache.set(key, { ts: Date.now(), data: responsePayload });
     res.json(responsePayload);
   }

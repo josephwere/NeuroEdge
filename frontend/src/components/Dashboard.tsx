@@ -367,6 +367,33 @@ interface CreatorJobState {
   finished_at?: number;
 }
 
+interface QualityEvalCoverage {
+  suites?: Array<{ suite: string; totalCases: number; domains: string[]; ids: string[] }>;
+  totalCases?: number;
+  redTeamCases?: number;
+}
+
+interface QualityModelSummary {
+  router?: {
+    updatedAt?: number;
+    variants?: Array<{ id: string; weight: number; domains: string[]; enabled: boolean }>;
+  };
+  outcomes?: {
+    totalEvents?: number;
+    models?: Array<{
+      model: string;
+      total: number;
+      up: number;
+      down: number;
+      neutral: number;
+      avgLatencyMs: number;
+      avgConfidence: number;
+      upRate: number;
+      downRate: number;
+    }>;
+  };
+}
+
 interface DashboardGuideItem {
   id: string;
   title: string;
@@ -374,6 +401,54 @@ interface DashboardGuideItem {
   roleScope: Array<"founder" | "admin" | "developer" | "enterprise" | "user" | "all">;
   summary: string;
   keywords: string[];
+}
+
+interface FrontierProgramItem {
+  id: string;
+  group: string;
+  title: string;
+  description: string;
+  status: "planned" | "in_progress" | "blocked" | "done" | string;
+  priority: "critical" | "high" | "medium" | "low" | string;
+  owner: string;
+  targetQuarter: string;
+  notes: string;
+  updatedAt?: number;
+}
+
+interface FrontierProgramMilestone {
+  id: string;
+  name: string;
+  quarter: string;
+  owner: string;
+  status: "planned" | "in_progress" | "blocked" | "done" | string;
+  successCriteria: string[];
+  updatedAt?: number;
+}
+
+interface FrontierProgramState {
+  version?: string;
+  updatedAt?: number;
+  items: FrontierProgramItem[];
+  milestones: FrontierProgramMilestone[];
+}
+
+interface FrontierReadiness {
+  gate?: boolean;
+  readinessScore?: number;
+  totals?: {
+    items?: number;
+    done?: number;
+    inProgress?: number;
+    planned?: number;
+    blocked?: number;
+    criticalDone?: number;
+    criticalTotal?: number;
+    highDone?: number;
+    highTotal?: number;
+  };
+  topBlocked?: FrontierProgramItem[];
+  recommendation?: string;
 }
 
 type UploadTier = "founder" | "admin" | "paid" | "free";
@@ -390,6 +465,28 @@ const Dashboard: React.FC = () => {
   const [adminAgents, setAdminAgents] = useState<any[]>([]);
   const [adminVersion, setAdminVersion] = useState<any>({});
   const [adminMetrics, setAdminMetrics] = useState<any>({});
+  const [qualityEvalCoverage, setQualityEvalCoverage] = useState<QualityEvalCoverage | null>(null);
+  const [qualityReliability, setQualityReliability] = useState<any>(null);
+  const [qualityRetrieval, setQualityRetrieval] = useState<any>(null);
+  const [qualityTrust, setQualityTrust] = useState<any>(null);
+  const [qualityModelSummary, setQualityModelSummary] = useState<QualityModelSummary | null>(null);
+  const [modelRouterDraft, setModelRouterDraft] = useState("");
+  const [benchmarkBaselinesDraft, setBenchmarkBaselinesDraft] = useState("");
+  const [frontierProgram, setFrontierProgram] = useState<FrontierProgramState | null>(null);
+  const [frontierReadiness, setFrontierReadiness] = useState<FrontierReadiness | null>(null);
+  const [frontierItemId, setFrontierItemId] = useState("");
+  const [frontierItemOwner, setFrontierItemOwner] = useState("founder");
+  const [frontierItemStatus, setFrontierItemStatus] = useState<"planned" | "in_progress" | "blocked" | "done">("planned");
+  const [frontierItemPriority, setFrontierItemPriority] = useState<"critical" | "high" | "medium" | "low">("high");
+  const [frontierItemNotes, setFrontierItemNotes] = useState("");
+  const [frontierBulkIds, setFrontierBulkIds] = useState("");
+  const [frontierBulkStatus, setFrontierBulkStatus] = useState<"planned" | "in_progress" | "blocked" | "done">("in_progress");
+  const [frontierMilestoneId, setFrontierMilestoneId] = useState("");
+  const [frontierMilestoneName, setFrontierMilestoneName] = useState("");
+  const [frontierMilestoneQuarter, setFrontierMilestoneQuarter] = useState("Q2-2026");
+  const [frontierMilestoneOwner, setFrontierMilestoneOwner] = useState("founder");
+  const [frontierMilestoneStatus, setFrontierMilestoneStatus] = useState<"planned" | "in_progress" | "blocked" | "done">("planned");
+  const [frontierMilestoneCriteria, setFrontierMilestoneCriteria] = useState("");
   const [twinOutput, setTwinOutput] = useState<any>(null);
   const [backendOutput, setBackendOutput] = useState<any>(null);
   const [twinQuestion, setTwinQuestion] = useState("");
@@ -1295,6 +1392,36 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.webhooks)) setWebhooks(data.webhooks);
       if (Array.isArray(data.integrations)) setIntegrations(data.integrations);
       if (Array.isArray(data.domainLinks)) setDomainLinks(data.domainLinks);
+      if (data?.summary && data?.summary?.windowHours && data?.summary?.hallucinationRiskScore !== undefined) {
+        setQualityTrust(data.summary);
+      }
+      if (data?.summary && data?.summary?.windowHours && data?.summary?.researchRuns !== undefined) {
+        setQualityRetrieval(data.summary);
+      }
+      if (data?.snapshot && data?.snapshot?.windowHours) {
+        setQualityReliability(data.snapshot);
+      }
+      if (data?.coverage && typeof data.coverage === "object") {
+        setQualityEvalCoverage(data.coverage);
+      }
+      if (data?.router || data?.outcomes) {
+        setQualityModelSummary({
+          router: data.router || {},
+          outcomes: data.outcomes || {},
+        });
+      }
+      if (Array.isArray(data?.baselines)) {
+        setBenchmarkBaselinesDraft(JSON.stringify(data.baselines, null, 2));
+      }
+      if (data?.config?.variants && Array.isArray(data.config.variants)) {
+        setModelRouterDraft(JSON.stringify(data.config.variants, null, 2));
+      }
+      if (data?.program && Array.isArray(data.program.items) && Array.isArray(data.program.milestones)) {
+        setFrontierProgram(data.program);
+      }
+      if (data?.readiness && typeof data.readiness === "object") {
+        setFrontierReadiness(data.readiness);
+      }
       if (data.accessControl && typeof data.accessControl === "object") setAccessControl(data.accessControl);
       if (Array.isArray(data.permissionCatalog)) setPermissionCatalog(data.permissionCatalog);
       if (data.deviceProtection && typeof data.deviceProtection === "object") setDeviceProtection(data.deviceProtection);
@@ -1342,6 +1469,8 @@ const Dashboard: React.FC = () => {
     };
     loadDashboardState();
     loadCreatorHistory();
+    refreshQualityInsights();
+    refreshFrontierProgram();
   }, []);
 
   useEffect(() => {
@@ -1392,6 +1521,7 @@ const Dashboard: React.FC = () => {
       if (calls[4].status === "fulfilled") setAdminAgents(calls[4].value?.agents || []);
       if (calls[5].status === "fulfilled") setAdminVersion(calls[5].value || {});
       if (calls[6].status === "fulfilled") setAdminMetrics(calls[6].value || {});
+      refreshQualityInsights();
     };
     refresh();
     const t = setInterval(refresh, 15000);
@@ -2176,6 +2306,195 @@ const Dashboard: React.FC = () => {
       setAutoRefreshStaleHours(String(staleHours));
       addNotification({ type: "success", message: "Auto-refresh config saved." });
       setBackendOutput(data);
+    }
+  };
+
+  const refreshQualityInsights = async () => {
+    if (!canAccessAdminOps) return;
+    try {
+      const [coverage, reliability, retrieval, trust, modelSummary] = await Promise.all([
+        getJson("/admin/evals/coverage"),
+        getJson("/admin/reliability/overview?windowHours=24"),
+        getJson("/admin/retrieval/freshness?windowHours=72"),
+        getJson("/admin/trust/signals?windowHours=72"),
+        getJson("/admin/model-quality/summary"),
+      ]);
+      setQualityEvalCoverage(coverage?.coverage || null);
+      setQualityReliability(reliability?.snapshot || null);
+      setQualityRetrieval(retrieval?.summary || null);
+      setQualityTrust(trust?.summary || null);
+      setQualityModelSummary({
+        router: modelSummary?.router || {},
+        outcomes: modelSummary?.outcomes || {},
+      });
+      if (Array.isArray(modelSummary?.router?.variants)) {
+        setModelRouterDraft(JSON.stringify(modelSummary.router.variants, null, 2));
+      }
+      try {
+        const baselineData = await getJson("/admin/quality/benchmark/baselines");
+        if (Array.isArray(baselineData?.baselines)) {
+          setBenchmarkBaselinesDraft(JSON.stringify(baselineData.baselines, null, 2));
+        }
+      } catch {
+        // ignore
+      }
+    } catch {
+      // keep prior values; errors are shown when explicit action buttons are pressed
+    }
+  };
+
+  const runQualityBatch = async () => {
+    const data = await callAction("/admin/evals/run-batch", {
+      suites: ["core", "reasoning", "coding", "research"],
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Quality eval batch completed." });
+      setBackendOutput(data);
+      await refreshQualityInsights();
+    }
+  };
+
+  const runQualityRedTeam = async () => {
+    const data = await callAction("/admin/redteam/run", {});
+    if (data?.success) {
+      addNotification({ type: "success", message: "Red-team suite completed." });
+      setBackendOutput(data);
+      await refreshQualityInsights();
+    }
+  };
+
+  const runQualityHardening = async () => {
+    const data = await callAction("/admin/quality/hardening/run", {});
+    if (data?.success) {
+      addNotification({ type: "success", message: "Quality hardening run completed." });
+      setBackendOutput(data);
+      await refreshQualityInsights();
+    }
+  };
+
+  const saveModelRouterFromDashboard = async () => {
+    let variants: any[] = [];
+    try {
+      variants = JSON.parse(modelRouterDraft || "[]");
+    } catch {
+      addNotification({ type: "error", message: "Invalid model router JSON." });
+      return;
+    }
+    if (!Array.isArray(variants) || variants.length === 0) {
+      addNotification({ type: "error", message: "Add at least one model variant." });
+      return;
+    }
+    const data = await callAction("/admin/model-quality/router", { variants });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Model router saved." });
+      setBackendOutput(data);
+      await refreshQualityInsights();
+    }
+  };
+
+  const saveBenchmarkBaselinesFromDashboard = async () => {
+    let baselines: any[] = [];
+    try {
+      baselines = JSON.parse(benchmarkBaselinesDraft || "[]");
+    } catch {
+      addNotification({ type: "error", message: "Invalid benchmark baselines JSON." });
+      return;
+    }
+    if (!Array.isArray(baselines) || baselines.length === 0) {
+      addNotification({ type: "error", message: "Add at least one benchmark baseline." });
+      return;
+    }
+    const data = await callAction("/admin/quality/benchmark/baselines", { baselines });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Benchmark baselines saved." });
+      setBackendOutput(data);
+    }
+  };
+
+  const refreshFrontierProgram = async () => {
+    if (!canAccessAdminOps) return;
+    const [programData, readinessData] = await Promise.all([
+      callAction("GET:/admin/frontier-program", {}),
+      callAction("GET:/admin/frontier-program/readiness", {}),
+    ]);
+    if (programData?.program) setBackendOutput(programData);
+    if (readinessData?.readiness) setBackendOutput(readinessData);
+  };
+
+  const upsertFrontierItemFromDashboard = async () => {
+    const id = frontierItemId.trim();
+    if (!id) {
+      addNotification({ type: "warn", message: "Enter an item ID (example: model_core_01)." });
+      return;
+    }
+    const data = await callAction("/admin/frontier-program/item", {
+      id,
+      owner: frontierItemOwner.trim() || "founder",
+      status: frontierItemStatus,
+      priority: frontierItemPriority,
+      notes: frontierItemNotes,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Frontier item updated: ${id}` });
+      await refreshFrontierProgram();
+    }
+  };
+
+  const bulkUpdateFrontierItemsFromDashboard = async () => {
+    const ids = frontierBulkIds
+      .split(/[\n,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) {
+      addNotification({ type: "warn", message: "Enter one or more item IDs for bulk update." });
+      return;
+    }
+    const data = await callAction("/admin/frontier-program/items/bulk", {
+      ids,
+      status: frontierBulkStatus,
+      owner: frontierItemOwner.trim() || undefined,
+      priority: frontierItemPriority,
+      notes: frontierItemNotes,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Bulk updated ${ids.length} frontier items.` });
+      await refreshFrontierProgram();
+    }
+  };
+
+  const upsertFrontierMilestoneFromDashboard = async () => {
+    const id = frontierMilestoneId.trim();
+    if (!id) {
+      addNotification({ type: "warn", message: "Enter a milestone ID." });
+      return;
+    }
+    const criteria = frontierMilestoneCriteria
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const data = await callAction("/admin/frontier-program/milestone", {
+      id,
+      name: frontierMilestoneName.trim() || id,
+      quarter: frontierMilestoneQuarter.trim() || "Q4-2026",
+      owner: frontierMilestoneOwner.trim() || "founder",
+      status: frontierMilestoneStatus,
+      successCriteria: criteria,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Milestone updated: ${id}` });
+      await refreshFrontierProgram();
+    }
+  };
+
+  const resetFrontierProgramFromDashboard = async () => {
+    if (!isFounderUser()) {
+      addNotification({ type: "error", message: "Only founder can reset frontier program." });
+      return;
+    }
+    const data = await callAction("/admin/frontier-program/reset", {});
+    if (data?.success) {
+      addNotification({ type: "success", message: "Frontier program reset to default roadmap." });
+      await refreshFrontierProgram();
     }
   };
 
@@ -3960,6 +4279,160 @@ const Dashboard: React.FC = () => {
           </div>
         ))}
       </Card>
+      <Card title="Quality Command Center (Founder/Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={runQualityHardening}>Run Full Hardening</button>
+          <button style={chip} onClick={runQualityBatch}>Run Eval Batch</button>
+          <button style={chip} onClick={runQualityRedTeam}>Run Red-Team</button>
+          <button style={chip} onClick={refreshQualityInsights}>Refresh Quality Signals</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/trust/consistency?windowHours=72")}>Trust Consistency</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/trends?windowDays=30")}>Benchmark Trends</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/regression?windowDays=30")}>Regression Check</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/sre/concurrency")}>SRE Concurrency</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Eval Cases" value={String(qualityEvalCoverage?.totalCases || 0)} />
+          <Stat label="Red-Team Cases" value={String(qualityEvalCoverage?.redTeamCases || 0)} />
+          <Stat label="Reliability p95 (ms)" value={String(qualityReliability?.p95LatencyMs || 0)} />
+          <Stat label="Success Rate" value={qualityReliability?.successRate !== undefined ? `${Number(qualityReliability.successRate * 100).toFixed(1)}%` : "0%"} />
+          <Stat label="Citation Coverage" value={qualityTrust?.citationCoverageRate !== undefined ? `${Number(qualityTrust.citationCoverageRate * 100).toFixed(1)}%` : "0%"} />
+          <Stat label="Hallucination Risk" value={qualityTrust?.hallucinationRiskScore !== undefined ? String(qualityTrust.hallucinationRiskScore) : "0"} />
+          <Stat label="Stale Citation Rate" value={qualityRetrieval?.staleCitationRate !== undefined ? `${Number(qualityRetrieval.staleCitationRate * 100).toFixed(1)}%` : "0%"} />
+          <Stat label="Model Outcome Events" value={String(qualityModelSummary?.outcomes?.totalEvents || 0)} />
+        </div>
+        <div style={{ marginTop: 8, fontWeight: 700 }}>Model Router Variants</div>
+        <textarea
+          value={modelRouterDraft}
+          onChange={(e) => setModelRouterDraft(e.target.value)}
+          placeholder='[{"id":"neuroedge-7b-instruct","weight":70,"domains":["general"],"enabled":true}]'
+          style={{ ...input, minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={saveModelRouterFromDashboard}>Save Router</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/model-quality/summary")}>Open Model Summary JSON</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/evals/latest?limit=10")}>Latest Evals</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/redteam/latest?limit=10")}>Latest Red-Team</button>
+        </div>
+        <div style={{ marginTop: 8, fontWeight: 700 }}>Benchmark Baselines</div>
+        <textarea
+          value={benchmarkBaselinesDraft}
+          onChange={(e) => setBenchmarkBaselinesDraft(e.target.value)}
+          placeholder='[{"suite":"core","minAccuracy":0.82,"maxP95LatencyMs":2500}]'
+          style={{ ...input, minHeight: 110, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={saveBenchmarkBaselinesFromDashboard}>Save Baselines</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/baselines")}>Load Baselines</button>
+        </div>
+      </Card>
+      <Card title="Frontier Program Roadmap (Founder/Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={refreshFrontierProgram}>Refresh Program</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/frontier-program/readiness")}>Open Readiness JSON</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/frontier-program")}>Open Program JSON</button>
+          <button style={chip} onClick={resetFrontierProgramFromDashboard}>Reset Program</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Readiness Gate" value={frontierReadiness?.gate ? "pass" : "hold"} />
+          <Stat label="Readiness Score" value={frontierReadiness?.readinessScore !== undefined ? `${Number(frontierReadiness.readinessScore * 100).toFixed(1)}%` : "0%"} />
+          <Stat label="Blocked Items" value={String(frontierReadiness?.totals?.blocked || 0)} />
+          <Stat label="Total Items" value={String(frontierReadiness?.totals?.items || frontierProgram?.items?.length || 0)} />
+          <Stat label="Done Items" value={String(frontierReadiness?.totals?.done || 0)} />
+          <Stat label="Critical Done" value={`${frontierReadiness?.totals?.criticalDone || 0}/${frontierReadiness?.totals?.criticalTotal || 0}`} />
+        </div>
+        <div style={{ marginTop: 8, fontSize: 13, opacity: 0.9 }}>
+          {frontierReadiness?.recommendation || "Frontier readiness recommendation will appear here after refresh."}
+        </div>
+
+        <div style={{ marginTop: 10, fontWeight: 700 }}>Update Single Item</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(180px, 1fr))", gap: 8 }}>
+          <input value={frontierItemId} onChange={(e) => setFrontierItemId(e.target.value)} placeholder="Item ID (model_core_01)" style={input} />
+          <input value={frontierItemOwner} onChange={(e) => setFrontierItemOwner(e.target.value)} placeholder="Owner" style={input} />
+          <select value={frontierItemStatus} onChange={(e) => setFrontierItemStatus(e.target.value as any)} style={input}>
+            <option value="planned">planned</option>
+            <option value="in_progress">in_progress</option>
+            <option value="blocked">blocked</option>
+            <option value="done">done</option>
+          </select>
+          <select value={frontierItemPriority} onChange={(e) => setFrontierItemPriority(e.target.value as any)} style={input}>
+            <option value="critical">critical</option>
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+          </select>
+          <input value={frontierItemNotes} onChange={(e) => setFrontierItemNotes(e.target.value)} placeholder="Notes" style={{ ...input, gridColumn: "span 2" }} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button style={primary} onClick={upsertFrontierItemFromDashboard}>Save Item</button>
+        </div>
+
+        <div style={{ marginTop: 10, fontWeight: 700 }}>Bulk Item Update</div>
+        <textarea
+          value={frontierBulkIds}
+          onChange={(e) => setFrontierBulkIds(e.target.value)}
+          placeholder={"Item IDs (comma/newline separated)\nmodel_core_01\neval_03\nsre_02"}
+          style={{ ...input, minHeight: 72 }}
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8 }}>
+          <select value={frontierBulkStatus} onChange={(e) => setFrontierBulkStatus(e.target.value as any)} style={input}>
+            <option value="planned">planned</option>
+            <option value="in_progress">in_progress</option>
+            <option value="blocked">blocked</option>
+            <option value="done">done</option>
+          </select>
+          <button style={chip} onClick={bulkUpdateFrontierItemsFromDashboard}>Apply Bulk Update</button>
+        </div>
+
+        <div style={{ marginTop: 10, fontWeight: 700 }}>Milestones</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8 }}>
+          <input value={frontierMilestoneId} onChange={(e) => setFrontierMilestoneId(e.target.value)} placeholder="Milestone ID" style={input} />
+          <input value={frontierMilestoneName} onChange={(e) => setFrontierMilestoneName(e.target.value)} placeholder="Milestone Name" style={input} />
+          <input value={frontierMilestoneQuarter} onChange={(e) => setFrontierMilestoneQuarter(e.target.value)} placeholder="Quarter (Q2-2026)" style={input} />
+          <input value={frontierMilestoneOwner} onChange={(e) => setFrontierMilestoneOwner(e.target.value)} placeholder="Owner" style={input} />
+          <select value={frontierMilestoneStatus} onChange={(e) => setFrontierMilestoneStatus(e.target.value as any)} style={input}>
+            <option value="planned">planned</option>
+            <option value="in_progress">in_progress</option>
+            <option value="blocked">blocked</option>
+            <option value="done">done</option>
+          </select>
+        </div>
+        <textarea
+          value={frontierMilestoneCriteria}
+          onChange={(e) => setFrontierMilestoneCriteria(e.target.value)}
+          placeholder={"Success criteria (one per line)\nNightly eval active\nRegression gate passing"}
+          style={{ ...input, minHeight: 72 }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button style={chip} onClick={upsertFrontierMilestoneFromDashboard}>Save Milestone</button>
+        </div>
+
+        <div style={{ marginTop: 10, fontWeight: 700 }}>Roadmap Snapshot</div>
+        <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto", paddingRight: 4 }}>
+          {(frontierProgram?.items || []).slice(0, 24).map((item) => (
+            <div key={item.id} style={{ ...row, alignItems: "flex-start", border: "1px solid rgba(148,163,184,0.25)", borderRadius: 8, padding: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>{item.id} • {item.title}</div>
+                <div style={{ fontSize: 12, opacity: 0.85 }}>{item.group} • {item.priority} • {item.status} • {item.targetQuarter} • {item.owner}</div>
+              </div>
+              <button
+                style={chip}
+                onClick={async () => {
+                  setFrontierItemId(item.id);
+                  setFrontierItemOwner(item.owner || "founder");
+                  setFrontierItemPriority((item.priority as any) || "high");
+                  setFrontierItemStatus((item.status as any) || "planned");
+                  setFrontierItemNotes(item.notes || "");
+                }}
+              >
+                Edit
+              </button>
+            </div>
+          ))}
+          {(!frontierProgram || (frontierProgram.items || []).length === 0) && (
+            <div style={{ opacity: 0.8 }}>No frontier items loaded yet.</div>
+          )}
+        </div>
+      </Card>
       <Card title="Branding Studio (Founder/System Admin)">
         <input
           value={brandingDraft.productName}
@@ -4145,6 +4618,18 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runBackendAction("GET:/training/samples?limit=20")}>Training Samples</button>
           <button style={chip} onClick={() => runBackendAction("/training/feedback", { query: "sample", response: "sample response", rating: "up", tags: ["dashboard"] })}>Training Feedback</button>
           <button style={chip} onClick={() => runBackendAction("GET:/training/export?limit=100")}>Training Export</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/evals/coverage")}>Eval Coverage</button>
+          <button style={chip} onClick={() => runBackendAction("/admin/evals/run", { suite: "core" })}>Run Core Eval</button>
+          <button style={chip} onClick={() => runBackendAction("/admin/evals/run-batch", { suites: ["core", "reasoning", "coding", "research"] })}>Run Eval Batch</button>
+          <button style={chip} onClick={() => runBackendAction("/admin/redteam/run", {})}>Run Red-Team</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/reliability/overview?windowHours=24")}>Reliability Snapshot</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/retrieval/freshness?windowHours=72")}>Retrieval Freshness</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/trust/signals?windowHours=72")}>Trust Signals</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/trust/consistency?windowHours=72")}>Trust Consistency</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/trends?windowDays=30")}>Benchmark Trends</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/regression?windowDays=30")}>Benchmark Regression</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/sre/concurrency")}>SRE Concurrency</button>
+          <button style={chip} onClick={() => runBackendAction("/admin/quality/hardening/run", {})}>Quality Hardening Run</button>
           <button style={chip} onClick={() => runBackendAction("GET:/billing/usage")}>Billing Usage</button>
           <button style={chip} onClick={() => runBackendAction("GET:/storage/state")}>Storage State</button>
           <button style={chip} onClick={() => runBackendAction("GET:/storage/events?limit=50")}>Storage Events</button>

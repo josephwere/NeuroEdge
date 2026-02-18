@@ -191,6 +191,8 @@ export async function runResearch(query: string): Promise<ResearchResult> {
   const timeoutMs = Number(process.env.RESEARCH_HTTP_TIMEOUT_MS || 7000);
   const maxResults = Math.min(10, Math.max(1, Number(process.env.RESEARCH_MAX_RESULTS || 5)));
   const maxPages = Math.min(8, Math.max(1, Number(process.env.RESEARCH_MAX_PAGES || 3)));
+  const minQuality = Math.max(0, Math.min(1, Number(process.env.RESEARCH_MIN_QUALITY_SCORE || 0.5)));
+  const allowStale = String(process.env.RESEARCH_ALLOW_STALE || "false").toLowerCase() === "true";
 
   const serp = await searchSerpApi(query, maxResults, timeoutMs);
   const ddg = serp.length > 0 ? [] : await searchDuckDuckGo(query, maxResults, timeoutMs);
@@ -255,21 +257,28 @@ export async function runResearch(query: string): Promise<ResearchResult> {
   evidence.sort((a, b) => b.score - a.score);
   const topEvidence = evidence.slice(0, 4);
 
+  const filteredCitations = citations
+    .filter((c) => Number(c.qualityScore || 0) >= minQuality)
+    .filter((c) => allowStale || !c.stale);
+
   let summary = "";
   if (topEvidence.length === 0) {
     summary = "I could not gather enough reliable sources for this query with current allowlist and connectivity.";
   } else {
     const bullets = topEvidence.map((e) => `- ${e.sentence} [${e.source}]`).join("\n");
-    const ranked = [...citations].sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
+    const ranked = [...filteredCitations].sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
     summary = `## Research Summary\n\n${bullets}\n\n## Citations\n${ranked
       .map((c, i) => `${i + 1}. [${c.title}](${c.url})${c.stale ? " ⚠️ stale-signal" : ""}`)
       .join("\n")}`;
+    if (ranked.length === 0) {
+      summary += "\n\n⚠️ No citations met current quality/staleness policy.";
+    }
   }
 
   const result = {
     query,
     summary,
-    citations,
+    citations: filteredCitations,
     pagesFetched: pages.filter((p) => !!p.text).length,
   };
   researchCache.set(cacheKey, { ts: Date.now(), value: result });
