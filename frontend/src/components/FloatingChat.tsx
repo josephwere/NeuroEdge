@@ -12,7 +12,10 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { confirmSafeAction } from "@/services/safetyPrompts";
 import { extractVisibleText, fillFormFieldsFromSpec } from "@/services/localAutomation";
-import { loadBranding } from "@/services/branding";
+import {
+  loadEffectiveChatBranding,
+  userCustomizationUpdateEventName,
+} from "@/services/userCustomization";
 
 interface ExecutionResult {
   id: string;
@@ -79,14 +82,22 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const recordingDraftRef = useRef("");
   const [listenSeq, setListenSeq] = useState(0);
   const [brainstormMode, setBrainstormMode] = useState(false);
-  const [branding, setBranding] = useState(() => loadBranding());
+  const [branding, setBranding] = useState(() => loadEffectiveChatBranding());
 
   useEffect(() => {
-    const refreshBranding = () => setBranding(loadBranding());
+    const refreshBranding = () => setBranding(loadEffectiveChatBranding());
     window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener(
+      userCustomizationUpdateEventName(),
+      refreshBranding as EventListener
+    );
     window.addEventListener("storage", refreshBranding);
     return () => {
       window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener(
+        userCustomizationUpdateEventName(),
+        refreshBranding as EventListener
+      );
       window.removeEventListener("storage", refreshBranding);
     };
   }, []);
@@ -619,7 +630,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     >
       <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: `rgba(15, 23, 42, ${Math.min(1, (branding.floatingOverlayOpacity || 0.92) + 0.05)})`, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(148, 163, 184, 0.2)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-          <img src={branding.logoUrl || "/logo.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
+          <img src={branding.floatingChatIconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
           <strong>{branding.productName || "NeuroEdge"} Floating Chat</strong>
           {!embedded && (
             <>

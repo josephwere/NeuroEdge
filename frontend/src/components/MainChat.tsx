@@ -28,7 +28,10 @@ import {
 } from "@/services/conversationStore";
 import { confirmSafeAction } from "@/services/safetyPrompts";
 import { extractVisibleText, fillFormFieldsFromSpec } from "@/services/localAutomation";
-import { loadBranding } from "@/services/branding";
+import {
+  loadEffectiveChatBranding,
+  userCustomizationUpdateEventName,
+} from "@/services/userCustomization";
 
 interface Message {
   id: string;
@@ -77,14 +80,22 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const recordingDraftRef = useRef("");
   const [listenSeq, setListenSeq] = useState(0);
   const [brainstormMode, setBrainstormMode] = useState(false);
-  const [branding, setBranding] = useState(() => loadBranding());
+  const [branding, setBranding] = useState(() => loadEffectiveChatBranding());
 
   useEffect(() => {
-    const refreshBranding = () => setBranding(loadBranding());
+    const refreshBranding = () => setBranding(loadEffectiveChatBranding());
     window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener(
+      userCustomizationUpdateEventName(),
+      refreshBranding as EventListener
+    );
     window.addEventListener("storage", refreshBranding);
     return () => {
       window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener(
+        userCustomizationUpdateEventName(),
+        refreshBranding as EventListener
+      );
       window.removeEventListener("storage", refreshBranding);
     };
   }, []);
@@ -938,8 +949,18 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
           background: "rgba(15, 23, 42, 0.66)",
         }}
       >
-        <div style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
-          Active Chat: <span style={{ color: "#e2e8f0" }}>{activeConversationId ? "Saved thread" : "Unsaved"}</span>
+        <div style={{ fontSize: "0.8rem", color: "#94a3b8", display: "flex", alignItems: "center", gap: 8 }}>
+          <img
+            src={branding.mainChatIconUrl || "/icon.png"}
+            alt="Main chat icon"
+            style={{ width: 18, height: 18, borderRadius: 5, objectFit: "cover" }}
+          />
+          <span>
+            Active Chat:{" "}
+            <span style={{ color: "#e2e8f0" }}>
+              {activeConversationId ? "Saved thread" : "Unsaved"}
+            </span>
+          </span>
         </div>
         <div style={{ display: "flex", gap: "0.45rem" }}>
           <button

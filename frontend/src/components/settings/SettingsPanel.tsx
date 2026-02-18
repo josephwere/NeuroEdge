@@ -1,4 +1,10 @@
 import React, { useEffect, useState } from "react";
+import {
+  clearUserCustomization,
+  loadUserCustomization,
+  saveUserCustomization,
+  type UserCustomizationConfig,
+} from "@/services/userCustomization";
 
 /* =========================================================
    Types — shared contract with orchestrator (future-proof)
@@ -57,6 +63,9 @@ const SettingsPanel: React.FC = () => {
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
   const [ttsAvailable, setTtsAvailable] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
+  const [userCustomization, setUserCustomization] = useState<UserCustomizationConfig>(
+    () => loadUserCustomization()
+  );
 
   /* -------------------- Lifecycle -------------------- */
 
@@ -84,6 +93,22 @@ const SettingsPanel: React.FC = () => {
     document.documentElement.style.fontSize = `${Math.max(0.85, Math.min(1.2, settings.fontScale)) * 16}px`;
     document.documentElement.style.setProperty("--ne-reduced-motion", settings.reduceMotion ? "1" : "0");
   }, [settings]);
+
+  useEffect(() => {
+    const syncCustomization = () => setUserCustomization(loadUserCustomization());
+    window.addEventListener(
+      "neuroedge:userCustomizationUpdated",
+      syncCustomization as EventListener
+    );
+    window.addEventListener("storage", syncCustomization);
+    return () => {
+      window.removeEventListener(
+        "neuroedge:userCustomizationUpdated",
+        syncCustomization as EventListener
+      );
+      window.removeEventListener("storage", syncCustomization);
+    };
+  }, []);
 
   /* -------------------- TTS Detection -------------------- */
 
@@ -167,6 +192,38 @@ const SettingsPanel: React.FC = () => {
       if (!keep.has(key)) localStorage.removeItem(key);
     });
     alert("Cleared local cache (kept profile + core settings).");
+  };
+
+  const toDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+
+  const onCustomizationImageUpload = async (
+    field: "mainChatIconUrl" | "floatingChatIconUrl" | "mainChatBackgroundUrl" | "floatingChatBackgroundUrl",
+    files: FileList | null
+  ) => {
+    if (!files || files.length === 0) return;
+    const dataUrl = await toDataUrl(files[0]);
+    saveUserCustomization({ [field]: dataUrl });
+    setUserCustomization(loadUserCustomization());
+  };
+
+  const onCustomizationNumberChange = (
+    field: "mainChatOverlayOpacity" | "floatingOverlayOpacity",
+    value: string
+  ) => {
+    const numeric = Number(value);
+    saveUserCustomization({ [field]: Number.isFinite(numeric) ? numeric : null });
+    setUserCustomization(loadUserCustomization());
+  };
+
+  const onCustomizationAccentChange = (value: string) => {
+    saveUserCustomization({ accentColor: value });
+    setUserCustomization(loadUserCustomization());
   };
 
   /* -------------------- UI -------------------- */
@@ -431,6 +488,116 @@ const SettingsPanel: React.FC = () => {
           </section>
 
           <section style={cardStyle}>
+            <h3 style={titleStyle}>Open Customization (User Level)</h3>
+            <p style={mutedStyle}>
+              Customize your own chat basics. Protected branding like global logo and favicon
+              remains founder/admin controlled.
+            </p>
+            <div style={{ display: "grid", gap: "0.55rem", marginTop: "0.65rem" }}>
+              <label style={actionBtnStyle}>
+                Main Chat Icon
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => onCustomizationImageUpload("mainChatIconUrl", e.target.files)}
+                />
+              </label>
+              <label style={actionBtnStyle}>
+                Floating Chat Icon
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) =>
+                    onCustomizationImageUpload("floatingChatIconUrl", e.target.files)
+                  }
+                />
+              </label>
+              <label style={actionBtnStyle}>
+                Main Chat Background
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) =>
+                    onCustomizationImageUpload("mainChatBackgroundUrl", e.target.files)
+                  }
+                />
+              </label>
+              <label style={actionBtnStyle}>
+                Floating Background
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) =>
+                    onCustomizationImageUpload(
+                      "floatingChatBackgroundUrl",
+                      e.target.files
+                    )
+                  }
+                />
+              </label>
+            </div>
+            <label style={{ ...rowStyle, marginTop: "0.8rem" }}>
+              <span style={{ minWidth: 150 }}>Main Overlay Opacity</span>
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={userCustomization.mainChatOverlayOpacity ?? 0.62}
+                onChange={(e) =>
+                  onCustomizationNumberChange("mainChatOverlayOpacity", e.target.value)
+                }
+                style={{ width: "100%" }}
+              />
+            </label>
+            <label style={rowStyle}>
+              <span style={{ minWidth: 150 }}>Floating Opacity</span>
+              <input
+                type="range"
+                min={0.2}
+                max={1}
+                step={0.05}
+                value={userCustomization.floatingOverlayOpacity ?? 0.92}
+                onChange={(e) =>
+                  onCustomizationNumberChange("floatingOverlayOpacity", e.target.value)
+                }
+                style={{ width: "100%" }}
+              />
+            </label>
+            <label style={{ ...rowStyle, marginTop: "0.5rem" }}>
+              <span style={{ minWidth: 150 }}>Accent Color</span>
+              <input
+                type="color"
+                value={userCustomization.accentColor || "#2563eb"}
+                onChange={(e) => onCustomizationAccentChange(e.target.value)}
+                style={{
+                  width: 46,
+                  height: 32,
+                  border: "1px solid rgba(148,163,184,0.35)",
+                  borderRadius: 8,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginTop: "0.7rem" }}>
+              <button
+                onClick={() => {
+                  clearUserCustomization();
+                  setUserCustomization(loadUserCustomization());
+                }}
+                style={actionBtnStyle}
+              >
+                Reset My Customization
+              </button>
+            </div>
+          </section>
+
+          <section style={cardStyle}>
             <h3 style={titleStyle}>Data Controls</h3>
             <label style={rowStyle}>
               <input
@@ -550,6 +717,9 @@ const inputStyle: React.CSSProperties = {
 };
 
 const actionBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   border: "1px solid rgba(148, 163, 184, 0.3)",
   background: "rgba(15, 23, 42, 0.7)",
   color: "#e2e8f0",
