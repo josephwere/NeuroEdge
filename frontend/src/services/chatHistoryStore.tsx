@@ -171,3 +171,48 @@ export const useChatHistory = () => {
   }
   return ctx;
 };
+
+// Backward-compatible API for legacy components.
+export interface ChatRecord {
+  id: string;
+  title: string;
+  createdAt: number;
+}
+
+function toChatRecords(messages: ChatMessage[]): ChatRecord[] {
+  return messages
+    .filter((m) => m.role === "user")
+    .map((m) => ({
+      id: m.id,
+      title: (m.text || "").slice(0, 80) || "Untitled chat",
+      createdAt: m.timestamp,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export const ChatHistoryStore = {
+  getAll(): ChatRecord[] {
+    try {
+      const raw = localStorage.getItem("chat_history");
+      const parsed: ChatMessage[] = raw ? JSON.parse(raw) : [];
+      return toChatRecords(parsed);
+    } catch {
+      return [];
+    }
+  },
+  search(q: string): ChatRecord[] {
+    const query = (q || "").toLowerCase().trim();
+    if (!query) return this.getAll();
+    return this.getAll().filter((r) => r.title.toLowerCase().includes(query));
+  },
+  remove(id: string): void {
+    try {
+      const raw = localStorage.getItem("chat_history");
+      const parsed: ChatMessage[] = raw ? JSON.parse(raw) : [];
+      const next = parsed.filter((m) => m.id !== id);
+      localStorage.setItem("chat_history", JSON.stringify(next));
+    } catch {
+      // ignore storage errors
+    }
+  },
+};

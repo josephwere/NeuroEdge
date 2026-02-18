@@ -37,6 +37,30 @@ function isTruthy(v?: string): boolean {
   return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
 }
 
+function uniqueScopes(scopes: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of scopes.map((x) => String(x || "").trim()).filter(Boolean)) {
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function roleDefaultScopes(roleRaw: string): string[] {
+  const role = String(roleRaw || "").trim().toLowerCase();
+  if (!role) return [];
+  if (role === "founder") return ["founder:*", "admin:*", "*"];
+  if (role === "admin") return ["admin:*", "training:*", "identity:*", "chat:*", "ai:*", "research:*", "execute:*"];
+  if (role === "developer") {
+    return ["admin:read", "admin:write", "chat:*", "ai:*", "execute:*", "research:*", "training:read", "identity:read"];
+  }
+  if (role === "enterprise") return ["chat:*", "ai:*", "execute:*", "research:*", "training:read", "billing:read", "identity:read"];
+  if (role === "user") return ["chat:*", "ai:*", "execute:*", "research:*", "training:read", "identity:read"];
+  return [];
+}
+
 function getBearerToken(req: Request): string | null {
   const auth = req.header("authorization") || req.header("Authorization");
   if (!auth) return null;
@@ -104,17 +128,27 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const headerEmail = String(req.header("x-user-email") || "").trim().toLowerCase();
   const headerName = String(req.header("x-user-name") || "").trim();
   const headerDeviceId = String(req.header("x-device-id") || "").trim();
+  const trustHeaderIdentity = process.env.AUTH_TRUST_HEADERS
+    ? isTruthy(process.env.AUTH_TRUST_HEADERS)
+    : process.env.NODE_ENV !== "production";
+  const hasHeaderIdentity = !!(headerRole || headerEmail || headerName);
+  const allowHeaderFallback = trustHeaderIdentity && hasHeaderIdentity;
 
-  if (!claims && !apiKeyValid && authRequired) {
+  if (!claims && !apiKeyValid && authRequired && !allowHeaderFallback) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   const jwtScopes = parseScopes(claims || undefined);
+  const roleScopes = roleDefaultScopes((claims?.role as string | undefined) || headerRole || "");
   const apiKeyScopes = parseScopeList(
     process.env.API_KEY_SCOPES ||
       "chat:write execute:run ai:infer research:run mesh:read mesh:write billing:read storage:write federation:read federation:write training:read training:write identity:read identity:verify identity:write admin:read admin:write founder:*"
   );
-  const scopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : [];
+  const guestScopes = parseScopeList(
+    process.env.GUEST_SCOPES || "chat:read chat:write ai:infer execute:run research:run training:read identity:read"
+  );
+  const baseScopes = jwtScopes.length > 0 ? jwtScopes : apiKeyValid ? apiKeyScopes : authRequired ? [] : guestScopes;
+  const scopes = uniqueScopes([...baseScopes, ...roleScopes]);
   const requestedOrg = req.header("x-org-id") || undefined;
   const requestedWorkspace = req.header("x-workspace-id") || undefined;
   const mergedRaw = {
@@ -126,7 +160,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   req.auth = {
     sub:
       (claims?.sub as string) ||
-      (headerEmail ? `user:${headerEmail}` : "") ||
+      (headerEmail ? `user:${headerEmail}` : allowHeaderFallback && headerName ? `user:${headerName.toLowerCase().replace(/\s+/g, "_")}` : "") ||
       (apiKeyValid ? "service-api-key" : "anonymous"),
     orgId: (claims?.org_id as string) || requestedOrg || defaultOrgId,
     workspaceId: (claims?.workspace_id as string) || requestedWorkspace || defaultWorkspaceId,

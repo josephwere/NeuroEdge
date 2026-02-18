@@ -1,0 +1,18 @@
+{
+  "id": "creator_job_1771402788_6866ea16fd",
+  "kind": "image_edit",
+  "status": "failed",
+  "progress": 100,
+  "created_at": 1771402788,
+  "started_at": 1771402788,
+  "finished_at": 1771402788,
+  "error": "Missing image_path",
+  "payload": {
+    "image_path": "",
+    "instructions": "enhance details",
+    "mask": "",
+    "upscale": false,
+    "style_transfer": ""
+  },
+  "result": {}
+}

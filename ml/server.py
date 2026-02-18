@@ -42,7 +42,24 @@ try:
         list_meetings,
         log_decision,
         list_decisions,
+        get_channels,
+        get_channel,
+        upsert_channel,
+        remove_channel,
+        get_channel_policy,
+        save_channel_policy,
+        get_availability,
+        set_availability,
+        get_call_assistant_config,
+        save_call_assistant_config,
+        get_clone_customization,
+        save_clone_customization,
+        build_auto_reply_draft,
+        approve_auto_reply_draft,
+        list_channel_logs,
+        twin_market_map,
     )
+    from human_twin.channel_adapters import send_via_adapter
 except Exception:
     TwinCore = None
     TwinProfileStore = None
@@ -56,6 +73,23 @@ except Exception:
     list_meetings = None
     log_decision = None
     list_decisions = None
+    get_channels = None
+    get_channel = None
+    upsert_channel = None
+    remove_channel = None
+    get_channel_policy = None
+    save_channel_policy = None
+    get_availability = None
+    set_availability = None
+    get_call_assistant_config = None
+    save_call_assistant_config = None
+    get_clone_customization = None
+    save_clone_customization = None
+    build_auto_reply_draft = None
+    approve_auto_reply_draft = None
+    list_channel_logs = None
+    twin_market_map = None
+    send_via_adapter = None
 
 
 app = FastAPI(title="NeuroEdge ML Service", version="1.0.0")
@@ -244,6 +278,77 @@ class TwinAskRequest(BaseModel):
     include_scan: bool = True
     include_analyze: bool = True
     include_report: bool = True
+
+
+class TwinChannelUpsertRequest(BaseModel):
+    id: str = ""
+    channel: str
+    provider: str = "official_api"
+    handle: str
+    display_name: str = ""
+    consent_granted: bool = False
+    verified: bool = False
+    auto_reply_enabled: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TwinChannelRemoveRequest(BaseModel):
+    id: str
+
+
+class TwinChannelPolicyRequest(BaseModel):
+    disclosure_required: Optional[bool] = None
+    require_human_approval_for_send: Optional[bool] = None
+    allow_auto_reply_only_when_away_or_ill: Optional[bool] = None
+    max_auto_replies_per_hour: Optional[int] = None
+    allow_channels: Optional[List[str]] = None
+
+
+class TwinAvailabilityRequest(BaseModel):
+    mode: str
+    away_until_ts: int = 0
+    notes: str = ""
+
+
+class TwinAutoReplyDraftRequest(BaseModel):
+    event_type: str = "message"
+    channel: str = "sms"
+    sender: str = "unknown"
+    incoming_text: str = ""
+    requester_role: str = "user"
+
+
+class TwinAutoReplyApproveRequest(BaseModel):
+    draft: Dict[str, Any] = Field(default_factory=dict)
+    approver: str = "user"
+    action: str = "approve_send"
+
+
+class TwinChannelSendRequest(BaseModel):
+    channel_id: str
+    message: str
+    subject: str = "NeuroEdge Personal Twin"
+    event_type: str = "message"
+    to_handle: str = ""
+
+
+class TwinCallAssistantConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    requested_permissions: Dict[str, Any] = Field(default_factory=dict)
+    allow_phone_call_assist: Optional[bool] = None
+    allow_whatsapp_call_assist: Optional[bool] = None
+    allow_video_call_assist: Optional[bool] = None
+    disclosure_audio_required: Optional[bool] = None
+    human_override_required: Optional[bool] = None
+
+
+class TwinCloneCustomizationRequest(BaseModel):
+    voice_assets: List[Dict[str, Any]] = Field(default_factory=list)
+    video_assets: List[Dict[str, Any]] = Field(default_factory=list)
+    persona_presets: List[Dict[str, Any]] = Field(default_factory=list)
+    active_voice_asset_id: str = ""
+    active_video_asset_id: str = ""
+    active_persona_preset_id: str = ""
 
 
 def _load_agent() -> Optional[Any]:
@@ -568,6 +673,173 @@ def neurotwin_report() -> Dict[str, Any]:
         "recent_meetings": meetings,
         "recent_decisions": decisions,
     }
+
+
+@app.get("/neurotwin/channels/bootstrap")
+def neurotwin_channels_bootstrap() -> Dict[str, Any]:
+    if get_channels is None or get_channel_policy is None or get_availability is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    return {
+        "status": "ok",
+        "channels": get_channels(),
+        "policy": get_channel_policy(),
+        "availability": get_availability(),
+        "disclosure": "NeuroTwin must disclose AI identity and requires user consent for channel automation.",
+    }
+
+
+@app.post("/neurotwin/channels/connect")
+def neurotwin_channel_connect(req: TwinChannelUpsertRequest) -> Dict[str, Any]:
+    if upsert_channel is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    try:
+        item = upsert_channel(req.model_dump(), actor="dashboard_user")
+        return {"status": "ok", "channel": item}
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail=str(ex))
+
+
+@app.post("/neurotwin/channels/disconnect")
+def neurotwin_channel_disconnect(req: TwinChannelRemoveRequest) -> Dict[str, Any]:
+    if remove_channel is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    return {"status": "ok", **remove_channel(req.id, actor="dashboard_user")}
+
+
+@app.post("/neurotwin/channels/policy")
+def neurotwin_channel_policy(req: TwinChannelPolicyRequest) -> Dict[str, Any]:
+    if save_channel_policy is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    payload = {k: v for k, v in req.model_dump().items() if v is not None}
+    return {"status": "ok", "policy": save_channel_policy(payload)}
+
+
+@app.post("/neurotwin/availability")
+def neurotwin_availability(req: TwinAvailabilityRequest) -> Dict[str, Any]:
+    if set_availability is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    mode = req.mode.strip().lower()
+    allowed = {"active", "away", "ill", "do_not_disturb"}
+    if mode not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid mode. Allowed: {sorted(list(allowed))}")
+    return {"status": "ok", "availability": set_availability(mode, req.away_until_ts, req.notes)}
+
+
+@app.post("/neurotwin/auto-reply/draft")
+def neurotwin_auto_reply_draft(req: TwinAutoReplyDraftRequest) -> Dict[str, Any]:
+    if (
+        twin_profile_store is None
+        or get_channel_policy is None
+        or get_availability is None
+        or build_auto_reply_draft is None
+    ):
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    guard = (
+        enforce_human_twin_guardrails(req.incoming_text)
+        if enforce_human_twin_guardrails is not None
+        else {"allowed": True}
+    )
+    if not guard.get("allowed", True):
+        raise HTTPException(status_code=400, detail=guard.get("message", "Blocked by guardrails"))
+    draft = build_auto_reply_draft(
+        req.model_dump(),
+        twin_profile_store.get_profile(),
+        get_channel_policy(),
+        get_availability(),
+    )
+    return {"status": "ok", "draft": draft}
+
+
+@app.post("/neurotwin/auto-reply/approve")
+def neurotwin_auto_reply_approve(req: TwinAutoReplyApproveRequest) -> Dict[str, Any]:
+    if approve_auto_reply_draft is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    action = req.action.strip().lower()
+    if action not in {"approve_send", "reject"}:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    result = {"status": "ok", **approve_auto_reply_draft(req.draft, req.approver, action)}
+    if action == "approve_send" and send_via_adapter is not None:
+        try:
+            draft = req.draft or {}
+            dispatch = send_via_adapter(
+                str(draft.get("channel") or "sms"),
+                str(draft.get("sender") or ""),
+                str(draft.get("generated_reply") or ""),
+                {},
+                event_type=str(draft.get("event_type") or "message"),
+            )
+            result["dispatch"] = dispatch
+        except Exception as ex:
+            result["dispatch"] = {"ok": False, "error": str(ex)}
+    return result
+
+
+@app.get("/neurotwin/auto-reply/logs")
+def neurotwin_auto_reply_logs(limit: int = 50) -> Dict[str, Any]:
+    if list_channel_logs is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    return {"status": "ok", "logs": list_channel_logs(limit)}
+
+
+@app.post("/neurotwin/channels/send-test")
+def neurotwin_channel_send_test(req: TwinChannelSendRequest) -> Dict[str, Any]:
+    if get_channel is None or send_via_adapter is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    item = get_channel(req.channel_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    if not bool(item.get("consent_granted")):
+        raise HTTPException(status_code=400, detail="Consent not granted for this channel")
+    handle = req.to_handle.strip() or str(item.get("handle") or "").strip()
+    if not handle:
+        raise HTTPException(status_code=400, detail="Missing target handle")
+    dispatch = send_via_adapter(
+        str(item.get("channel") or ""),
+        handle,
+        req.message.strip(),
+        item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+        event_type=req.event_type,
+        subject=req.subject,
+    )
+    return {"status": "ok", "dispatch": dispatch}
+
+
+@app.get("/neurotwin/market-map")
+def neurotwin_market_map() -> Dict[str, Any]:
+    if twin_market_map is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin channels unavailable")
+    return {"status": "ok", "market_map": twin_market_map()}
+
+
+@app.get("/neurotwin/call-assistant/config")
+def neurotwin_call_assistant_config() -> Dict[str, Any]:
+    if get_call_assistant_config is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin call assistant unavailable")
+    return {"status": "ok", "config": get_call_assistant_config()}
+
+
+@app.post("/neurotwin/call-assistant/config")
+def neurotwin_call_assistant_config_save(req: TwinCallAssistantConfigRequest) -> Dict[str, Any]:
+    if save_call_assistant_config is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin call assistant unavailable")
+    payload = {k: v for k, v in req.model_dump().items() if v is not None}
+    config = save_call_assistant_config(payload, actor="dashboard_user")
+    return {"status": "ok", "config": config}
+
+
+@app.get("/neurotwin/clone/customization")
+def neurotwin_clone_customization() -> Dict[str, Any]:
+    if get_clone_customization is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin clone customization unavailable")
+    return {"status": "ok", "customization": get_clone_customization()}
+
+
+@app.post("/neurotwin/clone/customization")
+def neurotwin_clone_customization_save(req: TwinCloneCustomizationRequest) -> Dict[str, Any]:
+    if save_clone_customization is None:
+        raise HTTPException(status_code=503, detail="NeuroTwin clone customization unavailable")
+    data = save_clone_customization(req.model_dump(), actor="dashboard_user")
+    return {"status": "ok", "customization": data}
 
 
 @app.post("/twin/scan")

@@ -1,0 +1,32 @@
+name: NeuroEdgeShell
+options:
+  bundleIdPrefix: com.neuroedge
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+targets:
+  NeuroEdgeShell:
+    type: application
+    platform: iOS
+    sources:
+      - path: NeuroEdgeShell
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.neuroedge.iosshell
+      INFOPLIST_FILE: NeuroEdgeShell/Info.plist
+      TARGETED_DEVICE_FAMILY: "1,2"
+      DEVELOPMENT_TEAM: ""
+    info:
+      path: NeuroEdgeShell/Info.plist
+      properties:
+        CFBundleDisplayName: NeuroEdge
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSMicrophoneUsageDescription: NeuroEdge needs microphone access for voice chat.
+        NSCameraUsageDescription: NeuroEdge needs camera access for uploads and calls.
+        NSPhotoLibraryUsageDescription: NeuroEdge needs photo library access for file uploads.
+        NSPhotoLibraryAddUsageDescription: NeuroEdge can save generated outputs to your library.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

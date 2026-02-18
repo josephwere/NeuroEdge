@@ -16,6 +16,15 @@ export interface ExecuteResponse {
   intent?: string;
   risk?: "low" | "medium" | "high";
   response?: string;
+  confidence?: number;
+  citations?: Array<{ title?: string; url?: string; snippet?: string; domain?: string }>;
+  trust?: {
+    why?: string;
+    freshnessHours?: number | null;
+    sourceQualityScore?: number;
+    contradictionRisk?: number;
+    citationCount?: number;
+  };
   logs?: string[];
   results?: Array<{ id?: string; success: boolean; stdout?: string; stderr?: string }>;
   approvals?: Array<{ id: string; message: string; command?: string }>;
@@ -228,6 +237,9 @@ export class OrchestratorClient {
       intent: aiResp?.intent,
       risk: aiResp?.risk || "low",
       response: assistantText || undefined,
+      confidence: aiResp?.confidence,
+      citations: Array.isArray(aiResp?.citations) ? aiResp.citations : undefined,
+      trust: aiResp?.trust,
       logs: [],
       results: [
         {

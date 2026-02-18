@@ -54,6 +54,7 @@ const App: React.FC = () => {
     <NotificationProvider>
       <UnifiedChat orchestrator={orchestrator} />
       <CommandPalette
+        orchestrator={orchestrator}
         visible={paletteVisible}
         onClose={() => setPaletteVisible(false)}
       />

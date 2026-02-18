@@ -1,0 +1,19 @@
+{
+  "name": "@neuroedge/react-native-twin",
+  "version": "0.1.0",
+  "description": "React Native bridge for NeuroEdge Personal Twin mobile actions",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "react-native": "src/index.ts",
+  "keywords": [
+    "react-native",
+    "neuroedge",
+    "callkit",
+    "call-screening",
+    "personal-twin"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react-native": ">=0.72.0"
+  }
+}

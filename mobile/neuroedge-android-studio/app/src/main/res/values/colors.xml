@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="neuroedge_primary">#0B1220</color>
+    <color name="neuroedge_primary_variant">#101A2E</color>
+    <color name="neuroedge_accent">#1EA7FD</color>
+    <color name="neuroedge_background">#05070D</color>
+</resources>

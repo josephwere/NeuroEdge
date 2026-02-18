@@ -4,7 +4,8 @@ import { chatContext } from "@/services/chatContext";
 import { OrchestratorClient } from "@/services/orchestrator_client";
 import { saveToCache, getCache, clearCache } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
-import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
+import { AISuggestion as OverlaySuggestion } from "@/components/AISuggestionsOverlay";
+import { generateSuggestions } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { isFounderUser } from "@/services/founderAccess";
@@ -18,10 +19,10 @@ import {
 } from "@/services/userCustomization";
 
 interface ExecutionResult {
-  id: string;
+  id?: string;
   success: boolean;
-  stdout: string;
-  stderr: string;
+  stdout?: string;
+  stderr?: string;
 }
 
 interface LogLine {
@@ -51,6 +52,24 @@ interface FloatingChatProps {
   embedded?: boolean;
 }
 
+interface ActiveAssistantProfile {
+  name?: string;
+  rolePrompt?: string;
+  tone?: string;
+  language?: string;
+  responseMode?: "concise" | "balanced" | "detailed";
+  domainFocus?: string;
+  startupPrompt?: string;
+  avatarEmoji?: string;
+  creativity?: number;
+  tools?: string[];
+  memoryDays?: number;
+  memoryMode?: "session" | "long_term";
+  privacyMode?: boolean;
+  safeMode?: boolean;
+  autoCitations?: boolean;
+}
+
 const PAGE_SIZE = 20;
 const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
 
@@ -68,7 +87,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const [input, setInput] = useState("");
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
-  const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<OverlaySuggestion[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(initialPosition || { x: 20, y: 20 });
   const longPressTimer = useRef<number | null>(null);
@@ -83,6 +102,14 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   const [listenSeq, setListenSeq] = useState(0);
   const [brainstormMode, setBrainstormMode] = useState(false);
   const [branding, setBranding] = useState(() => loadEffectiveChatBranding());
+  const [activeAssistant, setActiveAssistant] = useState<ActiveAssistantProfile | null>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_active_user_assistant_v1");
+      return raw ? (JSON.parse(raw) as ActiveAssistantProfile) : null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
     const refreshBranding = () => setBranding(loadEffectiveChatBranding());
@@ -99,6 +126,23 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         refreshBranding as EventListener
       );
       window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncAssistant = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_active_user_assistant_v1");
+        setActiveAssistant(raw ? (JSON.parse(raw) as ActiveAssistantProfile) : null);
+      } catch {
+        setActiveAssistant(null);
+      }
+    };
+    window.addEventListener("neuroedge:userAssistantUpdated", syncAssistant as EventListener);
+    window.addEventListener("storage", syncAssistant);
+    return () => {
+      window.removeEventListener("neuroedge:userAssistantUpdated", syncAssistant as EventListener);
+      window.removeEventListener("storage", syncAssistant);
     };
   }, []);
 
@@ -214,12 +258,16 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     if (!input.trim()) return setSuggestions([]);
     const timer = setTimeout(async () => {
       const s = await generateSuggestions(input, "floating");
-      setSuggestions(s);
+      setSuggestions(s as OverlaySuggestion[]);
     }, 250);
     return () => clearTimeout(timer);
   }, [input]);
 
-  const acceptSuggestion = (s: AISuggestion) => {
+  const acceptSuggestion = (s: OverlaySuggestion | null) => {
+    if (!s) {
+      setSuggestions([]);
+      return;
+    }
     if (s.type === "command") {
       setInput(s.text); setSuggestions([]); setTimeout(send, 0);
     } else {
@@ -243,6 +291,35 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     const runId = Date.now();
     sendRunRef.current = runId;
     const context = chatContext.getAll();
+    try {
+      const rawAssistant = localStorage.getItem("neuroedge_active_user_assistant_v1");
+      if (rawAssistant) {
+        const a = JSON.parse(rawAssistant) as ActiveAssistantProfile;
+        const systemInstruction = [
+          `Active assistant profile: ${a.name || "User Assistant"}.`,
+          a.rolePrompt ? `Role: ${a.rolePrompt}` : "",
+          a.tone ? `Tone: ${a.tone}` : "",
+          a.language ? `Language: ${a.language}` : "",
+          a.responseMode ? `Response mode: ${a.responseMode}` : "",
+          a.domainFocus ? `Domain focus: ${a.domainFocus}` : "",
+          a.startupPrompt ? `Startup behavior: ${a.startupPrompt}` : "",
+          a.creativity !== undefined ? `Creativity: ${a.creativity}` : "",
+          a.memoryDays !== undefined ? `Memory days: ${a.memoryDays}` : "",
+          a.memoryMode ? `Memory mode: ${a.memoryMode}` : "",
+          Array.isArray(a.tools) ? `Tools allowed: ${a.tools.join(", ")}` : "",
+          a.autoCitations !== undefined ? `Auto citations: ${a.autoCitations ? "on" : "off"}` : "",
+          a.privacyMode !== undefined ? `Privacy mode: ${a.privacyMode ? "on" : "off"}` : "",
+          a.safeMode !== undefined ? `Safety mode: ${a.safeMode ? "on" : "off"}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        if (systemInstruction.trim()) {
+          context.unshift({ role: "system", content: systemInstruction });
+        }
+      }
+    } catch {
+      // ignore assistant parse issues
+    }
     const commandId = Date.now().toString();
 
     addMessage(text, "info", undefined, undefined, "user");
@@ -498,6 +575,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
           );
         }
       }
+      const codeLang = (m[1] || "text").trim();
+      const codeBody = m[2] || "";
       nodes.push(
         <div key={`c-${idx++}`} style={{ marginTop: "0.45rem" }}>
           <div
@@ -514,9 +593,9 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               color: "#cbd5e1",
             }}
           >
-            <span>{(m[1] || "text").trim()}</span>
+            <span>{codeLang}</span>
             <button
-              onClick={() => copyText(m[2] || "")}
+              onClick={() => copyText(codeBody)}
               style={{
                 border: "1px solid rgba(148, 163, 184, 0.28)",
                 background: "transparent",
@@ -529,8 +608,8 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
               Copy
             </button>
           </div>
-          <SyntaxHighlighter language={(m[1] || "text").trim()} style={okaidia} showLineNumbers>
-            {m[2] || ""}
+          <SyntaxHighlighter language={codeLang} style={okaidia} showLineNumbers>
+            {codeBody}
           </SyntaxHighlighter>
         </div>
       );
@@ -632,6 +711,21 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
           <img src={branding.floatingChatIconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
           <strong>{branding.productName || "NeuroEdge"} Floating Chat</strong>
+          {activeAssistant?.name && (
+            <span
+              style={{
+                marginLeft: 8,
+                padding: "0.12rem 0.45rem",
+                borderRadius: 999,
+                border: "1px solid rgba(125,211,252,0.35)",
+                color: "#bae6fd",
+                fontSize: "0.68rem",
+              }}
+            >
+              {(activeAssistant.avatarEmoji || "🤖") + " "}
+              {activeAssistant.name}
+            </span>
+          )}
           {!embedded && (
             <>
               <button

@@ -8,6 +8,7 @@ import { recordTokenUsage } from "@billing/usage";
 import { trackTokenUsage } from "@observability/metrics";
 import { runResearch } from "@research/pipeline";
 import { chooseModelVariant, recordModelOutcome } from "@quality/modelQuality";
+import { getMarketReadinessConfig } from "@quality/marketReadiness";
 
 function parseSharedPattern(text: string): { total: number; people: number } | null {
   const m = text
@@ -72,6 +73,51 @@ function isFactualPrompt(text: string): boolean {
 function citationModeRequired(text: string): boolean {
   const strict = String(process.env.CITATION_REQUIRED_MODE || "").toLowerCase() === "true";
   return strict && isFactualPrompt(text);
+}
+
+function needsHumanApproval(text: string): { risky: boolean; reason: string } {
+  const t = String(text || "").toLowerCase();
+  const rules: Array<{ re: RegExp; reason: string }> = [
+    { re: /\b(delete|drop)\b.*\b(database|table|production|prod)\b/, reason: "destructive_db_action" },
+    { re: /\b(deploy|release|ship)\b.*\b(prod|production)\b/, reason: "production_deploy_request" },
+    { re: /\b(transfer|send|wire)\b.*\b(money|funds|usd|crypto|token)\b/, reason: "financial_transfer_request" },
+    { re: /\b(sign|approve)\b.*\b(contract|agreement|legal)\b/, reason: "legal_commitment_request" },
+  ];
+  for (const r of rules) {
+    if (r.re.test(t)) return { risky: true, reason: r.reason };
+  }
+  return { risky: false, reason: "" };
+}
+
+function contradictionRiskScore(answer: string): number {
+  const text = String(answer || "").toLowerCase();
+  const both = (text.includes(" yes ") || text.startsWith("yes")) && (text.includes(" no ") || text.startsWith("no"));
+  if (both) return 0.65;
+  const howeverCount = (text.match(/\bhowever\b/g) || []).length;
+  const butCount = (text.match(/\bbut\b/g) || []).length;
+  return Number(Math.min(0.45, (howeverCount + butCount) * 0.06).toFixed(4));
+}
+
+function sourceQualityScore(citations: any[]): number {
+  if (!Array.isArray(citations) || citations.length === 0) return 0.35;
+  const score = citations.reduce((acc, c) => {
+    const q = Number(c?.quality_score || c?.quality || 0);
+    if (Number.isFinite(q) && q > 0) return acc + Math.min(1, q);
+    const u = String(c?.url || "").toLowerCase();
+    if (/(reuters|bbc|arxiv|nature|who\.int|nih\.gov|cdc\.gov|developer\.mozilla)/.test(u)) return acc + 0.9;
+    return acc + 0.65;
+  }, 0);
+  return Number((score / citations.length).toFixed(4));
+}
+
+function freshnessHours(citations: any[]): number | null {
+  if (!Array.isArray(citations) || citations.length === 0) return null;
+  const dates = citations
+    .map((c) => new Date(c?.fetched_at || c?.published_at || c?.timestamp || "").getTime())
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (dates.length === 0) return null;
+  const newest = Math.max(...dates);
+  return Number(((Date.now() - newest) / 36e5).toFixed(2));
 }
 
 function detectSafetyBlockReason(text: string): string | null {
@@ -343,6 +389,7 @@ export async function handleAIInference(req: Request, res: Response) {
   const startedAt = Date.now();
   const input = req.body?.input || req.body?.text || req.body?.message || "";
   const payload = req.body?.payload || {};
+  const marketConfig = getMarketReadinessConfig();
 
   if (!input && Object.keys(payload).length === 0) {
     return res.status(400).json({ error: "Missing input" });
@@ -370,6 +417,29 @@ export async function handleAIInference(req: Request, res: Response) {
     });
   }
 
+  const approvalCheck = needsHumanApproval(String(input || ""));
+  if (marketConfig.hitlRiskyActions && approvalCheck.risky) {
+    appendEvent({
+      type: "approval.required",
+      timestamp: Date.now(),
+      payload: {
+        reason: approvalCheck.reason,
+        actor: req.auth?.sub || "unknown",
+        inputPreview: String(input || "").slice(0, 180),
+      },
+    });
+    return res.json({
+      success: true,
+      approvalRequired: true,
+      approvalReason: approvalCheck.reason,
+      response:
+        "This request needs human approval before execution. Open Approvals and confirm with reason + scope.",
+      confidence: 0.25,
+      risk: "high",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   const mlUrl = process.env.ML_URL || "http://localhost:8090";
   const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:7070";
   const text = String(input || "").toLowerCase();
@@ -381,7 +451,7 @@ export async function handleAIInference(req: Request, res: Response) {
         ? "run_tests"
         : "gather_context";
   const style = getStyle(req);
-  const citationRequired = citationModeRequired(text);
+  const citationRequired = citationModeRequired(text) || (marketConfig.verifiedAnswerMode && isFactualPrompt(text));
   const contextArr = Array.isArray(req.body?.context) ? req.body.context : [];
   const domain = detectCortexDomain(String(input || ""));
   const modelPick = chooseModelVariant({
@@ -405,7 +475,7 @@ export async function handleAIInference(req: Request, res: Response) {
     });
     let mlData: any = null;
     let usedMesh = false;
-    try {
+    const inferViaMesh = async () => {
       const meshResp = await axios.post(`${orchestratorUrl}/mesh/infer`, {
         text: input,
         payload,
@@ -413,13 +483,35 @@ export async function handleAIInference(req: Request, res: Response) {
       });
       mlData = meshResp.data?.result || meshResp.data;
       usedMesh = true;
-    } catch {
+    };
+    const inferViaMl = async () => {
       const mlResp = await axios.post(`${mlUrl}/infer`, {
         text: input,
         payload,
         context: req.body?.context || {},
       });
       mlData = mlResp.data || {};
+      usedMesh = false;
+    };
+    const mode = marketConfig.hybridRoutingMode;
+    if (mode === "local_first") {
+      try {
+        await inferViaMl();
+      } catch {
+        await inferViaMesh();
+      }
+    } else if (mode === "mesh_first") {
+      try {
+        await inferViaMesh();
+      } catch {
+        await inferViaMl();
+      }
+    } else {
+      try {
+        await inferViaMesh();
+      } catch {
+        await inferViaMl();
+      }
     }
     appendEvent({
       type: "ml.infer.response",
@@ -481,7 +573,7 @@ export async function handleAIInference(req: Request, res: Response) {
       style === "concise" ? "fast" : style === "detailed" ? "deep_research" : "step_by_step";
 
     let assistant = "";
-    if (researchTool?.output?.summary) {
+    if (marketConfig.deepResearchEnabled && researchTool?.output?.summary) {
       assistant = String(researchTool.output.summary);
     } else if (mathTool?.output?.value !== undefined) {
       assistant = `✅ **Math Result**\n\n**${mathTool.output.value}**`;
@@ -551,9 +643,32 @@ export async function handleAIInference(req: Request, res: Response) {
     }
 
     const verification = verifyResponseQuality(assistant, toolOutputs, citationRequired);
-    if (!verification.ok) {
+    if (marketConfig.verifiedAnswerMode && citationRequired && !verification.ok) {
+      assistant =
+        "I need higher-confidence evidence before answering this fact-sensitive question.\n\n" +
+        "Please refine scope (topic, region, timeframe) or enable trusted sources for citations.";
+    } else if (!verification.ok) {
       assistant += "\n\n⚠️ Confidence is limited for this answer. Please refine query or provide source constraints.";
     }
+
+    const citations = Array.isArray(researchTool?.output?.citations) ? researchTool.output.citations : [];
+    const trustMeta = {
+      verifiedAnswerMode: marketConfig.verifiedAnswerMode,
+      citationRequired,
+      citationCount: citations.length,
+      sourceQualityScore: sourceQualityScore(citations),
+      freshnessHours: freshnessHours(citations),
+      contradictionRisk: contradictionRiskScore(assistant),
+      why:
+        marketConfig.trustUxByDefault
+          ? {
+              strategy: usedMesh ? "mesh-first inference" : "local-ml inference",
+              toolsUsed: toolOutputs.map((t) => t.name),
+              model: selectedModel || process.env.LLM_MODEL_NAME || process.env.ML_MODEL_NAME || "neuroedge-ml",
+              retrievalUsed: Boolean(researchTool),
+            }
+          : undefined,
+    };
 
     const responsePayload = {
       success: true,
@@ -569,8 +684,14 @@ export async function handleAIInference(req: Request, res: Response) {
         confidence: t.confidence,
         retries: t.retries,
       })),
-      citations: Array.isArray(researchTool?.output?.citations) ? researchTool?.output?.citations : [],
+      citations,
       ml: { ...mlData, mesh: usedMesh },
+      trust: trustMeta,
+      market: {
+        routingMode: marketConfig.hybridRoutingMode,
+        hitlRiskyActions: marketConfig.hitlRiskyActions,
+        deepResearchEnabled: marketConfig.deepResearchEnabled,
+      },
       timestamp: new Date().toISOString(),
     };
     appendEvent({
@@ -585,6 +706,8 @@ export async function handleAIInference(req: Request, res: Response) {
         citationCount: Array.isArray(responsePayload.citations)
           ? responsePayload.citations.length
           : 0,
+        sourceQualityScore: trustMeta.sourceQualityScore,
+        contradictionRisk: trustMeta.contradictionRisk,
         toolCount: Array.isArray(responsePayload.tools)
           ? responsePayload.tools.length
           : 0,
@@ -646,6 +769,19 @@ export async function handleAIInference(req: Request, res: Response) {
       ml: {
         status: "fallback",
         action: fallbackIntent,
+      },
+      trust: {
+        verifiedAnswerMode: marketConfig.verifiedAnswerMode,
+        citationRequired: false,
+        citationCount: 0,
+        sourceQualityScore: 0.2,
+        freshnessHours: null,
+        contradictionRisk: contradictionRiskScore(assistant),
+      },
+      market: {
+        routingMode: marketConfig.hybridRoutingMode,
+        hitlRiskyActions: marketConfig.hitlRiskyActions,
+        deepResearchEnabled: marketConfig.deepResearchEnabled,
       },
       timestamp: new Date().toISOString(),
     };

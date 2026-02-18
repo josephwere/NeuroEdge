@@ -11,10 +11,35 @@ export interface HybridEvent {
   payload: Record<string, any>;
 }
 
+export interface ReliabilityProgramState {
+  slo?: {
+    availabilityPct?: number;
+    p95LatencyMs?: number;
+    errorBudgetPct?: number;
+    windowDays?: number;
+    owner?: string;
+    updatedAt?: number;
+  };
+  canary?: {
+    enabled?: boolean;
+    trafficPct?: number;
+    autoRollback?: boolean;
+    lastRun?: Record<string, any> | null;
+  };
+  statusPage?: {
+    mode?: string;
+    message?: string;
+    updatedAt?: number;
+  };
+  incidents?: Array<Record<string, any>>;
+}
+
 export interface HybridState {
   version: string;
   updatedAt: number;
   summary: Record<string, any>;
+  reliabilityProgram?: ReliabilityProgramState;
+  [key: string]: any;
 }
 
 function ensureDataDir() {
@@ -38,9 +63,19 @@ export function readState(): HybridState {
   return JSON.parse(raw) as HybridState;
 }
 
-export function writeState(next: HybridState): HybridState {
+export function writeState(next: Partial<HybridState>): HybridState {
   ensureDataDir();
-  const updated = { ...next, updatedAt: Date.now() };
+  const current = readState();
+  const updated: HybridState = {
+    ...current,
+    ...next,
+    summary: {
+      ...(current.summary || {}),
+      ...((next.summary || {}) as Record<string, any>),
+    },
+    version: String(next.version || current.version || "v1"),
+    updatedAt: Date.now(),
+  };
   fs.writeFileSync(stateFile, JSON.stringify(updated, null, 2), "utf-8");
   return updated;
 }

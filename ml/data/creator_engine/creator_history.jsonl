@@ -1,0 +1,2 @@
+{"timestamp": 1771402788, "type": "creator.job.queued", "job_id": "creator_job_1771402788_6866ea16fd", "kind": "image_edit"}
+{"timestamp": 1771402788, "type": "creator.job.failed", "job_id": "creator_job_1771402788_6866ea16fd", "kind": "image_edit", "error": "Missing image_path"}

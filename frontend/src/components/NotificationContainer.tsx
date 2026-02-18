@@ -1,6 +1,6 @@
 import React from "react";
 
-export type NotificationType = "success" | "warn" | "error" | "ai";
+export type NotificationType = "info" | "success" | "warn" | "error" | "ai";
 
 export interface Notification {
   id: string;
@@ -73,6 +73,8 @@ const NotificationContainer: React.FC<NotificationContainerProps> = ({
 
 const getColor = (type?: NotificationType) => {
   switch (type) {
+    case "info":
+      return "#0ea5e9";
     case "success":
       return "#2b8a3e";
     case "warn":

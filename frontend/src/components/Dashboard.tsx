@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
 import { chatContext } from "@/services/chatContext";
 import { listConversations } from "@/services/conversationStore";
@@ -74,6 +74,9 @@ interface CryptoRewardsConfig {
   chain: string;
   token: string;
   founderWalletAddress: string;
+  neuroChainRpcUrl?: string;
+  wdcContractAddress?: string;
+  wdcWalletAppUrl?: string;
   rewardPerComputeUnit: string;
   minPayout: string;
   payoutSchedule: "hourly" | "daily" | "weekly" | "monthly";
@@ -100,6 +103,155 @@ interface RewardsLedger {
     payoutMode: "points_only" | "cash_only" | "wdc_only" | "hybrid";
   };
   wallets: RewardWallet[];
+}
+
+interface OwnerComputeDevice {
+  id: string;
+  hostname: string;
+  os: string;
+  ownerUserId: string;
+  ownerUserName?: string;
+  ownerOrg?: string;
+  status: string;
+  computeEnabled?: boolean;
+  pauseReason?: string;
+  installToken?: string;
+  stats?: {
+    cpuPct?: number;
+    ramPct?: number;
+    tempC?: number;
+    onBattery?: boolean;
+    uptimeSec?: number;
+    tasksCompleted?: number;
+    computeHours?: number;
+    earningsUsd?: number;
+    earnedPoints?: number;
+    updatedAt?: number;
+  };
+  updatedAt?: number;
+}
+
+interface OwnerPayoutProfile {
+  userId: string;
+  userName?: string;
+  verifiedAt?: number;
+  paymentMethod: string;
+  bankName?: string;
+  accountName?: string;
+  accountNumberMasked?: string;
+  swiftCode?: string;
+  cardHolder?: string;
+  cardLast4?: string;
+  billingCountry?: string;
+  wdcWalletAddress?: string;
+  neuroChainAddress?: string;
+}
+
+interface OwnerPayoutRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  target: string;
+  amountUsd: number;
+  amountWdc: number;
+  points: number;
+  status: string;
+  createdAt: number;
+  approvedAt?: number;
+  sentAt?: number;
+  settlement?: string;
+  txRef?: string;
+}
+
+interface ComputePayoutBudget {
+  period: string;
+  totalRevenueUsd: number;
+  allocatedUsd: number;
+  pendingUsd: number;
+  approvedUsd: number;
+  sentUsd: number;
+  reserveUsd: number;
+  updatedAt?: number;
+}
+
+interface ComputeAutoPayoutConfig {
+  enabled: boolean;
+  period: "hourly" | "daily" | "weekly" | "monthly";
+  maxPayoutsPerRun: number;
+  lastRunBucket?: string;
+  lastRunAt?: number;
+  updatedAt?: number;
+}
+
+interface LoanOpsCompany {
+  id: string;
+  name: string;
+  orgId?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  legalPolicyRef?: string;
+  attestationRequired?: boolean;
+  autoRelockOnLoan?: boolean;
+  mdmProvider?: string;
+  oemProvider?: string;
+  enrollmentMode?: string;
+  lockWorkflow?: string;
+  status?: string;
+  updatedAt?: number;
+}
+
+interface LoanOpsDevice {
+  id: string;
+  companyId: string;
+  orgId?: string;
+  externalId?: string;
+  model: string;
+  serial?: string;
+  imei?: string;
+  ownerRef?: string;
+  loanStatus: string;
+  restrictedMode?: boolean;
+  restrictionReason?: string;
+  securityState?: string;
+  protectionTier?: string;
+  complianceState?: "trusted" | "re-enroll-required" | "restricted" | string;
+  attestationProvider?: string;
+  attestationStatus?: string;
+  attestationAt?: number;
+  lockState?: string;
+  updatedAt?: number;
+}
+
+interface LoanOpsApiKey {
+  id: string;
+  companyId: string;
+  name: string;
+  keyMasked: string;
+  status: string;
+  createdAt: number;
+}
+
+interface LoanOpsDispute {
+  id: string;
+  deviceId: string;
+  companyId: string;
+  status: string;
+  reason?: string;
+  openedAt?: number;
+  resolvedAt?: number;
+}
+
+interface UserProtectionProfile {
+  userId: string;
+  userName?: string;
+  planTier: "free" | "paid";
+  maxDevices: number;
+  devices: Array<{ id: string; label: string; platform: string; status: string; createdAt?: number; updatedAt?: number }>;
+  trustedContacts: Array<{ id: string; name: string; endpoint: string; channel: string; verified?: boolean }>;
+  antiTheftConsent?: boolean;
+  locationConsent?: boolean;
+  cameraEvidenceConsent?: boolean;
+  updatedAt?: number;
 }
 
 interface IdverseConfig {
@@ -342,6 +494,60 @@ interface AgentProfile {
   permission: "workspace" | "project" | "read_only";
 }
 
+interface UserAssistantProfile {
+  id: string;
+  name: string;
+  rolePrompt: string;
+  tone: "balanced" | "formal" | "casual" | "technical" | "creative";
+  language: string;
+  responseMode?: "concise" | "balanced" | "detailed";
+  domainFocus?: string;
+  startupPrompt?: string;
+  avatarEmoji?: string;
+  creativity: number;
+  memoryDays: number;
+  memoryMode?: "session" | "long_term";
+  autoCitations?: boolean;
+  knowledgeSources?: string[];
+  knowledgeFiles?: Array<{
+    id: string;
+    name: string;
+    size: number;
+    mime: string;
+    addedAt: number;
+  }>;
+  tools: string[];
+  privacyMode: boolean;
+  safeMode: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface AssistantMarketplacePack {
+  id: string;
+  owner: string;
+  name: string;
+  description: string;
+  visibility: "public" | "private";
+  tags: string[];
+  downloads: number;
+  rating: number;
+  updatedAt: number;
+  assistant: UserAssistantProfile;
+}
+
+interface AssistantUsageAnalytics {
+  assistantId: string;
+  turns: number;
+  up: number;
+  down: number;
+  laugh: number;
+  sad: number;
+  avgConfidence: number;
+  citationCoverage: number;
+  updatedAt: number;
+}
+
 interface SavedPrompt {
   id: string;
   title: string;
@@ -451,6 +657,130 @@ interface FrontierReadiness {
   recommendation?: string;
 }
 
+type RuntimeDomain = "kernel" | "ml" | "orchestrator" | "frontend";
+
+interface RuntimeUnit {
+  id: string;
+  name: string;
+  domain: RuntimeDomain;
+  kind: "agent" | "engine" | "module" | "instance" | "file";
+  registered: boolean;
+  live: boolean;
+  cause: string;
+  suggestedFix: string;
+  sourcePath?: string;
+}
+
+interface MarketReadinessConfig {
+  verifiedAnswerMode: boolean;
+  trustUxByDefault: boolean;
+  hybridRoutingMode: "mesh_first" | "local_first" | "balanced";
+  hitlRiskyActions: boolean;
+  reliabilityGuardrails: boolean;
+  benchmarkReleaseGates: boolean;
+  domainPackStrictness: "standard" | "strict";
+  deepResearchEnabled: boolean;
+  connectorsEnabled: boolean;
+  artifactsWorkspaceEnabled: boolean;
+  updatedAt?: number;
+}
+
+interface ReliabilityProgramState {
+  slo?: {
+    availabilityPct: number;
+    p95LatencyMs: number;
+    errorBudgetPct: number;
+    windowDays: number;
+    owner: string;
+    updatedAt?: number;
+  };
+  canary?: {
+    enabled: boolean;
+    trafficPct: number;
+    autoRollback: boolean;
+    lastRun?: any;
+  };
+  statusPage?: {
+    mode: "operational" | "degraded" | "major_outage" | "maintenance";
+    message: string;
+    updatedAt?: number;
+  };
+  incidents?: Array<{
+    id: string;
+    title: string;
+    severity: "sev1" | "sev2" | "sev3" | "sev4";
+    status: "open" | "monitoring" | "resolved";
+    summary?: string;
+    owner?: string;
+    createdAt?: number;
+  }>;
+}
+
+interface ArtifactWorkspaceItem {
+  id: string;
+  title: string;
+  type: "doc" | "code" | "plan" | "report";
+  body: string;
+  owner: string;
+  visibility: "private" | "workspace";
+  updatedAt: number;
+}
+
+interface NeuroExpansionSubmission {
+  id: string;
+  title: string;
+  featureText: string;
+  codeText: string;
+  status: "blocked" | "pending_approval" | "approved" | "rejected" | "merged";
+  scan: {
+    severity: "low" | "medium" | "high" | "critical";
+    signals: string[];
+    doctrineOk: boolean;
+    doctrineReason?: string;
+  };
+  metadata: {
+    uploadedBy: string;
+    uploadedByRole: string;
+    uploadedAt: number;
+    orgId: string;
+    workspaceId: string;
+  };
+  review?: {
+    decisionBy: string;
+    decisionRole: string;
+    decisionAt: number;
+    decision: "approve" | "reject";
+    reason?: string;
+  };
+  merge?: {
+    mergedBy: string;
+    mergedAt: number;
+    targetPath: string;
+    testsRequested: boolean;
+  };
+}
+
+interface NeuroExpansionState {
+  settings: {
+    enabled: boolean;
+    autoDailyScan: boolean;
+    requireFounderApproval: boolean;
+    autoTestOnMerge: boolean;
+    placeholderScanRoots: string[];
+    maxFindings: number;
+    lastDailyRunAt: number;
+  };
+  submissions: NeuroExpansionSubmission[];
+  autoProposals: Array<{
+    id: string;
+    createdAt: number;
+    placeholdersDetected: number;
+    candidateModules: string[];
+    rationale: string[];
+    status: "pending_approval" | "approved" | "rejected";
+  }>;
+}
+
 type UploadTier = "founder" | "admin" | "paid" | "free";
 type DashboardRole = "founder" | "admin" | "developer" | "enterprise" | "user";
 
@@ -487,6 +817,74 @@ const Dashboard: React.FC = () => {
   const [frontierMilestoneOwner, setFrontierMilestoneOwner] = useState("founder");
   const [frontierMilestoneStatus, setFrontierMilestoneStatus] = useState<"planned" | "in_progress" | "blocked" | "done">("planned");
   const [frontierMilestoneCriteria, setFrontierMilestoneCriteria] = useState("");
+  const [runtimeDomain, setRuntimeDomain] = useState<RuntimeDomain>("kernel");
+  const [selectedRuntimeUnit, setSelectedRuntimeUnit] = useState<RuntimeUnit | null>(null);
+  const [runtimeTwinScan, setRuntimeTwinScan] = useState<any>(null);
+  const [runtimeAgentRegistry, setRuntimeAgentRegistry] = useState<Array<{ name: string; status: string }>>([]);
+  const [runtimeScanLoading, setRuntimeScanLoading] = useState(false);
+  const [runtimeScanAt, setRuntimeScanAt] = useState<number>(0);
+  const [marketReadinessConfig, setMarketReadinessConfig] = useState<MarketReadinessConfig>({
+    verifiedAnswerMode: true,
+    trustUxByDefault: true,
+    hybridRoutingMode: "balanced",
+    hitlRiskyActions: true,
+    reliabilityGuardrails: true,
+    benchmarkReleaseGates: true,
+    domainPackStrictness: "strict",
+    deepResearchEnabled: true,
+    connectorsEnabled: true,
+    artifactsWorkspaceEnabled: true,
+  });
+  const [marketReadinessSummary, setMarketReadinessSummary] = useState<any>(null);
+  const [reliabilityProgram, setReliabilityProgram] = useState<ReliabilityProgramState | null>(null);
+  const [sloDraft, setSloDraft] = useState({
+    availabilityPct: "99.9",
+    p95LatencyMs: "2500",
+    errorBudgetPct: "0.1",
+    windowDays: "30",
+    owner: "sre",
+  });
+  const [canaryTrafficPct, setCanaryTrafficPct] = useState("5");
+  const [canaryAutoRollback, setCanaryAutoRollback] = useState(true);
+  const [statusPageMode, setStatusPageMode] = useState<"operational" | "degraded" | "major_outage" | "maintenance">("operational");
+  const [statusPageMessage, setStatusPageMessage] = useState("All systems operational.");
+  const [incidentTitle, setIncidentTitle] = useState("");
+  const [incidentSeverity, setIncidentSeverity] = useState<"sev1" | "sev2" | "sev3" | "sev4">("sev3");
+  const [incidentSummary, setIncidentSummary] = useState("");
+  const [neuroExpansion, setNeuroExpansion] = useState<NeuroExpansionState | null>(null);
+  const [neuroExpansionNotifications, setNeuroExpansionNotifications] = useState<any[]>([]);
+  const [neuroExpansionTitle, setNeuroExpansionTitle] = useState("");
+  const [neuroExpansionFeature, setNeuroExpansionFeature] = useState("");
+  const [neuroExpansionCode, setNeuroExpansionCode] = useState("");
+  const [neuroExpansionReviewReason, setNeuroExpansionReviewReason] = useState("");
+  const [neuroExpansionPrBaseBranch, setNeuroExpansionPrBaseBranch] = useState("main");
+  const [neuroExpansionPrMaterialize, setNeuroExpansionPrMaterialize] = useState(false);
+  const [neuroExpansionPrPush, setNeuroExpansionPrPush] = useState(false);
+  const [neuroExpansionPatchRunTests, setNeuroExpansionPatchRunTests] = useState(true);
+  const [neuroExpansionPatchTestCommand, setNeuroExpansionPatchTestCommand] = useState("pnpm run typecheck");
+  const [neuroExpansionPlaceholderReport, setNeuroExpansionPlaceholderReport] = useState<any>(null);
+  const [neuroExpansionSettingsDraft, setNeuroExpansionSettingsDraft] = useState({
+    enabled: true,
+    autoDailyScan: true,
+    requireFounderApproval: true,
+    autoTestOnMerge: true,
+    placeholderScanRoots: "src,../frontend/src,../ml",
+    maxFindings: "500",
+  });
+  const [artifactWorkspace, setArtifactWorkspace] = useState<ArtifactWorkspaceItem[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_artifact_workspace_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [artifactDraft, setArtifactDraft] = useState({
+    title: "",
+    type: "doc" as ArtifactWorkspaceItem["type"],
+    body: "",
+    visibility: "private" as ArtifactWorkspaceItem["visibility"],
+  });
   const [twinOutput, setTwinOutput] = useState<any>(null);
   const [backendOutput, setBackendOutput] = useState<any>(null);
   const [twinQuestion, setTwinQuestion] = useState("");
@@ -497,6 +895,79 @@ const Dashboard: React.FC = () => {
   const [twinUploadedZips, setTwinUploadedZips] = useState<Array<{ name: string; data_base64: string }>>([]);
   const [twinIncludeAnalyze, setTwinIncludeAnalyze] = useState(true);
   const [twinIncludeReport, setTwinIncludeReport] = useState(true);
+  const [twinChannelsBootstrap, setTwinChannelsBootstrap] = useState<any>(null);
+  const [twinChannelDraft, setTwinChannelDraft] = useState({
+    channel: "whatsapp",
+    provider: "official_api",
+    handle: "",
+    display_name: "",
+    consent_granted: true,
+    verified: false,
+    auto_reply_enabled: true,
+  });
+  const [twinAvailabilityMode, setTwinAvailabilityMode] = useState("active");
+  const [twinAvailabilityNotes, setTwinAvailabilityNotes] = useState("");
+  const [twinAutoEventDraft, setTwinAutoEventDraft] = useState({
+    event_type: "message",
+    channel: "whatsapp",
+    sender: "",
+    incoming_text: "",
+  });
+  const [twinAutoReplyDraft, setTwinAutoReplyDraft] = useState<any>(null);
+  const [twinApprover, setTwinApprover] = useState("owner");
+  const [twinMarketMap, setTwinMarketMap] = useState<any>(null);
+  const [twinSendChannelId, setTwinSendChannelId] = useState("");
+  const [twinSendTestMessage, setTwinSendTestMessage] = useState("Hello from NeuroEdge Personal Twin.");
+  const [twinCallConfig, setTwinCallConfig] = useState<any>(null);
+  const [twinCloneCustomization, setTwinCloneCustomization] = useState<any>(null);
+  const [twinCloneVoiceJson, setTwinCloneVoiceJson] = useState("[]");
+  const [twinCloneVideoJson, setTwinCloneVideoJson] = useState("[]");
+  const [twinClonePresetsJson, setTwinClonePresetsJson] = useState("[]");
+  const [mobileTwinBridge, setMobileTwinBridge] = useState<any>(null);
+  const [mobileTwinDeviceDraft, setMobileTwinDeviceDraft] = useState({
+    id: "",
+    platform: "android",
+    deviceName: "",
+    appVersion: "1.0.0",
+    osVersion: "",
+    attestationProvider: "android_play_integrity",
+    attestationStatus: "trusted",
+  });
+  const [mobileTwinSyncDraft, setMobileTwinSyncDraft] = useState({
+    deviceId: "",
+    pushToken: "",
+    permissionCallScreening: true,
+    capabilityCallAssist: true,
+    capabilityVoipAnswer: true,
+    capabilityWhatsappCallAssist: true,
+    capabilityVideoAvatar: true,
+    status: "online",
+  });
+  const [mobileTwinActionDraft, setMobileTwinActionDraft] = useState({
+    deviceId: "",
+    actionType: "answer_phone_call",
+    payloadJson: "{\"reason\":\"user_away\"}",
+  });
+  const [mobileTwinPendingDeviceId, setMobileTwinPendingDeviceId] = useState("");
+  const [mobileTwinPendingActions, setMobileTwinPendingActions] = useState<any[]>([]);
+  const [mobileTwinReceiptDraft, setMobileTwinReceiptDraft] = useState({
+    actionId: "",
+    deviceId: "",
+    status: "completed",
+    resultJson: "{\"ok\":true}",
+  });
+  const [opsVoiceQuery, setOpsVoiceQuery] = useState("");
+  const [opsVoiceListening, setOpsVoiceListening] = useState(false);
+  const [opsVoiceAutoSpeak, setOpsVoiceAutoSpeak] = useState(true);
+  const [opsVoiceLiveInterrupt, setOpsVoiceLiveInterrupt] = useState(true);
+  const [opsVoicePushToTalk, setOpsVoicePushToTalk] = useState(false);
+  const [opsVoiceHotkey, setOpsVoiceHotkey] = useState("Alt+V");
+  const [opsVoiceLanguage, setOpsVoiceLanguage] = useState("en-US");
+  const [opsVoiceOutput, setOpsVoiceOutput] = useState<any>(null);
+  const [opsVoiceStreamText, setOpsVoiceStreamText] = useState("");
+  const [opsVoiceSupported, setOpsVoiceSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const opsStreamTimerRef = useRef<any>(null);
   const [dashboardRole, setDashboardRole] = useState<DashboardRole>("user");
   const [dashboardAssistantQuery, setDashboardAssistantQuery] = useState("");
 
@@ -582,6 +1053,10 @@ const Dashboard: React.FC = () => {
     () => dashboardRole === "founder" || dashboardRole === "admin",
     [dashboardRole]
   );
+  const canAccessLoanOps = useMemo(
+    () => dashboardRole === "founder" || dashboardRole === "admin" || dashboardRole === "enterprise",
+    [dashboardRole]
+  );
 
   const dashboardGuideCatalog = useMemo<DashboardGuideItem[]>(
     () => [
@@ -608,6 +1083,22 @@ const Dashboard: React.FC = () => {
         roleScope: ["founder", "admin"],
         summary: "Ingest text/files/urls and run training jobs for system learning.",
         keywords: ["training", "ingest", "dataset", "feedback", "crawl", "urls", "zip"],
+      },
+      {
+        id: "founder-reliability-ops",
+        title: "Reliability Ops",
+        view: "founder",
+        roleScope: ["founder", "admin"],
+        summary: "SLO controls, canary runs, status page updates, and incident management.",
+        keywords: ["reliability", "slo", "canary", "incident", "status page", "rollback", "sre"],
+      },
+      {
+        id: "founder-artifacts-workspace",
+        title: "Artifacts Workspace",
+        view: "founder",
+        roleScope: ["founder", "admin", "developer", "user"],
+        summary: "Build and save docs/plans/code artifacts for collaborative iteration.",
+        keywords: ["artifact", "workspace", "document", "plan", "code", "report"],
       },
       {
         id: "founder-branding",
@@ -814,6 +1305,9 @@ const Dashboard: React.FC = () => {
             chain: "NeuroChain",
             token: "WDC",
             founderWalletAddress: "",
+            neuroChainRpcUrl: "",
+            wdcContractAddress: "",
+            wdcWalletAppUrl: "",
             rewardPerComputeUnit: "0.0001",
             minPayout: "1.0",
             payoutSchedule: "weekly",
@@ -827,6 +1321,9 @@ const Dashboard: React.FC = () => {
         chain: "NeuroChain",
         token: "WDC",
         founderWalletAddress: "",
+        neuroChainRpcUrl: "",
+        wdcContractAddress: "",
+        wdcWalletAppUrl: "",
         rewardPerComputeUnit: "0.0001",
         minPayout: "1.0",
         payoutSchedule: "weekly",
@@ -945,6 +1442,117 @@ const Dashboard: React.FC = () => {
   const [rewardUserId, setRewardUserId] = useState("u2");
   const [rewardUserName, setRewardUserName] = useState("Guest User");
   const [rewardPointsInput, setRewardPointsInput] = useState("100");
+  const [ownerComputeDevices, setOwnerComputeDevices] = useState<OwnerComputeDevice[]>([]);
+  const [ownerGuardrails, setOwnerGuardrails] = useState({
+    maxCpuPct: 35,
+    maxRamPct: 40,
+    pauseOnBattery: true,
+    pauseOnHighTempC: 80,
+  });
+  const [ownerPayoutProfile, setOwnerPayoutProfile] = useState<OwnerPayoutProfile | null>(null);
+  const [ownerPayoutRequests, setOwnerPayoutRequests] = useState<OwnerPayoutRequest[]>([]);
+  const [ownerWallet, setOwnerWallet] = useState<RewardWallet | null>(null);
+  const [computePayoutBudget, setComputePayoutBudget] = useState<ComputePayoutBudget>({
+    period: new Date().toISOString().slice(0, 7),
+    totalRevenueUsd: 0,
+    allocatedUsd: 0,
+    pendingUsd: 0,
+    approvedUsd: 0,
+    sentUsd: 0,
+    reserveUsd: 0,
+  });
+  const [computePayoutRequestsAdmin, setComputePayoutRequestsAdmin] = useState<OwnerPayoutRequest[]>([]);
+  const [computeAutoPayoutConfig, setComputeAutoPayoutConfig] = useState<ComputeAutoPayoutConfig>({
+    enabled: true,
+    period: "weekly",
+    maxPayoutsPerRun: 200,
+  });
+  const [computeDeviceDraft, setComputeDeviceDraft] = useState({ id: "", hostname: "", os: "linux" });
+  const [telemetryDraftByDevice, setTelemetryDraftByDevice] = useState<
+    Record<string, { cpuPct: string; ramPct: string; tempC: string; onBattery: boolean }>
+  >({});
+  const [otpChannel, setOtpChannel] = useState<"email" | "sms">("email");
+  const [otpDestination, setOtpDestination] = useState("");
+  const [loanOpsCompanies, setLoanOpsCompanies] = useState<LoanOpsCompany[]>([]);
+  const [loanOpsDevices, setLoanOpsDevices] = useState<LoanOpsDevice[]>([]);
+  const [loanOpsApiKeys, setLoanOpsApiKeys] = useState<LoanOpsApiKey[]>([]);
+  const [loanOpsIntakeLogs, setLoanOpsIntakeLogs] = useState<any[]>([]);
+  const [loanOpsDisputes, setLoanOpsDisputes] = useState<LoanOpsDispute[]>([]);
+  const [loanOpsPolicy, setLoanOpsPolicy] = useState({
+    consentRequired: true,
+    legalRestrictedModeOnly: true,
+    allowTrustedContactRecovery: true,
+    locationOnTheftWithConsent: true,
+    antiTamperMonitoring: true,
+    attestationRequiredDefault: true,
+    autoRelockOnLoanDefault: true,
+    allowedAttestationProvidersCsv: "android_play_integrity,ios_devicecheck,desktop_tpm",
+  });
+  const [loanCompanyDraft, setLoanCompanyDraft] = useState({
+    id: "",
+    name: "",
+    contactEmail: "",
+    contactPhone: "",
+    legalPolicyRef: "",
+  });
+  const [loanDeviceDraft, setLoanDeviceDraft] = useState({
+    id: "",
+    companyId: "",
+    model: "",
+    serial: "",
+    imei: "",
+    ownerRef: "",
+    loanStatus: "current",
+  });
+  const [loanImportText, setLoanImportText] = useState("");
+  const [loanApiKeyCompanyId, setLoanApiKeyCompanyId] = useState("");
+  const [loanApiKeyName, setLoanApiKeyName] = useState("LoanOps Integration Key");
+  const [loanBootIntegrityOk, setLoanBootIntegrityOk] = useState(true);
+  const [loanAttestationProvider, setLoanAttestationProvider] = useState("android_play_integrity");
+  const [loanAttestationStatus, setLoanAttestationStatus] = useState<"passed" | "failed">("passed");
+  const [loanSelectedDeviceId, setLoanSelectedDeviceId] = useState("");
+  const [loanDisputeReason, setLoanDisputeReason] = useState("customer_dispute");
+  const [loanDisputeEvidenceRef, setLoanDisputeEvidenceRef] = useState("");
+  const [loanConsentSubjectRef, setLoanConsentSubjectRef] = useState("");
+  const [loanConsentType, setLoanConsentType] = useState("loan_terms");
+  const [userProtectionProfile, setUserProtectionProfile] = useState<UserProtectionProfile | null>(null);
+  const [userProtectionIncidents, setUserProtectionIncidents] = useState<any[]>([]);
+  const [userProtectionPolicy, setUserProtectionPolicy] = useState<any>({});
+  const [userProtectDeviceDraft, setUserProtectDeviceDraft] = useState({
+    id: "",
+    label: "",
+    platform: "android",
+  });
+  const [trustedContactDraft, setTrustedContactDraft] = useState({
+    name: "",
+    endpoint: "",
+    channel: "email",
+  });
+  const [incidentDraft, setIncidentDraft] = useState({
+    deviceId: "",
+    note: "",
+    cameraEvidenceRef: "",
+    lat: "",
+    lng: "",
+  });
+  const [ownerPaymentDraft, setOwnerPaymentDraft] = useState({
+    paymentMethod: "bank",
+    bankName: "",
+    accountName: "",
+    accountNumberMasked: "",
+    swiftCode: "",
+    cardHolder: "",
+    cardLast4: "",
+    billingCountry: "",
+    wdcWalletAddress: "",
+    neuroChainAddress: "",
+  });
+  const [paymentVerifyChallengeId, setPaymentVerifyChallengeId] = useState("");
+  const [paymentVerifyCode, setPaymentVerifyCode] = useState("");
+  const [payoutReqUsd, setPayoutReqUsd] = useState("0");
+  const [payoutReqWdc, setPayoutReqWdc] = useState("0");
+  const [payoutReqPoints, setPayoutReqPoints] = useState("0");
+  const [payoutReqTarget, setPayoutReqTarget] = useState<"cash" | "wdc" | "points">("cash");
   const [devEnvironment, setDevEnvironment] = useState<"dev" | "staging" | "prod">("dev");
   const [devApiKeys, setDevApiKeys] = useState<DevApiKey[]>(() => {
     try {
@@ -1131,6 +1739,99 @@ const Dashboard: React.FC = () => {
   const [newPromptTitle, setNewPromptTitle] = useState("");
   const [newPromptText, setNewPromptText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [userAssistants, setUserAssistants] = useState<UserAssistantProfile[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_user_assistants_v1");
+      if (raw) {
+        const parsed = JSON.parse(raw) as UserAssistantProfile[];
+        return Array.isArray(parsed)
+          ? parsed.map((a) => ({
+              ...a,
+              responseMode: a.responseMode || "balanced",
+              domainFocus: a.domainFocus || "general",
+              startupPrompt: a.startupPrompt || "",
+              avatarEmoji: a.avatarEmoji || "🤖",
+              memoryMode: a.memoryMode || "long_term",
+              autoCitations: a.autoCitations === true,
+            }))
+          : [];
+      }
+      const now = Date.now();
+      return [
+        {
+          id: "ua-general",
+          name: "General Assistant",
+          rolePrompt: "Helpful all-purpose assistant for daily tasks and learning.",
+          tone: "balanced",
+          language: "en",
+          responseMode: "balanced",
+          domainFocus: "general",
+          startupPrompt: "Greet briefly and ask what outcome the user wants.",
+          avatarEmoji: "🤖",
+          creativity: 0.4,
+          memoryDays: 14,
+          memoryMode: "long_term",
+          autoCitations: false,
+          tools: ["chat", "research"],
+          privacyMode: true,
+          safeMode: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "ua-dev",
+          name: "Dev Copilot",
+          rolePrompt: "Coding assistant for debugging, refactoring, and implementation planning.",
+          tone: "technical",
+          language: "en",
+          responseMode: "detailed",
+          domainFocus: "software_engineering",
+          startupPrompt: "Ask for stack, error output, and expected behavior before proposing fixes.",
+          avatarEmoji: "🛠️",
+          creativity: 0.3,
+          memoryDays: 30,
+          memoryMode: "long_term",
+          autoCitations: true,
+          tools: ["chat", "code", "files"],
+          privacyMode: true,
+          safeMode: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedUserAssistantId, setSelectedUserAssistantId] = useState("");
+  const [defaultUserAssistantId, setDefaultUserAssistantId] = useState(() => {
+    try {
+      return localStorage.getItem("neuroedge_default_user_assistant_id") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [assistantKnowledgeUrlDraft, setAssistantKnowledgeUrlDraft] = useState("");
+  const [marketplaceDescription, setMarketplaceDescription] = useState("");
+  const [marketplaceVisibility, setMarketplaceVisibility] = useState<"public" | "private">("public");
+  const [marketplaceTagsCsv, setMarketplaceTagsCsv] = useState("");
+  const [marketplaceSearch, setMarketplaceSearch] = useState("");
+  const [assistantMarketplace, setAssistantMarketplace] = useState<AssistantMarketplacePack[]>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_assistant_marketplace_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [assistantAnalytics, setAssistantAnalytics] = useState<Record<string, AssistantUsageAnalytics>>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_assistant_analytics_v1");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentMembers, setNewDepartmentMembers] = useState("5");
   const [newDepartmentTokens, setNewDepartmentTokens] = useState("50000");
@@ -1223,6 +1924,21 @@ const Dashboard: React.FC = () => {
     localStorage.setItem("neuroedge_saved_prompts_v1", JSON.stringify(savedPrompts));
   }, [savedPrompts]);
   useEffect(() => {
+    localStorage.setItem("neuroedge_user_assistants_v1", JSON.stringify(userAssistants));
+  }, [userAssistants]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_artifact_workspace_v1", JSON.stringify(artifactWorkspace));
+  }, [artifactWorkspace]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_assistant_marketplace_v1", JSON.stringify(assistantMarketplace));
+  }, [assistantMarketplace]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_assistant_analytics_v1", JSON.stringify(assistantAnalytics));
+  }, [assistantAnalytics]);
+  useEffect(() => {
+    localStorage.setItem("neuroedge_default_user_assistant_id", defaultUserAssistantId || "");
+  }, [defaultUserAssistantId]);
+  useEffect(() => {
     localStorage.setItem("neuroedge_enterprise_departments_v1", JSON.stringify(enterpriseDepartments));
   }, [enterpriseDepartments]);
   useEffect(() => {
@@ -1246,6 +1962,60 @@ const Dashboard: React.FC = () => {
       setSelectedAgentId(agentsLocal[0].id);
     }
   }, [agentsLocal, selectedAgentId]);
+  useEffect(() => {
+    if (!userAssistants.length) {
+      setSelectedUserAssistantId("");
+      return;
+    }
+    if (defaultUserAssistantId && userAssistants.find((a) => a.id === defaultUserAssistantId)) {
+      if (!selectedUserAssistantId || !userAssistants.find((a) => a.id === selectedUserAssistantId)) {
+        setSelectedUserAssistantId(defaultUserAssistantId);
+        return;
+      }
+    }
+    if (
+      !selectedUserAssistantId ||
+      !userAssistants.find((a) => a.id === selectedUserAssistantId)
+    ) {
+      setSelectedUserAssistantId(userAssistants[0].id);
+    }
+  }, [userAssistants, selectedUserAssistantId, defaultUserAssistantId]);
+  useEffect(() => {
+    const syncAssistantTelemetry = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_assistant_analytics_v1");
+        setAssistantAnalytics(raw ? JSON.parse(raw) : {});
+      } catch {
+        setAssistantAnalytics({});
+      }
+    };
+    const syncMarketplace = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_assistant_marketplace_v1");
+        setAssistantMarketplace(raw ? JSON.parse(raw) : []);
+      } catch {
+        setAssistantMarketplace([]);
+      }
+    };
+    const syncAssistants = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_user_assistants_v1");
+        if (raw) setUserAssistants(JSON.parse(raw));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("storage", syncAssistantTelemetry);
+    window.addEventListener("storage", syncMarketplace);
+    window.addEventListener("storage", syncAssistants);
+    window.addEventListener("neuroedge:assistantAnalyticsUpdated", syncAssistantTelemetry as EventListener);
+    return () => {
+      window.removeEventListener("storage", syncAssistantTelemetry);
+      window.removeEventListener("storage", syncMarketplace);
+      window.removeEventListener("storage", syncAssistants);
+      window.removeEventListener("neuroedge:assistantAnalyticsUpdated", syncAssistantTelemetry as EventListener);
+    };
+  }, []);
 
   const authContext = () => {
     const envToken = String((import.meta.env.VITE_NEUROEDGE_JWT as string) || "").trim();
@@ -1304,6 +2074,9 @@ const Dashboard: React.FC = () => {
   const apiBase = String(import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:7070");
   const headers = () => {
     const auth = authContext();
+    const effectiveRole = String(
+      auth.userRole || dashboardRole || (isFounderUser() ? "founder" : "user")
+    ).toLowerCase();
     const h: Record<string, string> = {
       "Content-Type": "application/json",
       "x-org-id": auth.orgId,
@@ -1311,7 +2084,7 @@ const Dashboard: React.FC = () => {
     };
     if (auth.userEmail) h["x-user-email"] = auth.userEmail;
     if (auth.userName) h["x-user-name"] = auth.userName;
-    if (auth.userRole) h["x-user-role"] = auth.userRole;
+    if (effectiveRole) h["x-user-role"] = effectiveRole;
     if (auth.deviceId) h["x-device-id"] = auth.deviceId;
     if (auth.token) h.Authorization = `Bearer ${auth.token}`;
     if (auth.apiKey) {
@@ -1361,10 +2134,47 @@ const Dashboard: React.FC = () => {
     if (remote.accessControl && typeof remote.accessControl === "object") setAccessControl(remote.accessControl);
     if (Array.isArray(remote.permissionCatalog)) setPermissionCatalog(remote.permissionCatalog);
     if (remote.deviceProtection && typeof remote.deviceProtection === "object") setDeviceProtection(remote.deviceProtection);
+    if (remote.computeDonation && typeof remote.computeDonation === "object") {
+      const cd = remote.computeDonation as any;
+      if (cd.payoutBudget) setComputePayoutBudget((p) => ({ ...p, ...cd.payoutBudget }));
+      if (Array.isArray(cd.payoutRequests)) setComputePayoutRequestsAdmin(cd.payoutRequests);
+      if (cd.autoPayoutConfig && typeof cd.autoPayoutConfig === "object") {
+        setComputeAutoPayoutConfig((p) => ({ ...p, ...cd.autoPayoutConfig }));
+      }
+      if (cd.resourceGuardrails && typeof cd.resourceGuardrails === "object") {
+        setOwnerGuardrails((p) => ({ ...p, ...cd.resourceGuardrails }));
+      }
+    }
+    if (remote.loanOps && typeof remote.loanOps === "object") {
+      if (Array.isArray(remote.loanOps.companies)) setLoanOpsCompanies(remote.loanOps.companies);
+      if (Array.isArray(remote.loanOps.devices)) setLoanOpsDevices(remote.loanOps.devices);
+      if (Array.isArray(remote.loanOps.apiKeys)) setLoanOpsApiKeys(remote.loanOps.apiKeys);
+      if (Array.isArray(remote.loanOps.intakeLogs)) setLoanOpsIntakeLogs(remote.loanOps.intakeLogs);
+      if (Array.isArray(remote.loanOps.disputes)) setLoanOpsDisputes(remote.loanOps.disputes);
+      if (remote.loanOps.policy && typeof remote.loanOps.policy === "object") {
+        setLoanOpsPolicy((p) => ({
+          ...p,
+          ...remote.loanOps.policy,
+          allowedAttestationProvidersCsv: Array.isArray(remote.loanOps.policy.allowedAttestationProviders)
+            ? remote.loanOps.policy.allowedAttestationProviders.join(",")
+            : p.allowedAttestationProvidersCsv,
+        }));
+      }
+    }
+    if (remote.userProtection && typeof remote.userProtection === "object") {
+      if (Array.isArray(remote.userProtection.profiles) && remote.userProtection.profiles[0]) {
+        setUserProtectionProfile(remote.userProtection.profiles[0]);
+      }
+      if (Array.isArray(remote.userProtection.incidents)) setUserProtectionIncidents(remote.userProtection.incidents);
+      if (remote.userProtection.policy && typeof remote.userProtection.policy === "object") {
+        setUserProtectionPolicy(remote.userProtection.policy);
+      }
+    }
     if (Array.isArray(remote.agentsLocal)) setAgentsLocal(remote.agentsLocal);
     if (Array.isArray(remote.savedPrompts)) setSavedPrompts(remote.savedPrompts);
     if (Array.isArray(remote.enterpriseDepartments)) setEnterpriseDepartments(remote.enterpriseDepartments);
     if (remote.ssoConfig && typeof remote.ssoConfig === "object") setSsoConfig(remote.ssoConfig);
+    if (remote.neuroExpansion && typeof remote.neuroExpansion === "object") setNeuroExpansion(remote.neuroExpansion);
   };
 
   const callAction = async (path: string, body: any) => {
@@ -1416,6 +2226,35 @@ const Dashboard: React.FC = () => {
       if (data?.config?.variants && Array.isArray(data.config.variants)) {
         setModelRouterDraft(JSON.stringify(data.config.variants, null, 2));
       }
+      if (
+        data?.config &&
+        typeof data.config === "object" &&
+        Object.prototype.hasOwnProperty.call(data.config, "verifiedAnswerMode")
+      ) {
+        setMarketReadinessConfig((prev) => ({ ...prev, ...data.config }));
+      }
+      if (data?.summary && typeof data.summary === "object" && data.summary?.config?.verifiedAnswerMode !== undefined) {
+        setMarketReadinessSummary(data.summary);
+        setMarketReadinessConfig((prev) => ({ ...prev, ...(data.summary.config || {}) }));
+      }
+      if (data?.program && typeof data.program === "object" && !Array.isArray(data.program?.items)) {
+        setReliabilityProgram(data.program);
+      }
+      if (data?.slo && typeof data.slo === "object") {
+        setReliabilityProgram((prev) => ({ ...(prev || {}), slo: data.slo }));
+      }
+      if (data?.canary && typeof data.canary === "object") {
+        setReliabilityProgram((prev) => ({ ...(prev || {}), canary: data.canary }));
+      }
+      if (data?.statusPage && typeof data.statusPage === "object") {
+        setReliabilityProgram((prev) => ({ ...(prev || {}), statusPage: data.statusPage }));
+      }
+      if (data?.incident && typeof data.incident === "object") {
+        setReliabilityProgram((prev) => ({
+          ...(prev || {}),
+          incidents: [data.incident, ...((prev?.incidents || []) as any[])].slice(0, 200),
+        }));
+      }
       if (data?.program && Array.isArray(data.program.items) && Array.isArray(data.program.milestones)) {
         setFrontierProgram(data.program);
       }
@@ -1426,10 +2265,67 @@ const Dashboard: React.FC = () => {
       if (Array.isArray(data.permissionCatalog)) setPermissionCatalog(data.permissionCatalog);
       if (data.deviceProtection && typeof data.deviceProtection === "object") setDeviceProtection(data.deviceProtection);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
+      if (Array.isArray(data?.devices)) setOwnerComputeDevices(data.devices);
+      if (data?.payoutProfile && typeof data.payoutProfile === "object") setOwnerPayoutProfile(data.payoutProfile);
+      if (Array.isArray(data?.payoutRequests)) setOwnerPayoutRequests(data.payoutRequests);
+      if (data?.wallet && typeof data.wallet === "object") setOwnerWallet(data.wallet);
+      if (data?.guardrails && typeof data.guardrails === "object") {
+        setOwnerGuardrails((p) => ({ ...p, ...data.guardrails }));
+      }
+      if (data?.payoutBudget && typeof data.payoutBudget === "object") setComputePayoutBudget((p) => ({ ...p, ...data.payoutBudget }));
+      if (data?.computeDonation?.payoutBudget && typeof data.computeDonation.payoutBudget === "object") {
+        setComputePayoutBudget((p) => ({ ...p, ...data.computeDonation.payoutBudget }));
+      }
+      if (Array.isArray(data?.computeDonation?.payoutRequests)) setComputePayoutRequestsAdmin(data.computeDonation.payoutRequests);
+      if (data?.computeDonation?.autoPayoutConfig && typeof data.computeDonation.autoPayoutConfig === "object") {
+        setComputeAutoPayoutConfig((p) => ({ ...p, ...data.computeDonation.autoPayoutConfig }));
+      }
+      if (data?.loanOps && typeof data.loanOps === "object") {
+        if (Array.isArray(data.loanOps.companies)) setLoanOpsCompanies(data.loanOps.companies);
+        if (Array.isArray(data.loanOps.devices)) setLoanOpsDevices(data.loanOps.devices);
+        if (Array.isArray(data.loanOps.apiKeys)) setLoanOpsApiKeys(data.loanOps.apiKeys);
+        if (Array.isArray(data.loanOps.intakeLogs)) setLoanOpsIntakeLogs(data.loanOps.intakeLogs);
+        if (Array.isArray(data.loanOps.disputes)) setLoanOpsDisputes(data.loanOps.disputes);
+        if (data.loanOps.policy && typeof data.loanOps.policy === "object") {
+          setLoanOpsPolicy((p) => ({
+            ...p,
+            ...data.loanOps.policy,
+            allowedAttestationProvidersCsv: Array.isArray(data.loanOps.policy.allowedAttestationProviders)
+              ? data.loanOps.policy.allowedAttestationProviders.join(",")
+              : p.allowedAttestationProvidersCsv,
+          }));
+        }
+      }
+      if (data?.profile && data?.profile?.maxDevices !== undefined && data?.profile?.devices) {
+        setUserProtectionProfile(data.profile);
+      }
+      if (Array.isArray(data?.incidents)) setUserProtectionIncidents(data.incidents);
+      if (data?.policy && typeof data.policy === "object") setUserProtectionPolicy(data.policy);
       if (Array.isArray(data.agentsLocal)) setAgentsLocal(data.agentsLocal);
       if (Array.isArray(data.savedPrompts)) setSavedPrompts(data.savedPrompts);
       if (Array.isArray(data.enterpriseDepartments)) setEnterpriseDepartments(data.enterpriseDepartments);
       if (data.ssoConfig) setSsoConfig(data.ssoConfig);
+      if (data?.neuroExpansion && typeof data.neuroExpansion === "object") {
+        setNeuroExpansion(data.neuroExpansion);
+      }
+      if (data?.settings && data?.neuroExpansion) {
+        const roots = Array.isArray(data.settings?.placeholderScanRoots)
+          ? data.settings.placeholderScanRoots.join(",")
+          : neuroExpansionSettingsDraft.placeholderScanRoots;
+        setNeuroExpansionSettingsDraft({
+          enabled: Boolean(data.settings?.enabled ?? neuroExpansionSettingsDraft.enabled),
+          autoDailyScan: Boolean(data.settings?.autoDailyScan ?? neuroExpansionSettingsDraft.autoDailyScan),
+          requireFounderApproval: Boolean(
+            data.settings?.requireFounderApproval ?? neuroExpansionSettingsDraft.requireFounderApproval
+          ),
+          autoTestOnMerge: Boolean(data.settings?.autoTestOnMerge ?? neuroExpansionSettingsDraft.autoTestOnMerge),
+          placeholderScanRoots: roots,
+          maxFindings: String(data.settings?.maxFindings ?? neuroExpansionSettingsDraft.maxFindings),
+        });
+      }
+      if (data?.report?.findings && Array.isArray(data.report.findings)) {
+        setNeuroExpansionPlaceholderReport(data.report);
+      }
       return data;
     } catch (err: any) {
       addNotification({ type: "error", message: err?.message || String(err) });
@@ -1471,6 +2367,65 @@ const Dashboard: React.FC = () => {
     loadCreatorHistory();
     refreshQualityInsights();
     refreshFrontierProgram();
+    loadRuntimeInventory();
+    refreshMarketReadiness();
+    refreshReliabilityProgram();
+    refreshNeuroExpansion();
+    (async () => {
+      try {
+        const owner = await getJson("/dashboard/compute-owner/bootstrap");
+        if (Array.isArray(owner?.devices)) setOwnerComputeDevices(owner.devices);
+        if (owner?.guardrails && typeof owner.guardrails === "object") {
+          setOwnerGuardrails((p) => ({ ...p, ...owner.guardrails }));
+        }
+        if (owner?.payoutProfile) setOwnerPayoutProfile(owner.payoutProfile);
+        if (Array.isArray(owner?.payoutRequests)) setOwnerPayoutRequests(owner.payoutRequests);
+        if (owner?.wallet) setOwnerWallet(owner.wallet);
+      } catch {
+        // optional for roles/scopes
+      }
+      try {
+        const admin = await getJson("/admin/dashboard/compute-payouts");
+        if (admin?.payoutBudget) setComputePayoutBudget((p) => ({ ...p, ...admin.payoutBudget }));
+        if (Array.isArray(admin?.payoutRequests)) setComputePayoutRequestsAdmin(admin.payoutRequests);
+        if (admin?.autoPayoutConfig && typeof admin.autoPayoutConfig === "object") {
+          setComputeAutoPayoutConfig((p) => ({ ...p, ...admin.autoPayoutConfig }));
+        }
+      } catch {
+        // optional for founder/admin
+      }
+      if (canAccessLoanOps) {
+        try {
+          const lp = await getJson("/admin/loan-ops/bootstrap");
+          if (lp?.loanOps) {
+            if (Array.isArray(lp.loanOps.companies)) setLoanOpsCompanies(lp.loanOps.companies);
+            if (Array.isArray(lp.loanOps.devices)) setLoanOpsDevices(lp.loanOps.devices);
+            if (Array.isArray(lp.loanOps.apiKeys)) setLoanOpsApiKeys(lp.loanOps.apiKeys);
+            if (Array.isArray(lp.loanOps.intakeLogs)) setLoanOpsIntakeLogs(lp.loanOps.intakeLogs);
+            if (Array.isArray(lp.loanOps.disputes)) setLoanOpsDisputes(lp.loanOps.disputes);
+            if (lp.loanOps.policy && typeof lp.loanOps.policy === "object") {
+              setLoanOpsPolicy((p) => ({
+                ...p,
+                ...lp.loanOps.policy,
+                allowedAttestationProvidersCsv: Array.isArray(lp.loanOps.policy.allowedAttestationProviders)
+                  ? lp.loanOps.policy.allowedAttestationProviders.join(",")
+                  : p.allowedAttestationProvidersCsv,
+              }));
+            }
+          }
+        } catch {
+          // optional for authorized roles
+        }
+      }
+      try {
+        const up = await getJson("/dashboard/protection/bootstrap");
+        if (up?.profile) setUserProtectionProfile(up.profile);
+        if (Array.isArray(up?.incidents)) setUserProtectionIncidents(up.incidents);
+        if (up?.policy) setUserProtectionPolicy(up.policy);
+      } catch {
+        // optional for authorized roles
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -1522,11 +2477,68 @@ const Dashboard: React.FC = () => {
       if (calls[5].status === "fulfilled") setAdminVersion(calls[5].value || {});
       if (calls[6].status === "fulfilled") setAdminMetrics(calls[6].value || {});
       refreshQualityInsights();
+      refreshReliabilityProgram();
+      refreshNeuroExpansion();
+      try {
+        const owner = await getJson("/dashboard/compute-owner/bootstrap");
+        if (Array.isArray(owner?.devices)) setOwnerComputeDevices(owner.devices);
+        if (owner?.guardrails && typeof owner.guardrails === "object") {
+          setOwnerGuardrails((p) => ({ ...p, ...owner.guardrails }));
+        }
+        if (owner?.payoutProfile) setOwnerPayoutProfile(owner.payoutProfile);
+        if (Array.isArray(owner?.payoutRequests)) setOwnerPayoutRequests(owner.payoutRequests);
+        if (owner?.wallet) setOwnerWallet(owner.wallet);
+      } catch {
+        // optional
+      }
+      if (canAccessAdminOps) {
+        try {
+          const admin = await getJson("/admin/dashboard/compute-payouts");
+          if (admin?.payoutBudget) setComputePayoutBudget((p) => ({ ...p, ...admin.payoutBudget }));
+          if (Array.isArray(admin?.payoutRequests)) setComputePayoutRequestsAdmin(admin.payoutRequests);
+          if (admin?.autoPayoutConfig && typeof admin.autoPayoutConfig === "object") {
+            setComputeAutoPayoutConfig((p) => ({ ...p, ...admin.autoPayoutConfig }));
+          }
+        } catch {
+          // optional
+        }
+      }
+      if (canAccessLoanOps) {
+        try {
+          const lp = await getJson("/admin/loan-ops/bootstrap");
+          if (lp?.loanOps) {
+            if (Array.isArray(lp.loanOps.companies)) setLoanOpsCompanies(lp.loanOps.companies);
+            if (Array.isArray(lp.loanOps.devices)) setLoanOpsDevices(lp.loanOps.devices);
+            if (Array.isArray(lp.loanOps.apiKeys)) setLoanOpsApiKeys(lp.loanOps.apiKeys);
+            if (Array.isArray(lp.loanOps.intakeLogs)) setLoanOpsIntakeLogs(lp.loanOps.intakeLogs);
+            if (Array.isArray(lp.loanOps.disputes)) setLoanOpsDisputes(lp.loanOps.disputes);
+            if (lp.loanOps.policy && typeof lp.loanOps.policy === "object") {
+              setLoanOpsPolicy((p) => ({
+                ...p,
+                ...lp.loanOps.policy,
+                allowedAttestationProvidersCsv: Array.isArray(lp.loanOps.policy.allowedAttestationProviders)
+                  ? lp.loanOps.policy.allowedAttestationProviders.join(",")
+                  : p.allowedAttestationProvidersCsv,
+              }));
+            }
+          }
+        } catch {
+          // optional
+        }
+      }
+      try {
+        const up = await getJson("/dashboard/protection/bootstrap");
+        if (up?.profile) setUserProtectionProfile(up.profile);
+        if (Array.isArray(up?.incidents)) setUserProtectionIncidents(up.incidents);
+        if (up?.policy) setUserProtectionPolicy(up.policy);
+      } catch {
+        // optional
+      }
     };
     refresh();
     const t = setInterval(refresh, 15000);
     return () => clearInterval(t);
-  }, [canAccessAdminOps]);
+  }, [canAccessAdminOps, canAccessLoanOps]);
 
   useEffect(() => {
     if (!canAccessAdminOps) return;
@@ -1543,6 +2555,15 @@ const Dashboard: React.FC = () => {
         // ignore if not authorized
       }
     })();
+  }, [canAccessAdminOps]);
+
+  useEffect(() => {
+    if (!canAccessAdminOps) return;
+    loadRuntimeInventory();
+    const t = setInterval(() => {
+      loadRuntimeInventory();
+    }, 120000);
+    return () => clearInterval(t);
   }, [canAccessAdminOps]);
 
   const localMsgStats = useMemo(() => {
@@ -1569,6 +2590,174 @@ const Dashboard: React.FC = () => {
   const securityAlerts = adminAudit.filter((a) =>
     String(a?.type || "").startsWith("doctrine.") || String(a?.type || "").startsWith("policy.")
   );
+
+  const runtimeServiceState = useMemo(() => {
+    const findStatus = (needle: string) =>
+      services.find((s) => s.name.toLowerCase().includes(needle))?.status || "offline";
+    return {
+      kernel: (findStatus("kernel") as "online" | "offline" | "degraded"),
+      ml: (findStatus("ml") as "online" | "offline" | "degraded"),
+      orchestrator: (findStatus("orchestrator") as "online" | "offline" | "degraded"),
+      frontend: "online" as "online",
+    };
+  }, [services]);
+
+  const extractRuntimeFiles = (files: string[], domain: RuntimeDomain) => {
+    const extAllowed =
+      domain === "kernel"
+        ? /\.(go)$/i
+        : domain === "ml"
+        ? /\.(py)$/i
+        : /\.(ts|tsx|js|jsx)$/i;
+    const runtimePattern =
+      domain === "frontend"
+        ? /^src\/(components|services|pages|extensions|stores)\//i
+        : /(agent|engine|worker|runner|router|manager|service|bridge|handler|inference|mesh|federated|twin|training|kernel|orchestrator)/i;
+    return files
+      .filter((f) => extAllowed.test(f))
+      .filter((f) => runtimePattern.test(f))
+      .slice(0, 240);
+  };
+
+  const logHintFor = (domain: RuntimeDomain, key: string) => {
+    const needle = key.toLowerCase();
+    const hit = adminLogs.find((l) => {
+      const text = `${String(l?.type || "")} ${String(l?.message || "")} ${JSON.stringify(l?.payload || {})}`.toLowerCase();
+      const isErr = text.includes("error") || text.includes("fail") || text.includes("panic") || text.includes("exception");
+      return isErr && (text.includes(domain) || (needle && text.includes(needle)));
+    });
+    return hit ? String(hit?.message || hit?.type || "runtime error") : "";
+  };
+
+  const runtimeUnits = useMemo(() => {
+    const scan = runtimeTwinScan?.structure || {};
+    const backend = scan?.backend || {};
+    const kernelFiles = Array.isArray(backend?.kernel?.files) ? backend.kernel.files : [];
+    const mlFiles = Array.isArray(backend?.ml?.files) ? backend.ml.files : [];
+    const orchFiles = Array.isArray(backend?.orchestrator?.files) ? backend.orchestrator.files : [];
+    const frontendFiles = Array.isArray(scan?.frontend?.files) ? scan.frontend.files : [];
+
+    const buildFromFiles = (domain: RuntimeDomain, files: string[], kind: RuntimeUnit["kind"]) => {
+      const onlineState = runtimeServiceState[domain];
+      return extractRuntimeFiles(files, domain).map((path, idx) => {
+        const base = path.split("/").pop() || path;
+        const hint = logHintFor(domain, base);
+        const live = onlineState === "offline" ? false : hint ? false : true;
+        return {
+          id: `${domain}-file-${idx}-${base}`,
+          name: base,
+          domain,
+          kind,
+          registered: true,
+          live,
+          cause:
+            onlineState === "offline"
+              ? `${domain} service not reachable`
+              : hint || "healthy",
+          suggestedFix:
+            domain === "kernel"
+              ? "Inspect kernel logs and /kernels state, then restart kernel if needed."
+              : domain === "ml"
+              ? "Inspect ML /ready and inference logs, then restart ML if needed."
+              : domain === "orchestrator"
+              ? "Inspect orchestrator /status + logs and clear failing handlers."
+              : "Inspect browser console + rebuild frontend modules.",
+          sourcePath: path,
+        } as RuntimeUnit;
+      });
+    };
+
+    const kernelInstances: RuntimeUnit[] = kernels.map((k) => {
+      const st = String(k.status || "").toLowerCase();
+      const live = st === "ready" || st === "online" || st === "running";
+      return {
+        id: `kernel-instance-${k.name}`,
+        name: k.name,
+        domain: "kernel",
+        kind: "instance",
+        registered: true,
+        live,
+        cause: live ? "healthy" : `kernel instance status=${k.status}`,
+        suggestedFix: "Check kernel health and restart this kernel instance.",
+      };
+    });
+
+    const orchestratorAgents: RuntimeUnit[] = (runtimeAgentRegistry || []).map((a, i) => {
+      const live = String(a.status || "").toLowerCase() === "running";
+      return {
+        id: `orchestrator-agent-${i}-${a.name}`,
+        name: a.name,
+        domain: "orchestrator",
+        kind: "agent",
+        registered: true,
+        live,
+        cause: live ? "healthy" : `agent status=${a.status}`,
+        suggestedFix: "Inspect agent logs and restart orchestrator/agent manager.",
+      };
+    });
+
+    const kernelUnits = [...kernelInstances, ...buildFromFiles("kernel", kernelFiles, "file")];
+    const mlUnits = buildFromFiles("ml", mlFiles, "engine");
+    const orchestratorUnits = [...orchestratorAgents, ...buildFromFiles("orchestrator", orchFiles, "engine")];
+    const frontendUnits = buildFromFiles("frontend", frontendFiles, "module");
+
+    const uniq = (arr: RuntimeUnit[]) => {
+      const seen = new Set<string>();
+      return arr.filter((u) => {
+        const key = `${u.domain}:${u.name}:${u.kind}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    return {
+      kernel: uniq(kernelUnits),
+      ml: uniq(mlUnits),
+      orchestrator: uniq(orchestratorUnits),
+      frontend: uniq(frontendUnits),
+    } as Record<RuntimeDomain, RuntimeUnit[]>;
+  }, [runtimeTwinScan, runtimeServiceState, adminLogs, kernels, runtimeAgentRegistry]);
+
+  const runtimeCounts = useMemo(
+    () => ({
+      kernel: runtimeUnits.kernel.length,
+      ml: runtimeUnits.ml.length,
+      orchestrator: runtimeUnits.orchestrator.length,
+      frontend: runtimeUnits.frontend.length,
+    }),
+    [runtimeUnits]
+  );
+
+  const runtimeSummary = useMemo(() => {
+    const units = runtimeUnits[runtimeDomain] || [];
+    return {
+      total: units.length,
+      live: units.filter((u) => u.live).length,
+      registered: units.filter((u) => u.registered).length,
+      offline: units.filter((u) => !u.live).length,
+    };
+  }, [runtimeUnits, runtimeDomain]);
+
+  const loadRuntimeInventory = async () => {
+    if (!canAccessAdminOps) return;
+    setRuntimeScanLoading(true);
+    try {
+      const [scanRes, agentsRes] = await Promise.all([
+        callAction("/twin/scan", {}),
+        getJson("/admin/agents").catch(() => null),
+      ]);
+      if (scanRes?.structure) {
+        setRuntimeTwinScan(scanRes);
+      }
+      if (Array.isArray(agentsRes?.agents)) {
+        setRuntimeAgentRegistry(agentsRes.agents);
+      }
+      setRuntimeScanAt(Date.now());
+    } finally {
+      setRuntimeScanLoading(false);
+    }
+  };
 
   const assignRole = async (id: string, role: UserRecord["role"]) => {
     await callAction("/admin/dashboard/users/role", { id, role });
@@ -1832,6 +3021,467 @@ const Dashboard: React.FC = () => {
     addNotification({ type: "success", message: `Points converted to ${target.toUpperCase()} pending balance.` });
   };
 
+  const refreshOwnerCompute = async () => {
+    const data = await callAction("GET:/dashboard/compute-owner/bootstrap", {});
+    if (data?.devices) setOwnerComputeDevices(data.devices);
+    if (data?.guardrails && typeof data.guardrails === "object") {
+      setOwnerGuardrails((p) => ({ ...p, ...data.guardrails }));
+    }
+    if (data?.payoutProfile) setOwnerPayoutProfile(data.payoutProfile);
+    if (data?.payoutRequests) setOwnerPayoutRequests(data.payoutRequests);
+    if (data?.wallet) setOwnerWallet(data.wallet);
+  };
+
+  const telemetryDraftFor = (device: OwnerComputeDevice) =>
+    telemetryDraftByDevice[device.id] || {
+      cpuPct: String(Number(device?.stats?.cpuPct || 0)),
+      ramPct: String(Number(device?.stats?.ramPct || 0)),
+      tempC: String(Number(device?.stats?.tempC || 0)),
+      onBattery: Boolean(device?.stats?.onBattery || false),
+    };
+
+  const updateTelemetryDraft = (
+    deviceId: string,
+    next: Partial<{ cpuPct: string; ramPct: string; tempC: string; onBattery: boolean }>
+  ) => {
+    setTelemetryDraftByDevice((p) => ({
+      ...p,
+      [deviceId]: { ...((p[deviceId] as any) || {}), ...next } as any,
+    }));
+  };
+
+  const upsertOwnerComputeDevice = async () => {
+    if (!computeDeviceDraft.hostname.trim()) {
+      addNotification({ type: "error", message: "Enter device hostname." });
+      return;
+    }
+    await callAction("/dashboard/compute-owner/device/upsert", {
+      device: {
+        id: computeDeviceDraft.id.trim(),
+        hostname: computeDeviceDraft.hostname.trim(),
+        os: computeDeviceDraft.os,
+      },
+    });
+    setComputeDeviceDraft({ id: "", hostname: "", os: "linux" });
+    addNotification({ type: "success", message: "Device added/updated for compute sharing." });
+    await refreshOwnerCompute();
+  };
+
+  const ownerDeviceAction = async (id: string, action: "pause" | "resume" | "suspend" | "delete") => {
+    await callAction("/dashboard/compute-owner/device/action", { id, action });
+    addNotification({ type: "success", message: `Device action completed: ${action}` });
+    await refreshOwnerCompute();
+  };
+
+  const requestPaymentVerify = async () => {
+    if (!otpDestination.trim()) {
+      addNotification({
+        type: "error",
+        message: otpChannel === "sms" ? "Enter phone number for SMS verification." : "Enter email for verification.",
+      });
+      return;
+    }
+    const payload =
+      otpChannel === "sms"
+        ? { channel: "sms", phone: otpDestination.trim() }
+        : { channel: "email", email: otpDestination.trim() };
+    const data = await callAction("/dashboard/compute-owner/payment/request-verify", payload);
+    if (data?.verification?.challengeId) {
+      setPaymentVerifyChallengeId(String(data.verification.challengeId));
+      addNotification({
+        type: "info",
+        message: `Verification code sent via ${String(data?.verification?.channel || otpChannel)} to ${String(
+          data?.verification?.maskedDestination || "destination"
+        )}`,
+      });
+    }
+  };
+
+  const submitDeviceTelemetry = async (device: OwnerComputeDevice) => {
+    const draft = telemetryDraftFor(device);
+    await callAction("/dashboard/compute-owner/device/telemetry", {
+      id: device.id,
+      stats: {
+        cpuPct: Number(draft.cpuPct || 0),
+        ramPct: Number(draft.ramPct || 0),
+        tempC: Number(draft.tempC || 0),
+        onBattery: Boolean(draft.onBattery),
+      },
+    });
+    addNotification({ type: "success", message: `Telemetry submitted for ${device.hostname}.` });
+    await refreshOwnerCompute();
+  };
+
+  const saveOwnerPaymentVerified = async () => {
+    if (!paymentVerifyChallengeId || !paymentVerifyCode.trim()) {
+      addNotification({ type: "error", message: "Request verification and enter code first." });
+      return;
+    }
+    await callAction("/dashboard/compute-owner/payment/verify-save", {
+      challengeId: paymentVerifyChallengeId,
+      code: paymentVerifyCode.trim(),
+      profile: ownerPaymentDraft,
+    });
+    setPaymentVerifyCode("");
+    addNotification({ type: "success", message: "Payout details saved with verification." });
+    await refreshOwnerCompute();
+  };
+
+  const requestOwnerPayout = async () => {
+    const amountUsd = Number(payoutReqUsd || 0);
+    const amountWdc = Number(payoutReqWdc || 0);
+    const points = Number(payoutReqPoints || 0);
+    if (amountUsd <= 0 && amountWdc <= 0 && points <= 0) {
+      addNotification({ type: "error", message: "Enter payout amount in USD, WDC, or points." });
+      return;
+    }
+    await callAction("/dashboard/compute-owner/payout/request", {
+      target: payoutReqTarget,
+      amountUsd,
+      amountWdc,
+      points,
+    });
+    addNotification({ type: "success", message: "Payout request submitted for founder/admin approval." });
+    setPayoutReqUsd("0");
+    setPayoutReqWdc("0");
+    setPayoutReqPoints("0");
+    await refreshOwnerCompute();
+  };
+
+  const refreshComputePayoutsAdmin = async () => {
+    const data = await callAction("GET:/admin/dashboard/compute-payouts", {});
+    if (data?.payoutBudget) setComputePayoutBudget((p) => ({ ...p, ...data.payoutBudget }));
+    if (Array.isArray(data?.payoutRequests)) setComputePayoutRequestsAdmin(data.payoutRequests);
+      if (data?.computeDonation?.autoPayoutConfig && typeof data.computeDonation.autoPayoutConfig === "object") {
+        setComputeAutoPayoutConfig((p) => ({ ...p, ...data.computeDonation.autoPayoutConfig }));
+      }
+      if (data?.scheduler && typeof data.scheduler === "object") {
+        setComputeAutoPayoutConfig((p) => ({ ...p, ...data.scheduler }));
+      }
+    if (data?.autoPayoutConfig && typeof data.autoPayoutConfig === "object") {
+      setComputeAutoPayoutConfig((p) => ({ ...p, ...data.autoPayoutConfig }));
+    }
+  };
+
+  const approveComputePayout = async (
+    requestId: string,
+    settlement: "scheduled" | "instant" | "bank" | "card" | "wdc" = "scheduled"
+  ) => {
+    await callAction("/admin/dashboard/compute-payouts/approve", { requestId, settlement });
+    addNotification({
+      type: "success",
+      message: settlement === "instant" ? "Payout approved and sent." : "Payout approved for scheduler.",
+    });
+    await refreshComputePayoutsAdmin();
+  };
+
+  const rejectComputePayout = async (requestId: string) => {
+    await callAction("/admin/dashboard/compute-payouts/reject", { requestId, reason: "manual review rejected" });
+    addNotification({ type: "warn", message: "Payout request rejected." });
+    await refreshComputePayoutsAdmin();
+  };
+
+  const saveComputeBudget = async () => {
+    await callAction("/admin/dashboard/compute-payouts/budget/save", { budget: computePayoutBudget });
+    addNotification({ type: "success", message: "Compute payout budget saved." });
+    await refreshComputePayoutsAdmin();
+  };
+
+  const saveComputePayoutScheduler = async () => {
+    await callAction("/admin/dashboard/compute-payouts/scheduler/save", {
+      scheduler: computeAutoPayoutConfig,
+    });
+    addNotification({ type: "success", message: "Auto payout scheduler settings saved." });
+    await refreshComputePayoutsAdmin();
+  };
+
+  const refreshLoanOps = async () => {
+    if (!canAccessLoanOps) return;
+    const data = await callAction("GET:/admin/loan-ops/bootstrap", {});
+    if (data?.loanOps) {
+      if (Array.isArray(data.loanOps.companies)) setLoanOpsCompanies(data.loanOps.companies);
+      if (Array.isArray(data.loanOps.devices)) setLoanOpsDevices(data.loanOps.devices);
+      if (Array.isArray(data.loanOps.apiKeys)) setLoanOpsApiKeys(data.loanOps.apiKeys);
+      if (Array.isArray(data.loanOps.intakeLogs)) setLoanOpsIntakeLogs(data.loanOps.intakeLogs);
+      if (Array.isArray(data.loanOps.disputes)) setLoanOpsDisputes(data.loanOps.disputes);
+      if (data.loanOps.policy && typeof data.loanOps.policy === "object") {
+        setLoanOpsPolicy((p) => ({
+          ...p,
+          ...data.loanOps.policy,
+          allowedAttestationProvidersCsv: Array.isArray(data.loanOps.policy.allowedAttestationProviders)
+            ? data.loanOps.policy.allowedAttestationProviders.join(",")
+            : p.allowedAttestationProvidersCsv,
+        }));
+      }
+    }
+  };
+
+  const upsertLoanCompany = async () => {
+    if (!loanCompanyDraft.name.trim()) {
+      addNotification({ type: "error", message: "Enter company name." });
+      return;
+    }
+    await callAction("/admin/loan-ops/company/upsert", { company: loanCompanyDraft });
+    addNotification({ type: "success", message: "Loan company saved." });
+    setLoanCompanyDraft({ id: "", name: "", contactEmail: "", contactPhone: "", legalPolicyRef: "" });
+    await refreshLoanOps();
+  };
+
+  const importLoanDevicesFromText = async () => {
+    if (!loanDeviceDraft.companyId.trim() || !loanImportText.trim()) {
+      addNotification({ type: "error", message: "Select company ID and paste device text." });
+      return;
+    }
+    const data = await callAction("/admin/loan-ops/device/import-text", {
+      companyId: loanDeviceDraft.companyId.trim(),
+      text: loanImportText,
+    });
+    addNotification({ type: "success", message: `Imported ${Number(data?.imported || 0)} device record(s).` });
+    setLoanImportText("");
+    await refreshLoanOps();
+  };
+
+  const upsertLoanDevice = async () => {
+    if (!loanDeviceDraft.companyId.trim() || !loanDeviceDraft.model.trim()) {
+      addNotification({ type: "error", message: "Provide company ID and device model." });
+      return;
+    }
+    await callAction("/admin/loan-ops/device/upsert", {
+      device: {
+        ...loanDeviceDraft,
+      },
+    });
+    addNotification({ type: "success", message: "Loan device saved." });
+    setLoanDeviceDraft((p) => ({ ...p, id: "", model: "", serial: "", imei: "", ownerRef: "" }));
+    await refreshLoanOps();
+  };
+
+  const updateLoanStatus = async (deviceId: string, loanStatus: string, overdueDays = 0) => {
+    await callAction("/admin/loan-ops/device/loan-status", { deviceId, loanStatus, overdueDays });
+    addNotification({ type: "success", message: `Loan status updated: ${loanStatus}` });
+    await refreshLoanOps();
+  };
+
+  const createLoanApiKey = async () => {
+    if (!loanApiKeyCompanyId.trim()) {
+      addNotification({ type: "error", message: "Enter company ID for API key." });
+      return;
+    }
+    const data = await callAction("/admin/loan-ops/api-keys/create", {
+      companyId: loanApiKeyCompanyId.trim(),
+      name: loanApiKeyName.trim() || "LoanOps Integration Key",
+    });
+    if (data?.apiKey) setLatestGeneratedApiKey(String(data.apiKey));
+    addNotification({ type: "success", message: "LoanOps API key generated." });
+    await refreshLoanOps();
+  };
+
+  const revokeLoanApiKey = async (id: string) => {
+    await callAction("/admin/loan-ops/api-keys/revoke", { id });
+    addNotification({ type: "warn", message: "LoanOps API key revoked." });
+    await refreshLoanOps();
+  };
+
+  const saveLoanIntegration = async () => {
+    if (!loanApiKeyCompanyId.trim()) {
+      addNotification({ type: "error", message: "Enter company ID first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/integration/upsert", {
+      integration: {
+        companyId: loanApiKeyCompanyId.trim(),
+        systemName: "Existing Loan System",
+        baseUrl: apiBase,
+        webhookUrl: `${apiBase}/loan/webhook`,
+        authMode: "api_key",
+        status: "active",
+        notes: "NeuroEdge plug-in integration",
+      },
+    });
+    addNotification({ type: "success", message: "Loan integration saved." });
+    await refreshLoanOps();
+  };
+
+  const saveLoanOpsPolicy = async () => {
+    await callAction("/admin/loan-ops/policy/save", {
+      policy: {
+        ...loanOpsPolicy,
+        allowedAttestationProviders: String(loanOpsPolicy.allowedAttestationProvidersCsv || "")
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      },
+    });
+    addNotification({ type: "success", message: "LoanOps policy saved." });
+    await refreshLoanOps();
+  };
+
+  const reportLoanAttestation = async () => {
+    if (!loanSelectedDeviceId.trim()) {
+      addNotification({ type: "error", message: "Select a loan device ID first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/device/attestation/report", {
+      deviceId: loanSelectedDeviceId.trim(),
+      attestation: {
+        provider: loanAttestationProvider,
+        status: loanAttestationStatus,
+      },
+    });
+    addNotification({ type: "success", message: "Attestation report recorded." });
+    await refreshLoanOps();
+  };
+
+  const runLoanBootCheck = async () => {
+    if (!loanSelectedDeviceId.trim()) {
+      addNotification({ type: "error", message: "Select a loan device ID first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/device/boot-check", {
+      deviceId: loanSelectedDeviceId.trim(),
+      integrityOk: loanBootIntegrityOk,
+    });
+    addNotification({ type: "success", message: "Boot compliance check recorded." });
+    await refreshLoanOps();
+  };
+
+  const triggerLoanLock = async (lock: boolean) => {
+    if (!loanSelectedDeviceId.trim()) {
+      addNotification({ type: "error", message: "Select a loan device ID first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/device/lock-trigger", {
+      deviceId: loanSelectedDeviceId.trim(),
+      lock,
+      reason: lock ? "loan_policy_lock" : "manual_unlock",
+    });
+    addNotification({ type: "success", message: lock ? "Device lock requested." : "Device unlock requested." });
+    await refreshLoanOps();
+  };
+
+  const markLoanReenrolled = async () => {
+    if (!loanSelectedDeviceId.trim()) {
+      addNotification({ type: "error", message: "Select a loan device ID first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/device/reenroll", { deviceId: loanSelectedDeviceId.trim() });
+    addNotification({ type: "success", message: "Device re-enrollment marked as complete." });
+    await refreshLoanOps();
+  };
+
+  const openLoanDispute = async () => {
+    const device = loanOpsDevices.find((d) => d.id === loanSelectedDeviceId);
+    if (!device) {
+      addNotification({ type: "error", message: "Pick a valid loan device first." });
+      return;
+    }
+    await callAction("/admin/loan-ops/dispute/open", {
+      deviceId: device.id,
+      companyId: device.companyId,
+      reason: loanDisputeReason,
+      evidenceRef: loanDisputeEvidenceRef.trim(),
+    });
+    addNotification({ type: "warn", message: "Loan dispute opened." });
+    await refreshLoanOps();
+  };
+
+  const resolveLoanDispute = async (disputeId: string) => {
+    await callAction("/admin/loan-ops/dispute/resolve", {
+      disputeId,
+      resolution: "manual_resolution",
+    });
+    addNotification({ type: "success", message: "Loan dispute resolved." });
+    await refreshLoanOps();
+  };
+
+  const recordLoanLegalConsent = async () => {
+    const device = loanOpsDevices.find((d) => d.id === loanSelectedDeviceId);
+    if (!device || !loanConsentSubjectRef.trim() || !loanConsentType.trim()) {
+      addNotification({ type: "error", message: "Select device and fill consent subject/type." });
+      return;
+    }
+    await callAction("/admin/loan-ops/legal-consent/record", {
+      companyId: device.companyId,
+      subjectRef: loanConsentSubjectRef.trim(),
+      consentType: loanConsentType.trim(),
+      legalBasis: "contract",
+      evidenceRef: loanDisputeEvidenceRef.trim(),
+    });
+    addNotification({ type: "success", message: "Legal consent recorded." });
+    await refreshLoanOps();
+  };
+
+  const refreshUserProtection = async () => {
+    const data = await callAction("GET:/dashboard/protection/bootstrap", {});
+    if (data?.profile) setUserProtectionProfile(data.profile);
+    if (Array.isArray(data?.incidents)) setUserProtectionIncidents(data.incidents);
+    if (data?.policy) setUserProtectionPolicy(data.policy);
+  };
+
+  const upsertProtectedDevice = async () => {
+    if (!userProtectDeviceDraft.label.trim()) {
+      addNotification({ type: "error", message: "Enter protected device label." });
+      return;
+    }
+    await callAction("/dashboard/protection/device/upsert", {
+      device: {
+        id: userProtectDeviceDraft.id.trim(),
+        label: userProtectDeviceDraft.label.trim(),
+        platform: userProtectDeviceDraft.platform,
+      },
+    });
+    addNotification({ type: "success", message: "Protected device saved." });
+    setUserProtectDeviceDraft({ id: "", label: "", platform: "android" });
+    await refreshUserProtection();
+  };
+
+  const applyUserDeviceAction = async (id: string, action: "pause" | "resume" | "remove") => {
+    await callAction("/dashboard/protection/device/action", { id, action });
+    addNotification({ type: "success", message: `Device ${action} applied.` });
+    await refreshUserProtection();
+  };
+
+  const saveTrustedContact = async () => {
+    if (!trustedContactDraft.name.trim() || !trustedContactDraft.endpoint.trim()) {
+      addNotification({ type: "error", message: "Enter trusted contact name and destination." });
+      return;
+    }
+    await callAction("/dashboard/protection/trusted-contact/upsert", { contact: trustedContactDraft });
+    addNotification({ type: "success", message: "Trusted contact saved." });
+    setTrustedContactDraft({ name: "", endpoint: "", channel: "email" });
+    await refreshUserProtection();
+  };
+
+  const saveUserProtectionSettings = async () => {
+    await callAction("/dashboard/protection/settings/save", {
+      antiTheftConsent: Boolean(userProtectionProfile?.antiTheftConsent),
+      locationConsent: Boolean(userProtectionProfile?.locationConsent),
+      cameraEvidenceConsent: Boolean(userProtectionProfile?.cameraEvidenceConsent),
+    });
+    addNotification({ type: "success", message: "Protection consent settings saved." });
+    await refreshUserProtection();
+  };
+
+  const reportProtectionIncident = async () => {
+    if (!incidentDraft.deviceId.trim()) {
+      addNotification({ type: "error", message: "Select/report a device ID first." });
+      return;
+    }
+    await callAction("/dashboard/protection/incident/report", {
+      deviceId: incidentDraft.deviceId.trim(),
+      eventType: "tamper_attempt",
+      note: incidentDraft.note.trim(),
+      cameraEvidenceRef: incidentDraft.cameraEvidenceRef.trim(),
+      location:
+        incidentDraft.lat.trim() && incidentDraft.lng.trim()
+          ? { lat: Number(incidentDraft.lat), lng: Number(incidentDraft.lng) }
+          : null,
+    });
+    addNotification({ type: "warn", message: "Incident reported and queued for trusted-contact fanout." });
+    setIncidentDraft((p) => ({ ...p, note: "", cameraEvidenceRef: "", lat: "", lng: "" }));
+    await refreshUserProtection();
+  };
+
   const runTwinAction = async (path: string, body: any = {}) => {
     try {
       const isGet = path.startsWith("GET:");
@@ -1860,6 +3510,471 @@ const Dashboard: React.FC = () => {
       include_report: twinIncludeReport,
     });
   };
+
+  const refreshTwinChannels = async () => {
+    try {
+      const data = await getJson("/neurotwin/channels/bootstrap");
+      setTwinChannelsBootstrap(data);
+      const mode = String(data?.availability?.mode || "active");
+      setTwinAvailabilityMode(mode);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "NeuroTwin channels refreshed." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed to refresh channels: ${err?.message || err}` });
+    }
+  };
+
+  const connectTwinChannel = async () => {
+    if (!twinChannelDraft.handle.trim()) {
+      addNotification({ type: "warn", message: "Enter channel handle first." });
+      return;
+    }
+    try {
+      const data = await postJson("/neurotwin/channels/connect", twinChannelDraft);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Channel connected." });
+      await refreshTwinChannels();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Channel connect failed: ${err?.message || err}` });
+    }
+  };
+
+  const setTwinAvailability = async () => {
+    try {
+      const data = await postJson("/neurotwin/availability", {
+        mode: twinAvailabilityMode,
+        notes: twinAvailabilityNotes,
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Twin availability updated." });
+      await refreshTwinChannels();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Availability update failed: ${err?.message || err}` });
+    }
+  };
+
+  const draftTwinAutoReply = async () => {
+    try {
+      const data = await postJson("/neurotwin/auto-reply/draft", {
+        ...twinAutoEventDraft,
+        requester_role: dashboardRole,
+      });
+      setTwinAutoReplyDraft(data?.draft || null);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Auto-reply draft generated." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Auto-reply draft failed: ${err?.message || err}` });
+    }
+  };
+
+  const approveTwinAutoReply = async (action: "approve_send" | "reject") => {
+    if (!twinAutoReplyDraft) {
+      addNotification({ type: "warn", message: "Generate a draft first." });
+      return;
+    }
+    try {
+      const data = await postJson("/neurotwin/auto-reply/approve", {
+        draft: twinAutoReplyDraft,
+        approver: twinApprover || "owner",
+        action,
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: action === "approve_send" ? "Draft approved." : "Draft rejected." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Draft approval failed: ${err?.message || err}` });
+    }
+  };
+
+  const loadTwinAutoReplyLogs = async () => {
+    try {
+      const data = await getJson("/neurotwin/auto-reply/logs?limit=100");
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Auto-reply logs loaded." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed to load logs: ${err?.message || err}` });
+    }
+  };
+
+  const loadTwinMarketMap = async () => {
+    try {
+      const data = await getJson("/neurotwin/market-map");
+      setTwinMarketMap(data?.market_map || null);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Market capability map loaded." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed to load market map: ${err?.message || err}` });
+    }
+  };
+
+  const sendTwinChannelTest = async () => {
+    if (!twinSendChannelId.trim()) {
+      addNotification({ type: "warn", message: "Choose a connected channel id first." });
+      return;
+    }
+    try {
+      const data = await postJson("/neurotwin/channels/send-test", {
+        channel_id: twinSendChannelId.trim(),
+        message: twinSendTestMessage.trim() || "NeuroEdge test message",
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Test dispatch requested." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Test dispatch failed: ${err?.message || err}` });
+    }
+  };
+
+  const loadTwinCallAssistantConfig = async () => {
+    try {
+      const data = await getJson("/neurotwin/call-assistant/config");
+      setTwinCallConfig(data?.config || null);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Call assistant config loaded." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed loading call config: ${err?.message || err}` });
+    }
+  };
+
+  const saveTwinCallAssistantConfig = async () => {
+    try {
+      const data = await postJson("/neurotwin/call-assistant/config", twinCallConfig || {});
+      setTwinCallConfig(data?.config || twinCallConfig);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Call assistant config saved." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed saving call config: ${err?.message || err}` });
+    }
+  };
+
+  const loadTwinCloneCustomization = async () => {
+    try {
+      const data = await getJson("/neurotwin/clone/customization");
+      const cfg = data?.customization || {};
+      setTwinCloneCustomization(cfg);
+      setTwinCloneVoiceJson(JSON.stringify(cfg.voice_assets || [], null, 2));
+      setTwinCloneVideoJson(JSON.stringify(cfg.video_assets || [], null, 2));
+      setTwinClonePresetsJson(JSON.stringify(cfg.persona_presets || [], null, 2));
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Clone customization loaded." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed loading clone customization: ${err?.message || err}` });
+    }
+  };
+
+  const saveTwinCloneCustomization = async () => {
+    try {
+      const payload = {
+        voice_assets: JSON.parse(twinCloneVoiceJson || "[]"),
+        video_assets: JSON.parse(twinCloneVideoJson || "[]"),
+        persona_presets: JSON.parse(twinClonePresetsJson || "[]"),
+        active_voice_asset_id: String(twinCloneCustomization?.active_voice_asset_id || ""),
+        active_video_asset_id: String(twinCloneCustomization?.active_video_asset_id || ""),
+        active_persona_preset_id: String(twinCloneCustomization?.active_persona_preset_id || ""),
+      };
+      const data = await postJson("/neurotwin/clone/customization", payload);
+      setTwinCloneCustomization(data?.customization || payload);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Clone customization saved." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Failed saving clone customization: ${err?.message || err}` });
+    }
+  };
+
+  const refreshMobileTwinBridge = async () => {
+    try {
+      const data = await getJson("/dashboard/twin/mobile/bootstrap");
+      const section = data?.mobileTwinBridge || null;
+      setMobileTwinBridge(section);
+      if (section?.devices?.length) {
+        const first = section.devices[0];
+        if (!mobileTwinSyncDraft.deviceId) {
+          setMobileTwinSyncDraft((p) => ({ ...p, deviceId: String(first.id || "") }));
+        }
+        if (!mobileTwinActionDraft.deviceId) {
+          setMobileTwinActionDraft((p) => ({ ...p, deviceId: String(first.id || "") }));
+        }
+      }
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Mobile Twin bridge refreshed." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Mobile bridge refresh failed: ${err?.message || err}` });
+    }
+  };
+
+  const registerMobileTwinDevice = async () => {
+    try {
+      const data = await postJson("/dashboard/twin/mobile/device/register", {
+        device: {
+          ...mobileTwinDeviceDraft,
+          permissions: {
+            call_screening: true,
+            microphone: true,
+            notifications: true,
+          },
+          capabilities: {
+            call_assist: true,
+            voip_answer: true,
+            whatsapp_call_assist: true,
+            video_avatar: true,
+          },
+        },
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Mobile twin device registered." });
+      await refreshMobileTwinBridge();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Device register failed: ${err?.message || err}` });
+    }
+  };
+
+  const syncMobileTwinDevice = async () => {
+    if (!mobileTwinSyncDraft.deviceId.trim()) {
+      addNotification({ type: "warn", message: "Choose a device ID to sync first." });
+      return;
+    }
+    try {
+      const data = await postJson("/dashboard/twin/mobile/device/sync", {
+        deviceId: mobileTwinSyncDraft.deviceId.trim(),
+        pushToken: mobileTwinSyncDraft.pushToken.trim(),
+        attestationStatus: mobileTwinDeviceDraft.attestationStatus,
+        permissions: {
+          call_screening: Boolean(mobileTwinSyncDraft.permissionCallScreening),
+          microphone: true,
+          notifications: true,
+        },
+        capabilities: {
+          call_assist: Boolean(mobileTwinSyncDraft.capabilityCallAssist),
+          voip_answer: Boolean(mobileTwinSyncDraft.capabilityVoipAnswer),
+          whatsapp_call_assist: Boolean(mobileTwinSyncDraft.capabilityWhatsappCallAssist),
+          video_avatar: Boolean(mobileTwinSyncDraft.capabilityVideoAvatar),
+        },
+        status: mobileTwinSyncDraft.status,
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Mobile twin device synced." });
+      await refreshMobileTwinBridge();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Device sync failed: ${err?.message || err}` });
+    }
+  };
+
+  const enqueueMobileTwinAction = async () => {
+    if (!mobileTwinActionDraft.deviceId.trim()) {
+      addNotification({ type: "warn", message: "Choose a device ID first." });
+      return;
+    }
+    try {
+      const data = await postJson("/dashboard/twin/mobile/action/enqueue", {
+        deviceId: mobileTwinActionDraft.deviceId.trim(),
+        actionType: mobileTwinActionDraft.actionType,
+        payload: JSON.parse(mobileTwinActionDraft.payloadJson || "{}"),
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Action enqueued to mobile app." });
+      await refreshMobileTwinBridge();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Action enqueue failed: ${err?.message || err}` });
+    }
+  };
+
+  const loadMobileTwinPending = async () => {
+    if (!mobileTwinPendingDeviceId.trim()) {
+      addNotification({ type: "warn", message: "Enter device ID first." });
+      return;
+    }
+    try {
+      const data = await getJson(`/dashboard/twin/mobile/actions/pending?deviceId=${encodeURIComponent(mobileTwinPendingDeviceId.trim())}`);
+      setMobileTwinPendingActions(Array.isArray(data?.actions) ? data.actions : []);
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Pending actions loaded." });
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Pending load failed: ${err?.message || err}` });
+    }
+  };
+
+  const ackMobileTwinActionReceipt = async () => {
+    try {
+      const data = await postJson("/dashboard/twin/mobile/action/receipt", {
+        actionId: mobileTwinReceiptDraft.actionId.trim(),
+        deviceId: mobileTwinReceiptDraft.deviceId.trim(),
+        status: mobileTwinReceiptDraft.status,
+        result: JSON.parse(mobileTwinReceiptDraft.resultJson || "{}"),
+      });
+      setTwinOutput(data);
+      addNotification({ type: "success", message: "Action receipt submitted." });
+      await refreshMobileTwinBridge();
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Receipt submit failed: ${err?.message || err}` });
+    }
+  };
+
+  const speakOps = (text: string) => {
+    if (!opsVoiceAutoSpeak || !("speechSynthesis" in window)) return;
+    try {
+      if (opsVoiceLiveInterrupt) window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = opsVoiceLanguage || "en-US";
+      utter.rate = 1;
+      utter.pitch = 1;
+      window.speechSynthesis.speak(utter);
+    } catch {
+      // no-op
+    }
+  };
+
+  const clearOpsStreaming = () => {
+    if (opsStreamTimerRef.current) {
+      clearInterval(opsStreamTimerRef.current);
+      opsStreamTimerRef.current = null;
+    }
+  };
+
+  const streamOpsResponse = (assistant: any) => {
+    clearOpsStreaming();
+    const full = String(assistant?.response || "");
+    if (!full) {
+      setOpsVoiceStreamText("");
+      setOpsVoiceOutput(assistant);
+      return;
+    }
+    const tokens = full.split(/\s+/);
+    let idx = 0;
+    setOpsVoiceStreamText("");
+    setOpsVoiceOutput({ ...assistant, partial_response: "" });
+    opsStreamTimerRef.current = setInterval(() => {
+      idx += 1;
+      const partial = tokens.slice(0, idx).join(" ");
+      setOpsVoiceStreamText(partial);
+      setOpsVoiceOutput((prev: any) => ({ ...(prev || assistant), partial_response: partial }));
+      if (idx >= tokens.length) {
+        clearOpsStreaming();
+        setOpsVoiceOutput({ ...assistant, partial_response: full });
+      }
+    }, 30);
+  };
+
+  const askOpsAssistant = async (queryOverride?: string) => {
+    const query = String(queryOverride || opsVoiceQuery || "").trim();
+    if (!query) {
+      addNotification({ type: "warn", message: "Say or type a request first." });
+      return;
+    }
+    try {
+      const data = await postJson("/assistant/ops/ask", { query });
+      const assistant = data?.assistant || {};
+      const response = String(assistant?.response || "I have no response right now.");
+      streamOpsResponse(assistant);
+      setTwinOutput({ ...(twinOutput || {}), ops_assistant: assistant });
+      addNotification({ type: "success", message: "Ops assistant responded." });
+      speakOps(response);
+    } catch (err: any) {
+      addNotification({ type: "error", message: `Ops assistant failed: ${err?.message || err}` });
+    }
+  };
+
+  const stopOpsListening = () => {
+    setOpsVoiceListening(false);
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {
+      // no-op
+    }
+  };
+
+  const startOpsListening = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      addNotification({ type: "warn", message: "Speech recognition not supported in this browser." });
+      return;
+    }
+    try {
+      if (opsVoiceLiveInterrupt && "speechSynthesis" in window) window.speechSynthesis.cancel();
+      if (!recognitionRef.current) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = opsVoiceLanguage || "en-US";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onresult = (event: any) => {
+          let finalText = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const item = event.results[i];
+            if (item.isFinal) finalText += String(item[0]?.transcript || "");
+          }
+          if (finalText.trim()) {
+            setOpsVoiceQuery(finalText.trim());
+            void askOpsAssistant(finalText.trim());
+          }
+        };
+        recognition.onerror = () => {
+          stopOpsListening();
+        };
+        recognition.onend = () => setOpsVoiceListening(false);
+        recognitionRef.current = recognition;
+      }
+      recognitionRef.current.lang = opsVoiceLanguage || "en-US";
+      recognitionRef.current.start();
+      setOpsVoiceListening(true);
+    } catch {
+      setOpsVoiceListening(false);
+      addNotification({ type: "error", message: "Unable to start microphone capture." });
+    }
+  };
+
+  useEffect(() => {
+    const supported = Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    setOpsVoiceSupported(supported);
+    return () => {
+      clearOpsStreaming();
+      try {
+        recognitionRef.current?.stop?.();
+      } catch {
+        // no-op
+      }
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!opsVoicePushToTalk || !opsVoiceSupported) return;
+    const parseHotkey = (value: string) => {
+      const txt = String(value || "").toLowerCase();
+      return {
+        alt: txt.includes("alt+"),
+        ctrl: txt.includes("ctrl+"),
+        shift: txt.includes("shift+"),
+        key: txt.split("+").pop() || "v",
+      };
+    };
+    const hk = parseHotkey(opsVoiceHotkey);
+    const isTextInput = (el: any) =>
+      !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    const match = (e: KeyboardEvent) => {
+      const key = String(e.key || "").toLowerCase();
+      return (
+        key === hk.key &&
+        Boolean(e.altKey) === hk.alt &&
+        Boolean(e.ctrlKey) === hk.ctrl &&
+        Boolean(e.shiftKey) === hk.shift
+      );
+    };
+    const down = (e: KeyboardEvent) => {
+      if (isTextInput(document.activeElement)) return;
+      if (!match(e)) return;
+      e.preventDefault();
+      if (!opsVoiceListening) startOpsListening();
+    };
+    const up = (e: KeyboardEvent) => {
+      if (!match(e)) return;
+      e.preventDefault();
+      if (opsVoiceListening) stopOpsListening();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [opsVoicePushToTalk, opsVoiceHotkey, opsVoiceSupported, opsVoiceListening, opsVoiceLiveInterrupt, opsVoiceLanguage]);
 
   const handleTwinUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -2411,6 +4526,304 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const refreshMarketReadiness = async () => {
+    if (!canAccessAdminOps) return;
+    const [cfg, summary] = await Promise.all([
+      callAction("GET:/admin/market-readiness/config", {}),
+      callAction("GET:/admin/market-readiness/summary", {}),
+    ]);
+    if (cfg?.config) setBackendOutput(cfg);
+    if (summary?.summary) setBackendOutput(summary);
+  };
+
+  const refreshReliabilityProgram = async () => {
+    if (!canAccessAdminOps) return;
+    const data = await callAction("GET:/admin/reliability/program", {});
+    if (data?.program) {
+      setReliabilityProgram(data.program);
+      if (data.program?.slo) {
+        setSloDraft({
+          availabilityPct: String(data.program.slo.availabilityPct ?? "99.9"),
+          p95LatencyMs: String(data.program.slo.p95LatencyMs ?? "2500"),
+          errorBudgetPct: String(data.program.slo.errorBudgetPct ?? "0.1"),
+          windowDays: String(data.program.slo.windowDays ?? "30"),
+          owner: String(data.program.slo.owner || "sre"),
+        });
+      }
+      if (data.program?.canary) {
+        setCanaryTrafficPct(String(data.program.canary.trafficPct ?? 5));
+        setCanaryAutoRollback(Boolean(data.program.canary.autoRollback ?? true));
+      }
+      if (data.program?.statusPage) {
+        setStatusPageMode(data.program.statusPage.mode || "operational");
+        setStatusPageMessage(String(data.program.statusPage.message || "All systems operational."));
+      }
+    }
+  };
+
+  const saveSloProgram = async () => {
+    const data = await callAction("/admin/reliability/slo", {
+      slo: {
+        availabilityPct: Number(sloDraft.availabilityPct || 99.9),
+        p95LatencyMs: Number(sloDraft.p95LatencyMs || 2500),
+        errorBudgetPct: Number(sloDraft.errorBudgetPct || 0.1),
+        windowDays: Number(sloDraft.windowDays || 30),
+        owner: sloDraft.owner || "sre",
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "SLO policy updated." });
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const runCanaryNow = async () => {
+    const data = await callAction("/admin/reliability/canary/run", {
+      trafficPct: Number(canaryTrafficPct || 5),
+      autoRollback: canaryAutoRollback,
+    });
+    if (data?.success) {
+      addNotification({
+        type: data?.result?.rollbackTriggered ? "warn" : "success",
+        message: data?.result?.rollbackTriggered
+          ? "Canary triggered rollback recommendation."
+          : "Canary run completed.",
+      });
+      setBackendOutput(data);
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const updateStatusPage = async () => {
+    const data = await callAction("/admin/reliability/status-page", {
+      mode: statusPageMode,
+      message: statusPageMessage,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Status page updated." });
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const createReliabilityIncident = async () => {
+    if (!incidentTitle.trim()) {
+      addNotification({ type: "warn", message: "Enter incident title." });
+      return;
+    }
+    const data = await callAction("/admin/reliability/incident", {
+      title: incidentTitle.trim(),
+      severity: incidentSeverity,
+      summary: incidentSummary.trim(),
+      status: "open",
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Incident created: ${incidentTitle}` });
+      setIncidentTitle("");
+      setIncidentSummary("");
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const refreshNeuroExpansion = async () => {
+    if (!(dashboardRole === "founder" || dashboardRole === "admin" || dashboardRole === "developer")) return;
+    try {
+      const data = await getJson("/admin/dashboard/neuroexpansion/bootstrap");
+      if (data?.neuroExpansion) {
+        setNeuroExpansion(data.neuroExpansion);
+        const settings = data.neuroExpansion.settings || {};
+        setNeuroExpansionSettingsDraft({
+          enabled: Boolean(settings.enabled ?? true),
+          autoDailyScan: Boolean(settings.autoDailyScan ?? true),
+          requireFounderApproval: Boolean(settings.requireFounderApproval ?? true),
+          autoTestOnMerge: Boolean(settings.autoTestOnMerge ?? true),
+          placeholderScanRoots: Array.isArray(settings.placeholderScanRoots)
+            ? settings.placeholderScanRoots.join(",")
+            : "src,../frontend/src,../ml",
+          maxFindings: String(settings.maxFindings ?? 500),
+        });
+      }
+      if (dashboardRole === "founder" || dashboardRole === "admin") {
+        try {
+          const n = await getJson("/admin/dashboard/neuroexpansion/notifications");
+          if (Array.isArray(n?.notifications)) setNeuroExpansionNotifications(n.notifications);
+        } catch {
+          // ignore notification feed fetch errors
+        }
+      }
+    } catch {
+      // silently ignore when account lacks dashboard neuro-expansion access
+    }
+  };
+
+  const saveNeuroExpansionSettingsNow = async () => {
+    const roots = neuroExpansionSettingsDraft.placeholderScanRoots
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const data = await callAction("/admin/dashboard/neuroexpansion/settings/save", {
+      settings: {
+        enabled: neuroExpansionSettingsDraft.enabled,
+        autoDailyScan: neuroExpansionSettingsDraft.autoDailyScan,
+        requireFounderApproval: neuroExpansionSettingsDraft.requireFounderApproval,
+        autoTestOnMerge: neuroExpansionSettingsDraft.autoTestOnMerge,
+        placeholderScanRoots: roots.length > 0 ? roots : ["src", "../frontend/src", "../ml"],
+        maxFindings: Number(neuroExpansionSettingsDraft.maxFindings || 500),
+      },
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "NeuroExpansion settings saved." });
+    }
+  };
+
+  const submitNeuroExpansionNow = async () => {
+    if (!neuroExpansionTitle.trim() || !neuroExpansionFeature.trim()) {
+      addNotification({ type: "warn", message: "Add title and feature details first." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/neuroexpansion/submit", {
+      title: neuroExpansionTitle.trim(),
+      featureText: neuroExpansionFeature.trim(),
+      codeText: neuroExpansionCode.trim(),
+    });
+    if (data?.success) {
+      const blocked = String(data?.submission?.status || "") === "blocked";
+      addNotification({
+        type: blocked ? "warn" : "success",
+        message: blocked
+          ? "Submission blocked by security scan/doctrine."
+          : "Submission queued for founder/admin approval.",
+      });
+      setNeuroExpansionTitle("");
+      setNeuroExpansionFeature("");
+      setNeuroExpansionCode("");
+      await refreshNeuroExpansion();
+    }
+  };
+
+  const reviewNeuroExpansionNow = async (id: string, decision: "approve" | "reject") => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/review", {
+      id,
+      decision,
+      reason: neuroExpansionReviewReason.trim(),
+    });
+    if (data?.success) {
+      addNotification({
+        type: decision === "approve" ? "success" : "warn",
+        message: `Submission ${decision}d.`,
+      });
+      setNeuroExpansionReviewReason("");
+      await refreshNeuroExpansion();
+    }
+  };
+
+  const mergeNeuroExpansionNow = async (id: string) => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/merge", {
+      id,
+      testsRequested: neuroExpansionSettingsDraft.autoTestOnMerge,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Submission merged into generated artifact queue." });
+      await refreshNeuroExpansion();
+    }
+  };
+
+  const previewNeuroExpansionPatchNow = async (id: string) => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/patch/preview", { id });
+    if (data?.success) {
+      setBackendOutput(data);
+      addNotification({ type: "success", message: "Patch preview generated." });
+    }
+  };
+
+  const applyNeuroExpansionPatchNow = async (id: string) => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/patch/apply", {
+      id,
+      runTests: neuroExpansionPatchRunTests,
+      testCommand: neuroExpansionPatchTestCommand.trim() || "pnpm run typecheck",
+    });
+    if (data?.success) {
+      setBackendOutput(data);
+      addNotification({
+        type: data?.testResult?.ok === false ? "warn" : "success",
+        message: data?.testResult?.ok === false
+          ? "Patch applied, but test run failed. Use checkpoint restore hint."
+          : "Patch applied successfully.",
+      });
+      await refreshNeuroExpansion();
+    }
+  };
+
+  const generateNeuroExpansionPrNow = async (id: string) => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/pr/generate", {
+      id,
+      baseBranch: neuroExpansionPrBaseBranch.trim() || "main",
+      materializeBranch: neuroExpansionPrMaterialize,
+      push: neuroExpansionPrPush,
+      remote: "origin",
+    });
+    if (data?.success) {
+      setBackendOutput(data);
+      addNotification({ type: "success", message: "PR draft generated." });
+    }
+  };
+
+  const scanPlaceholderGapsNow = async () => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/scan-placeholders", {});
+    if (data?.success) {
+      setNeuroExpansionPlaceholderReport(data.report || null);
+      addNotification({
+        type: "success",
+        message: `Placeholder scan complete (${Number(data?.report?.totalFindings || 0)} findings).`,
+      });
+    }
+  };
+
+  const runNeuroExpansionDailyNow = async () => {
+    const data = await callAction("/admin/dashboard/neuroexpansion/daily/run", {});
+    if (data?.success) {
+      addNotification({
+        type: data?.result?.skipped ? "warn" : "success",
+        message: data?.result?.skipped
+          ? `Daily planner skipped: ${data?.result?.reason || "already_ran_recently"}`
+          : "Daily planner generated a new approval proposal.",
+      });
+      await refreshNeuroExpansion();
+    }
+  };
+
+  const createArtifact = () => {
+    if (!artifactDraft.title.trim() || !artifactDraft.body.trim()) {
+      addNotification({ type: "warn", message: "Add artifact title and content first." });
+      return;
+    }
+    const owner = currentUserLabel();
+    const now = Date.now();
+    const next: ArtifactWorkspaceItem = {
+      id: `art-${now}`,
+      title: artifactDraft.title.trim(),
+      type: artifactDraft.type,
+      body: artifactDraft.body,
+      owner,
+      visibility: artifactDraft.visibility,
+      updatedAt: now,
+    };
+    setArtifactWorkspace((prev) => [next, ...prev]);
+    setArtifactDraft((p) => ({ ...p, title: "", body: "" }));
+    addNotification({ type: "success", message: "Artifact saved to workspace." });
+  };
+
+  const deleteArtifact = (id: string) => {
+    setArtifactWorkspace((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const saveMarketReadiness = async () => {
+    const data = await callAction("/admin/market-readiness/config", marketReadinessConfig);
+    if (data?.success) {
+      addNotification({ type: "success", message: "Market readiness config saved." });
+      await refreshMarketReadiness();
+    }
+  };
+
   const refreshFrontierProgram = async () => {
     if (!canAccessAdminOps) return;
     const [programData, readinessData] = await Promise.all([
@@ -2538,7 +4951,13 @@ const Dashboard: React.FC = () => {
           </label>
           <label style={chip}>
             Upload Folder
-            <input type="file" multiple webkitdirectory="" style={{ display: "none" }} onChange={(e) => prepareTrainingFiles(e.target.files)} />
+            <input
+              type="file"
+              multiple
+              {...({ webkitdirectory: "" } as any)}
+              style={{ display: "none" }}
+              onChange={(e) => prepareTrainingFiles(e.target.files)}
+            />
           </label>
           <label style={chip}>
             Upload Zip/PDF
@@ -2573,13 +4992,13 @@ const Dashboard: React.FC = () => {
             Secondary Sources: {bootstrapIncludeSecondary ? "on" : "off"}
           </button>
           <button style={chip} onClick={runNightlyRefreshNow}>Run Nightly Refresh Now</button>
-          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/auto-refresh/status").then((d) => setBackendOutput(d))}>
+          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/auto-refresh/status", {}).then((d) => setBackendOutput(d))}>
             Auto-Refresh Status
           </button>
           <button style={chip} onClick={ragAsk}>Ask RAG</button>
           <button style={chip} onClick={() => callAction("/rag/reindex", {}).then((d) => setBackendOutput(d))}>Reindex RAG</button>
-          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/list").then((d) => setBackendOutput(d))}>View Trusted Sources</button>
-          <button style={chip} onClick={() => callAction("GET:/rag/stats").then((d) => setBackendOutput(d))}>RAG Stats</button>
+          <button style={chip} onClick={() => callAction("GET:/admin/training/bootstrap-pack/list", {}).then((d) => setBackendOutput(d))}>View Trusted Sources</button>
+          <button style={chip} onClick={() => callAction("GET:/rag/stats", {}).then((d) => setBackendOutput(d))}>RAG Stats</button>
         </div>
 
         <div style={{ border: "1px solid rgba(148,163,184,0.2)", borderRadius: 12, padding: 10, display: "grid", gap: 8 }}>
@@ -2712,6 +5131,46 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const inspectRuntimeUnit = (unit: RuntimeUnit) => {
+    setSelectedRuntimeUnit(unit);
+    setBackendOutput({
+      type: "runtime_unit_inspection",
+      inspectedAt: Date.now(),
+      unit,
+      serviceStatus: runtimeServiceState[unit.domain],
+      recommendation: unit.suggestedFix,
+    });
+  };
+
+  const runRuntimeDiagnostics = async (domain: RuntimeDomain) => {
+    if (domain === "kernel") {
+      await runBackendAction("GET:/kernels");
+      return;
+    }
+    if (domain === "ml") {
+      await runBackendAction("GET:/system/status");
+      await runBackendAction("GET:/admin/reliability/overview?windowHours=24");
+      return;
+    }
+    if (domain === "orchestrator") {
+      await runBackendAction("GET:/status");
+      await runBackendAction("GET:/admin/logs?limit=50");
+      return;
+    }
+    await runBackendAction("GET:/health");
+    await runBackendAction("GET:/admin/logs?limit=50");
+  };
+
+  const runRuntimeAutoFix = async (domain: RuntimeDomain) => {
+    if (domain === "frontend") {
+      await runBackendAction("/self-expansion/propose", {
+        goal: "frontend runtime stabilization and unresolved client error hardening",
+      });
+      return;
+    }
+    await requestServiceRestart(domain);
+  };
+
   const addDevApiKey = async () => {
     const name = window.prompt("API key name:", "New API Key");
     if (!name) return;
@@ -2759,6 +5218,55 @@ const Dashboard: React.FC = () => {
     if (data?.apiKey) {
       setLatestGeneratedApiKey(String(data.apiKey));
       addNotification({ type: "success", message: "Integration created. Copy API key now." });
+    }
+  };
+
+  const createConnectorPreset = async (preset: "github" | "google_drive" | "slack" | "notion") => {
+    const map: Record<typeof preset, Partial<IntegrationApp> & { scopes: string[]; origins: string[]; webhook?: string }> = {
+      github: {
+        appName: "GitHub Connector",
+        appDescription: "Repository browsing, issue context, and commit metadata sync.",
+        environment: "production",
+        scopes: ["chat:write", "ai:infer", "execute:run"],
+        origins: ["https://github.com"],
+      },
+      google_drive: {
+        appName: "Google Drive Connector",
+        appDescription: "Document retrieval and workspace file context.",
+        environment: "production",
+        scopes: ["chat:write", "ai:infer"],
+        origins: ["https://drive.google.com"],
+      },
+      slack: {
+        appName: "Slack Connector",
+        appDescription: "Channel summaries, incident updates, and workflow triggers.",
+        environment: "production",
+        scopes: ["chat:write", "ai:infer"],
+        origins: ["https://slack.com"],
+      },
+      notion: {
+        appName: "Notion Connector",
+        appDescription: "Page knowledge retrieval and project documentation sync.",
+        environment: "production",
+        scopes: ["chat:write", "ai:infer"],
+        origins: ["https://www.notion.so"],
+      },
+    };
+    const cfg = map[preset];
+    const body = {
+      integration: {
+        appName: cfg.appName,
+        appDescription: cfg.appDescription,
+        environment: cfg.environment,
+        scopes: cfg.scopes,
+        allowedOrigins: cfg.origins,
+        rateLimitPerMin: 120,
+        webhookUrl: cfg.webhook,
+      },
+    };
+    const data = await callAction("/admin/dashboard/integrations/upsert", body);
+    if (data?.success) {
+      addNotification({ type: "success", message: `${cfg.appName} created.` });
     }
   };
 
@@ -2904,15 +5412,28 @@ const Dashboard: React.FC = () => {
       addNotification({ type: "error", message: "Add prompt title and text." });
       return;
     }
-    await callAction("/admin/dashboard/prompts/upsert", {
-      prompt: { title: newPromptTitle.trim(), text: newPromptText.trim() },
-    });
+    if (canAccessAdminOps) {
+      await callAction("/admin/dashboard/prompts/upsert", {
+        prompt: { title: newPromptTitle.trim(), text: newPromptText.trim() },
+      });
+    } else {
+      setSavedPrompts((prev) => [
+        {
+          id: `sp-${Date.now()}`,
+          title: newPromptTitle.trim(),
+          text: newPromptText.trim(),
+        },
+        ...prev,
+      ]);
+    }
     setNewPromptTitle("");
     setNewPromptText("");
     addNotification({ type: "success", message: "Prompt saved." });
   };
 
   const selectedAgent = agentsLocal.find((a) => a.id === selectedAgentId) || null;
+  const selectedUserAssistant =
+    userAssistants.find((a) => a.id === selectedUserAssistantId) || null;
 
   const updateAgent = async (id: string, patch: Partial<AgentProfile>) => {
     const current = agentsLocal.find((a) => a.id === id);
@@ -2926,6 +5447,382 @@ const Dashboard: React.FC = () => {
     const has = current.tools.includes(tool);
     const tools = has ? current.tools.filter((t) => t !== tool) : [...current.tools, tool];
     await callAction("/admin/dashboard/agents/upsert", { agent: { ...current, tools, id } });
+  };
+
+  const addUserAssistant = () => {
+    const now = Date.now();
+    const next: UserAssistantProfile = {
+      id: `ua-${now}`,
+      name: "My Assistant",
+      rolePrompt: "Helpful personal assistant customized for my workflow.",
+      tone: "balanced",
+      language: "en",
+      responseMode: "balanced",
+      domainFocus: "general",
+      startupPrompt: "",
+      avatarEmoji: "✨",
+      creativity: 0.4,
+      memoryDays: 14,
+      memoryMode: "long_term",
+      autoCitations: false,
+      tools: ["chat", "research"],
+      privacyMode: true,
+      safeMode: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setUserAssistants((prev) => [next, ...prev]);
+    setSelectedUserAssistantId(next.id);
+    addNotification({ type: "success", message: "New personal assistant created." });
+  };
+
+  const updateUserAssistant = (id: string, patch: Partial<UserAssistantProfile>) => {
+    setUserAssistants((prev) =>
+      prev.map((a) =>
+        a.id === id ? { ...a, ...patch, updatedAt: Date.now() } : a
+      )
+    );
+  };
+
+  const toggleUserAssistantTool = (id: string, tool: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    const has = current.tools.includes(tool);
+    const tools = has ? current.tools.filter((t) => t !== tool) : [...current.tools, tool];
+    updateUserAssistant(id, { tools });
+  };
+
+  const duplicateUserAssistant = (id: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    const now = Date.now();
+    const next: UserAssistantProfile = {
+      ...current,
+      id: `ua-${now}`,
+      name: `${current.name} Copy`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setUserAssistants((prev) => [next, ...prev]);
+    setSelectedUserAssistantId(next.id);
+    addNotification({ type: "success", message: "Assistant duplicated." });
+  };
+
+  const deleteUserAssistant = (id: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    if (!confirmSafeAction({ title: `assistant ${current.name}`, actionLabel: "delete", chatMode: true })) return;
+    setUserAssistants((prev) => prev.filter((a) => a.id !== id));
+    if (selectedUserAssistantId === id) setSelectedUserAssistantId("");
+    if (defaultUserAssistantId === id) setDefaultUserAssistantId("");
+    addNotification({ type: "warn", message: `Removed assistant ${current.name}.` });
+  };
+
+  const activateUserAssistant = (id: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    try {
+      localStorage.setItem("neuroedge_active_user_assistant_v1", JSON.stringify(current));
+      window.dispatchEvent(
+        new CustomEvent("neuroedge:userAssistantUpdated", { detail: current })
+      );
+      addNotification({ type: "success", message: `${current.name} is now active for chat.` });
+    } catch {
+      addNotification({ type: "error", message: "Failed to activate assistant." });
+    }
+  };
+
+  const setDefaultUserAssistant = (id: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    setDefaultUserAssistantId(id);
+    addNotification({ type: "success", message: `${current.name} set as startup assistant.` });
+  };
+
+  const exportUserAssistant = (id: string) => {
+    const current = userAssistants.find((a) => a.id === id);
+    if (!current) return;
+    exportData(`${current.name.replace(/\s+/g, "_").toLowerCase()}_assistant_profile`, current);
+  };
+
+  const importUserAssistant = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as Partial<UserAssistantProfile>;
+      if (!parsed?.name) {
+        addNotification({ type: "error", message: "Invalid assistant profile file." });
+        return;
+      }
+      const now = Date.now();
+      const next: UserAssistantProfile = {
+        id: `ua-${now}`,
+        name: String(parsed.name),
+        rolePrompt: String(parsed.rolePrompt || "Helpful personal assistant."),
+        tone: (parsed.tone as UserAssistantProfile["tone"]) || "balanced",
+        language: String(parsed.language || "en"),
+        responseMode:
+          (parsed.responseMode as UserAssistantProfile["responseMode"]) || "balanced",
+        domainFocus: String(parsed.domainFocus || "general"),
+        startupPrompt: String(parsed.startupPrompt || ""),
+        avatarEmoji: String(parsed.avatarEmoji || "🤖"),
+        creativity: Number(parsed.creativity ?? 0.4),
+        memoryDays: Number(parsed.memoryDays ?? 14),
+        memoryMode:
+          (parsed.memoryMode as UserAssistantProfile["memoryMode"]) || "long_term",
+        autoCitations: parsed.autoCitations === true,
+        tools: Array.isArray(parsed.tools) ? parsed.tools.map((t) => String(t)) : ["chat"],
+        privacyMode: parsed.privacyMode !== false,
+        safeMode: parsed.safeMode !== false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      setUserAssistants((prev) => [next, ...prev]);
+      setSelectedUserAssistantId(next.id);
+      addNotification({ type: "success", message: "Assistant profile imported." });
+    } catch {
+      addNotification({ type: "error", message: "Failed to import assistant profile JSON." });
+    }
+  };
+
+  const currentUserLabel = () => {
+    try {
+      const rawUser = localStorage.getItem("neuroedge_user");
+      if (!rawUser) return "local-user";
+      const parsed = JSON.parse(rawUser);
+      return String(parsed?.name || parsed?.email || "local-user");
+    } catch {
+      return "local-user";
+    }
+  };
+
+  const addKnowledgeUrlToAssistant = () => {
+    const current = selectedUserAssistant;
+    const url = assistantKnowledgeUrlDraft.trim();
+    if (!current || !url) return;
+    const nextSources = Array.from(new Set([...(current.knowledgeSources || []), url]));
+    updateUserAssistant(current.id, { knowledgeSources: nextSources });
+    setAssistantKnowledgeUrlDraft("");
+    addNotification({ type: "success", message: "Knowledge URL added to assistant." });
+  };
+
+  const removeKnowledgeUrlFromAssistant = (url: string) => {
+    const current = selectedUserAssistant;
+    if (!current) return;
+    updateUserAssistant(current.id, {
+      knowledgeSources: (current.knowledgeSources || []).filter((u) => u !== url),
+    });
+  };
+
+  const attachKnowledgeFilesToAssistant = (files: FileList | null) => {
+    const current = selectedUserAssistant;
+    if (!current || !files || files.length === 0) return;
+    const incoming = Array.from(files).map((f) => ({
+      id: `akf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: f.name,
+      size: f.size,
+      mime: f.type || "application/octet-stream",
+      addedAt: Date.now(),
+    }));
+    updateUserAssistant(current.id, {
+      knowledgeFiles: [...(current.knowledgeFiles || []), ...incoming],
+    });
+    addNotification({ type: "success", message: `Attached ${incoming.length} knowledge file(s).` });
+  };
+
+  const removeKnowledgeFileFromAssistant = (fileId: string) => {
+    const current = selectedUserAssistant;
+    if (!current) return;
+    updateUserAssistant(current.id, {
+      knowledgeFiles: (current.knowledgeFiles || []).filter((f) => f.id !== fileId),
+    });
+  };
+
+  const publishAssistantPack = () => {
+    const current = selectedUserAssistant;
+    if (!current) return;
+    const tags = marketplaceTagsCsv
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const now = Date.now();
+    const owner = currentUserLabel();
+    const nextPack: AssistantMarketplacePack = {
+      id: `amp-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      owner,
+      name: current.name,
+      description: marketplaceDescription.trim() || `Assistant pack: ${current.name}`,
+      visibility: marketplaceVisibility,
+      tags,
+      downloads: 0,
+      rating: 0,
+      updatedAt: now,
+      assistant: { ...current, updatedAt: now },
+    };
+    setAssistantMarketplace((prev) => [nextPack, ...prev]);
+    addNotification({ type: "success", message: `${current.name} published to marketplace.` });
+  };
+
+  const installAssistantPack = (packId: string) => {
+    const pack = assistantMarketplace.find((p) => p.id === packId);
+    if (!pack) return;
+    const now = Date.now();
+    const next: UserAssistantProfile = {
+      ...pack.assistant,
+      id: `ua-${now}`,
+      name: `${pack.assistant.name}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setUserAssistants((prev) => [next, ...prev]);
+    setSelectedUserAssistantId(next.id);
+    setAssistantMarketplace((prev) =>
+      prev.map((p) =>
+        p.id === packId
+          ? {
+              ...p,
+              downloads: (p.downloads || 0) + 1,
+              updatedAt: now,
+            }
+          : p
+      )
+    );
+    addNotification({ type: "success", message: `Installed ${pack.name} from marketplace.` });
+  };
+
+  const rateAssistantPack = (packId: string, stars: number) => {
+    const rating = Math.max(1, Math.min(5, stars));
+    setAssistantMarketplace((prev) =>
+      prev.map((p) =>
+        p.id === packId
+          ? {
+              ...p,
+              rating: Number((((p.rating || 0) + rating) / 2).toFixed(2)),
+              updatedAt: Date.now(),
+            }
+          : p
+      )
+    );
+  };
+
+  const filteredMarketplacePacks = assistantMarketplace.filter((p) => {
+    const q = marketplaceSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      p.tags.join(" ").toLowerCase().includes(q) ||
+      p.owner.toLowerCase().includes(q)
+    );
+  });
+
+  const assistantQualityScore = (assistantId: string) => {
+    const a = assistantAnalytics[assistantId];
+    if (!a) return 0;
+    const sentimentBase = a.turns > 0 ? (a.up + a.laugh - a.down - a.sad) / a.turns : 0;
+    const confidence = Number.isFinite(a.avgConfidence) ? a.avgConfidence : 0;
+    const coverage = Number.isFinite(a.citationCoverage) ? a.citationCoverage : 0;
+    const score = (0.5 * confidence + 0.3 * coverage + 0.2 * (0.5 + sentimentBase / 2)) * 100;
+    return Math.max(0, Math.min(100, Number(score.toFixed(1))));
+  };
+
+  const addUserAssistantFromTemplate = (
+    template:
+      | "study_tutor"
+      | "research_analyst"
+      | "product_manager"
+      | "translator"
+      | "fitness_coach"
+  ) => {
+    const now = Date.now();
+    const base: UserAssistantProfile = {
+      id: `ua-${template}-${now}`,
+      name: "My Assistant",
+      rolePrompt: "Helpful personal assistant customized for my workflow.",
+      tone: "balanced",
+      language: "en",
+      responseMode: "balanced",
+      domainFocus: "general",
+      startupPrompt: "",
+      avatarEmoji: "🤖",
+      creativity: 0.4,
+      memoryDays: 14,
+      memoryMode: "long_term",
+      autoCitations: false,
+      tools: ["chat", "research"],
+      privacyMode: true,
+      safeMode: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const nextMap: Record<typeof template, UserAssistantProfile> = {
+      study_tutor: {
+        ...base,
+        name: "Study Tutor",
+        rolePrompt:
+          "Personal tutor. Teach step-by-step, add quick quizzes, and adapt to learner level.",
+        tone: "formal",
+        responseMode: "detailed",
+        domainFocus: "education",
+        startupPrompt: "Ask subject, level, and exam timeline first.",
+        avatarEmoji: "🎓",
+        tools: ["chat", "research", "math", "files"],
+      },
+      research_analyst: {
+        ...base,
+        name: "Research Analyst",
+        rolePrompt:
+          "Evidence-first analyst. Prioritize verifiable sources, freshness, and concise citations.",
+        tone: "technical",
+        responseMode: "detailed",
+        domainFocus: "research",
+        startupPrompt: "Ask for scope, geography, and timeframe before research.",
+        avatarEmoji: "📚",
+        autoCitations: true,
+        tools: ["chat", "research", "web", "files"],
+      },
+      product_manager: {
+        ...base,
+        name: "Product Manager",
+        rolePrompt:
+          "PM copilot for roadmap, PRD writing, prioritization, trade-off analysis, and launch plans.",
+        tone: "balanced",
+        responseMode: "balanced",
+        domainFocus: "product",
+        startupPrompt: "Ask for target users, KPI, and constraints before recommendations.",
+        avatarEmoji: "🧭",
+        tools: ["chat", "research", "code"],
+      },
+      translator: {
+        ...base,
+        name: "Global Translator",
+        rolePrompt:
+          "Translate with cultural nuance and preserve domain meaning. Offer literal and natural variants.",
+        tone: "casual",
+        responseMode: "balanced",
+        domainFocus: "language",
+        startupPrompt: "Ask source language, target language, and audience.",
+        avatarEmoji: "🌍",
+        tools: ["chat"],
+      },
+      fitness_coach: {
+        ...base,
+        name: "Fitness Coach",
+        rolePrompt:
+          "Fitness coach for routines, diet basics, and consistency plans. Stay safe and non-medical.",
+        tone: "casual",
+        responseMode: "balanced",
+        domainFocus: "health_fitness",
+        startupPrompt: "Ask current activity level, goals, and available equipment.",
+        avatarEmoji: "💪",
+        tools: ["chat", "files"],
+      },
+    };
+    const next = nextMap[template];
+    setUserAssistants((prev) => [next, ...prev]);
+    setSelectedUserAssistantId(next.id);
+    addNotification({ type: "success", message: `${next.name} template added.` });
   };
 
   const addDepartment = async () => {
@@ -3848,8 +6745,951 @@ const Dashboard: React.FC = () => {
     </Card>
   );
 
+  const reliabilityOpsCard = (
+    <Card title="Reliability Ops (SLO • Canary • Incidents)">
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <button style={chip} onClick={refreshReliabilityProgram}>Refresh Program</button>
+        <button style={chip} onClick={() => runBackendAction("GET:/admin/reliability/overview?windowHours=24")}>Reliability Snapshot</button>
+        <button style={chip} onClick={() => runBackendAction("GET:/admin/sre/concurrency")}>Concurrency</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(140px, 1fr))", gap: 8 }}>
+        <Stat label="SLO Availability" value={`${reliabilityProgram?.slo?.availabilityPct ?? 99.9}%`} />
+        <Stat label="SLO p95" value={`${reliabilityProgram?.slo?.p95LatencyMs ?? 2500}ms`} />
+        <Stat label="Error Budget" value={`${reliabilityProgram?.slo?.errorBudgetPct ?? 0.1}%`} />
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>SLO Policy</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8 }}>
+        <input value={sloDraft.availabilityPct} onChange={(e) => setSloDraft((p) => ({ ...p, availabilityPct: e.target.value }))} placeholder="Availability %" style={input} />
+        <input value={sloDraft.p95LatencyMs} onChange={(e) => setSloDraft((p) => ({ ...p, p95LatencyMs: e.target.value }))} placeholder="p95 latency ms" style={input} />
+        <input value={sloDraft.errorBudgetPct} onChange={(e) => setSloDraft((p) => ({ ...p, errorBudgetPct: e.target.value }))} placeholder="Error budget %" style={input} />
+        <input value={sloDraft.windowDays} onChange={(e) => setSloDraft((p) => ({ ...p, windowDays: e.target.value }))} placeholder="Window days" style={input} />
+        <input value={sloDraft.owner} onChange={(e) => setSloDraft((p) => ({ ...p, owner: e.target.value }))} placeholder="Owner" style={input} />
+      </div>
+      <button style={primary} onClick={saveSloProgram}>Save SLO</button>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Canary Rollout</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={canaryTrafficPct} onChange={(e) => setCanaryTrafficPct(e.target.value)} placeholder="Canary traffic %" style={{ ...input, width: 180 }} />
+        <button style={chip} onClick={() => setCanaryAutoRollback((v) => !v)}>
+          Auto rollback: {canaryAutoRollback ? "on" : "off"}
+        </button>
+        <button style={primary} onClick={runCanaryNow}>Run Canary</button>
+      </div>
+      {reliabilityProgram?.canary?.lastRun && (
+        <pre style={{ ...log, maxHeight: 180, overflow: "auto", marginTop: 8 }}>
+          {JSON.stringify(reliabilityProgram.canary.lastRun, null, 2)}
+        </pre>
+      )}
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Status Page + Incident Queue</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={statusPageMode} onChange={(e) => setStatusPageMode(e.target.value as any)} style={input}>
+          <option value="operational">operational</option>
+          <option value="degraded">degraded</option>
+          <option value="major_outage">major_outage</option>
+          <option value="maintenance">maintenance</option>
+        </select>
+        <input value={statusPageMessage} onChange={(e) => setStatusPageMessage(e.target.value)} placeholder="Status page message" style={{ ...input, minWidth: 280 }} />
+        <button style={chip} onClick={updateStatusPage}>Update Status Page</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <input value={incidentTitle} onChange={(e) => setIncidentTitle(e.target.value)} placeholder="Incident title" style={input} />
+        <select value={incidentSeverity} onChange={(e) => setIncidentSeverity(e.target.value as any)} style={input}>
+          <option value="sev1">sev1</option>
+          <option value="sev2">sev2</option>
+          <option value="sev3">sev3</option>
+          <option value="sev4">sev4</option>
+        </select>
+        <input value={incidentSummary} onChange={(e) => setIncidentSummary(e.target.value)} placeholder="Incident summary" style={{ ...input, minWidth: 280 }} />
+        <button style={chip} onClick={createReliabilityIncident}>Create Incident</button>
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 180, overflowY: "auto", display: "grid", gap: 6 }}>
+        {(reliabilityProgram?.incidents || []).slice(0, 12).map((inc) => (
+          <div key={inc.id} style={log}>
+            {inc.id} • {inc.severity} • {inc.status} • {inc.title}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const artifactWorkspaceCard = (
+    <Card title="Artifacts Workspace (Build • Edit • Share)">
+      <div style={{ ...muted, marginBottom: 8 }}>
+        Collaborative lightweight workspace for plans, docs, code snippets, and reports similar to artifact-style workflows.
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={artifactDraft.title}
+          onChange={(e) => setArtifactDraft((p) => ({ ...p, title: e.target.value }))}
+          placeholder="Artifact title"
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select value={artifactDraft.type} onChange={(e) => setArtifactDraft((p) => ({ ...p, type: e.target.value as any }))} style={input}>
+            <option value="doc">doc</option>
+            <option value="code">code</option>
+            <option value="plan">plan</option>
+            <option value="report">report</option>
+          </select>
+          <select value={artifactDraft.visibility} onChange={(e) => setArtifactDraft((p) => ({ ...p, visibility: e.target.value as any }))} style={input}>
+            <option value="private">private</option>
+            <option value="workspace">workspace</option>
+          </select>
+          <button style={primary} onClick={createArtifact}>Save Artifact</button>
+        </div>
+        <textarea
+          value={artifactDraft.body}
+          onChange={(e) => setArtifactDraft((p) => ({ ...p, body: e.target.value }))}
+          placeholder="Write artifact content here..."
+          style={{ ...input, minHeight: 120 }}
+        />
+      </div>
+      <div style={{ marginTop: 8, display: "grid", gap: 8, maxHeight: 240, overflowY: "auto" }}>
+        {artifactWorkspace.map((a) => (
+          <div key={a.id} style={{ ...log, whiteSpace: "pre-wrap" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <strong>{a.title}</strong>
+              <span>{a.type} • {a.visibility}</span>
+            </div>
+            <div style={{ ...muted, marginTop: 4 }}>owner: {a.owner} • updated: {new Date(a.updatedAt).toLocaleString()}</div>
+            <div style={{ marginTop: 6, maxHeight: 90, overflowY: "auto" }}>{a.body}</div>
+            <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+              <button style={chip} onClick={() => navigator.clipboard?.writeText(a.body)}>Copy</button>
+              <button style={chip} onClick={() => setArtifactDraft({ title: a.title, type: a.type, body: a.body, visibility: a.visibility })}>Load to Editor</button>
+              <button style={chip} onClick={() => deleteArtifact(a.id)}>Delete</button>
+            </div>
+          </div>
+        ))}
+        {artifactWorkspace.length === 0 && <div style={muted}>No artifacts yet. Create your first artifact.</div>}
+      </div>
+    </Card>
+  );
+
+  const neuroExpansionBuilderCard = (
+    <Card title="NeuroExpansion & Building">
+      <div style={muted}>
+        Founder/Admin/Dev can submit feature specs + code snippets. Twin-style security screening runs first
+        (malware/prompt-injection/doctrine), then approval + controlled merge artifact generation with audit logs.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshNeuroExpansion}>Refresh</button>
+        <button style={chip} onClick={scanPlaceholderGapsNow}>Scan Placeholders</button>
+        <button style={chip} onClick={runNeuroExpansionDailyNow}>Run Daily Planner</button>
+        <button style={chip} onClick={() => runBackendAction("GET:/self-expansion/analyze")}>Twin Analyze (System)</button>
+      </div>
+
+      <div style={{ marginTop: 8, fontWeight: 700 }}>Planner Settings</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(160px, 1fr))", gap: 8 }}>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={neuroExpansionSettingsDraft.enabled}
+            onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, enabled: e.target.checked }))}
+            style={{ marginRight: 6 }}
+          />
+          Enabled
+        </label>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={neuroExpansionSettingsDraft.autoDailyScan}
+            onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, autoDailyScan: e.target.checked }))}
+            style={{ marginRight: 6 }}
+          />
+          Auto Daily Scan
+        </label>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={neuroExpansionSettingsDraft.requireFounderApproval}
+            onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, requireFounderApproval: e.target.checked }))}
+            style={{ marginRight: 6 }}
+          />
+          Require Founder Approval
+        </label>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={neuroExpansionSettingsDraft.autoTestOnMerge}
+            onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, autoTestOnMerge: e.target.checked }))}
+            style={{ marginRight: 6 }}
+          />
+          Auto-Test on Merge
+        </label>
+        <input
+          value={neuroExpansionSettingsDraft.placeholderScanRoots}
+          onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, placeholderScanRoots: e.target.value }))}
+          placeholder="Scan roots: src,../frontend/src,../ml"
+          style={{ ...input, gridColumn: "span 2" }}
+        />
+        <input
+          value={neuroExpansionSettingsDraft.maxFindings}
+          onChange={(e) => setNeuroExpansionSettingsDraft((p) => ({ ...p, maxFindings: e.target.value }))}
+          placeholder="Max findings"
+          style={input}
+        />
+        <button style={primary} onClick={saveNeuroExpansionSettingsNow}>Save Settings</button>
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Submit Feature / Code for Twin Review</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={neuroExpansionTitle}
+          onChange={(e) => setNeuroExpansionTitle(e.target.value)}
+          placeholder="Feature title"
+          style={input}
+        />
+        <textarea
+          value={neuroExpansionFeature}
+          onChange={(e) => setNeuroExpansionFeature(e.target.value)}
+          placeholder="Describe feature, user need, expected outcome, rollout plan..."
+          style={{ ...input, minHeight: 90 }}
+        />
+        <textarea
+          value={neuroExpansionCode}
+          onChange={(e) => setNeuroExpansionCode(e.target.value)}
+          placeholder="Optional code snippet / patch proposal"
+          style={{ ...input, minHeight: 110, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+        />
+        <button style={primary} onClick={submitNeuroExpansionNow}>Submit to NeuroExpansion Queue</button>
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Approval + Merge Queue</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(160px, 1fr))", gap: 8 }}>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={neuroExpansionPatchRunTests}
+            onChange={(e) => setNeuroExpansionPatchRunTests(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Run Tests on Patch Apply
+        </label>
+        <input
+          value={neuroExpansionPatchTestCommand}
+          onChange={(e) => setNeuroExpansionPatchTestCommand(e.target.value)}
+          placeholder="Test command (e.g. pnpm run typecheck)"
+          style={input}
+        />
+        <input
+          value={neuroExpansionPrBaseBranch}
+          onChange={(e) => setNeuroExpansionPrBaseBranch(e.target.value)}
+          placeholder="PR base branch"
+          style={input}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <label style={chip}>
+            <input
+              type="checkbox"
+              checked={neuroExpansionPrMaterialize}
+              onChange={(e) => setNeuroExpansionPrMaterialize(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Materialize Branch+Commit
+          </label>
+          <label style={chip}>
+            <input
+              type="checkbox"
+              checked={neuroExpansionPrPush}
+              onChange={(e) => setNeuroExpansionPrPush(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Auto Push
+          </label>
+        </div>
+      </div>
+      <input
+        value={neuroExpansionReviewReason}
+        onChange={(e) => setNeuroExpansionReviewReason(e.target.value)}
+        placeholder="Review reason (optional)"
+        style={input}
+      />
+      <div style={{ marginTop: 8, display: "grid", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+        {(neuroExpansion?.submissions || []).slice(0, 30).map((s) => (
+          <div key={s.id} style={{ ...log, whiteSpace: "pre-wrap" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <strong>{s.title}</strong>
+              <span>
+                {s.status} • severity: {s.scan?.severity}
+              </span>
+            </div>
+            <div style={muted}>
+              by {s.metadata?.uploadedBy || "unknown"} ({s.metadata?.uploadedByRole || "unknown"}) •{" "}
+              {s.metadata?.uploadedAt ? new Date(s.metadata.uploadedAt).toLocaleString() : "-"}
+            </div>
+            <div style={{ marginTop: 4 }}>{s.featureText}</div>
+            {Array.isArray(s.scan?.signals) && s.scan.signals.length > 0 && (
+              <div style={{ ...muted, marginTop: 4 }}>signals: {s.scan.signals.join(", ")}</div>
+            )}
+            <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(dashboardRole === "founder" || dashboardRole === "admin") && s.status === "pending_approval" && (
+                <>
+                  <button style={primary} onClick={() => reviewNeuroExpansionNow(s.id, "approve")}>Approve</button>
+                  <button style={chip} onClick={() => reviewNeuroExpansionNow(s.id, "reject")}>Reject</button>
+                </>
+              )}
+              {(dashboardRole === "founder" || dashboardRole === "admin") && s.status === "approved" && (
+                <>
+                  <button style={primary} onClick={() => mergeNeuroExpansionNow(s.id)}>Merge</button>
+                  <button style={chip} onClick={() => previewNeuroExpansionPatchNow(s.id)}>Diff Preview</button>
+                  <button style={chip} onClick={() => applyNeuroExpansionPatchNow(s.id)}>Apply Patch</button>
+                  <button style={chip} onClick={() => generateNeuroExpansionPrNow(s.id)}>Generate PR Draft</button>
+                </>
+              )}
+              {(dashboardRole === "developer" || dashboardRole === "admin" || dashboardRole === "founder") &&
+                s.status !== "blocked" &&
+                s.status !== "approved" && (
+                  <button style={chip} onClick={() => previewNeuroExpansionPatchNow(s.id)}>Diff Preview</button>
+                )}
+              {s.merge?.targetPath && <span style={muted}>merged artifact: {s.merge.targetPath}</span>}
+            </div>
+          </div>
+        ))}
+        {(!neuroExpansion?.submissions || neuroExpansion.submissions.length === 0) && (
+          <div style={muted}>No submissions yet.</div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Auto Proposals (Daily Gap Planner)</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+        {(neuroExpansion?.autoProposals || []).slice(0, 12).map((p) => (
+          <div key={p.id} style={log}>
+            {p.id} • placeholders: {p.placeholdersDetected} • {p.status}
+          </div>
+        ))}
+        {(!neuroExpansion?.autoProposals || neuroExpansion.autoProposals.length === 0) && (
+          <div style={muted}>No auto proposals yet.</div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Founder/Admin Fanout Notifications</div>
+      <div style={{ display: "grid", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+        {neuroExpansionNotifications.slice(0, 20).map((n) => (
+          <div key={n.id} style={log}>
+            {new Date(Number(n.createdAt || Date.now())).toLocaleString()} • {n.title}: {n.message}
+          </div>
+        ))}
+        {neuroExpansionNotifications.length === 0 && (
+          <div style={muted}>No fanout notifications yet.</div>
+        )}
+      </div>
+
+      <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 180, overflow: "auto", marginTop: 8 }}>
+        {neuroExpansionPlaceholderReport
+          ? JSON.stringify(neuroExpansionPlaceholderReport, null, 2)
+          : "No placeholder scan report yet."}
+      </pre>
+    </Card>
+  );
+
+  const ownerComputeCard = (
+    <Card title="My Compute Devices & Earnings">
+      <div style={muted}>
+        NeuroEdge uses your device in background-safe mode with resource guardrails to avoid freeze, overheating, or shutdown risk.
+      </div>
+      <div style={{ ...log, marginTop: 8 }}>
+        Guardrails: CPU {Number(ownerGuardrails.maxCpuPct || 0)}% • RAM {Number(ownerGuardrails.maxRamPct || 0)}% •
+        Temp pause {Number(ownerGuardrails.pauseOnHighTempC || 0)}C • Battery pause{" "}
+        {ownerGuardrails.pauseOnBattery ? "on" : "off"}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshOwnerCompute}>Refresh</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+        <Stat label="My Devices" value={String(ownerComputeDevices.length)} />
+        <Stat label="Wallet Points" value={String(Number(ownerWallet?.points || 0).toLocaleString())} />
+        <Stat label="Pending Cash" value={`$${Number(ownerWallet?.pendingCashUsd || 0).toFixed(2)}`} />
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Add / Activate Device</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(140px, 1fr))", gap: 8 }}>
+        <input value={computeDeviceDraft.id} onChange={(e) => setComputeDeviceDraft((p) => ({ ...p, id: e.target.value }))} placeholder="Device ID (optional)" style={input} />
+        <input value={computeDeviceDraft.hostname} onChange={(e) => setComputeDeviceDraft((p) => ({ ...p, hostname: e.target.value }))} placeholder="Hostname" style={input} />
+        <input value={computeDeviceDraft.os} onChange={(e) => setComputeDeviceDraft((p) => ({ ...p, os: e.target.value }))} placeholder="OS" style={input} />
+      </div>
+      <button style={primary} onClick={upsertOwnerComputeDevice}>Add / Update Device</button>
+
+      <div style={{ marginTop: 10, maxHeight: 240, overflowY: "auto", display: "grid", gap: 8 }}>
+        {ownerComputeDevices.length === 0 && <div style={muted}>No compute devices registered yet.</div>}
+        {ownerComputeDevices.map((d) => (
+          <div key={d.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{d.hostname} ({d.id})</strong>
+              <span>{d.status}</span>
+            </div>
+            {["paused", "throttled"].includes(String(d.status || "").toLowerCase()) && (
+              <div
+                style={{
+                  marginTop: 6,
+                  marginBottom: 6,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(245, 158, 11, 0.45)",
+                  background:
+                    String(d.pauseReason || "").includes("high_temp")
+                      ? "rgba(239, 68, 68, 0.16)"
+                      : "rgba(245, 158, 11, 0.16)",
+                  color: "var(--text)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {String(d.pauseReason || "").includes("high_temp")
+                  ? "Thermal Alert: Device auto-paused due to high temperature."
+                  : String(d.pauseReason || "").includes("battery")
+                    ? "Power Alert: Device auto-paused while on battery."
+                    : "Resource Alert: Device auto-throttled due to CPU/RAM guardrails."}
+              </div>
+            )}
+            <div>CPU: {Number(d?.stats?.cpuPct || 0)}% • RAM: {Number(d?.stats?.ramPct || 0)}% • Temp: {Number(d?.stats?.tempC || 0)}C</div>
+            <div>Tasks: {Number(d?.stats?.tasksCompleted || 0)} • Hours: {Number(d?.stats?.computeHours || 0)} • Earned: ${Number(d?.stats?.earningsUsd || 0).toFixed(2)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(80px, 1fr))", gap: 6, marginTop: 6 }}>
+              <input
+                value={telemetryDraftFor(d).cpuPct}
+                onChange={(e) => updateTelemetryDraft(d.id, { cpuPct: e.target.value })}
+                placeholder="CPU %"
+                style={input}
+              />
+              <input
+                value={telemetryDraftFor(d).ramPct}
+                onChange={(e) => updateTelemetryDraft(d.id, { ramPct: e.target.value })}
+                placeholder="RAM %"
+                style={input}
+              />
+              <input
+                value={telemetryDraftFor(d).tempC}
+                onChange={(e) => updateTelemetryDraft(d.id, { tempC: e.target.value })}
+                placeholder="Temp C"
+                style={input}
+              />
+              <label style={{ ...muted, display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={telemetryDraftFor(d).onBattery}
+                  onChange={(e) => updateTelemetryDraft(d.id, { onBattery: e.target.checked })}
+                />
+                On battery
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+              <button style={primary} onClick={() => submitDeviceTelemetry(d)}>Update Telemetry</button>
+              <button style={chip} onClick={() => ownerDeviceAction(d.id, "pause")}>Pause</button>
+              <button style={chip} onClick={() => ownerDeviceAction(d.id, "resume")}>Resume</button>
+              <button style={chip} onClick={() => ownerDeviceAction(d.id, "suspend")}>Suspend</button>
+              <button style={chip} onClick={() => ownerDeviceAction(d.id, "delete")}>Delete</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const ownerPayoutCard = (
+    <Card title="My Payout Details & Requests (Verified)">
+      <div style={muted}>Editing payout details requires verification to prevent theft.</div>
+      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={ownerPaymentDraft.paymentMethod} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, paymentMethod: e.target.value }))} style={input}>
+          <option value="bank">bank</option>
+          <option value="card">card</option>
+          <option value="wdc_wallet">wdc_wallet</option>
+        </select>
+        <input value={ownerPaymentDraft.bankName} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, bankName: e.target.value }))} placeholder="Bank Name" style={input} />
+        <input value={ownerPaymentDraft.accountName} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, accountName: e.target.value }))} placeholder="Account Name" style={input} />
+        <input value={ownerPaymentDraft.accountNumberMasked} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, accountNumberMasked: e.target.value }))} placeholder="Account Number (masked)" style={input} />
+        <input value={ownerPaymentDraft.swiftCode} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, swiftCode: e.target.value }))} placeholder="SWIFT/BIC" style={input} />
+        <input value={ownerPaymentDraft.cardHolder} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, cardHolder: e.target.value }))} placeholder="Card Holder" style={input} />
+        <input value={ownerPaymentDraft.cardLast4} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, cardLast4: e.target.value }))} placeholder="Card last 4" style={input} />
+        <input value={ownerPaymentDraft.billingCountry} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, billingCountry: e.target.value }))} placeholder="Billing Country" style={input} />
+        <input value={ownerPaymentDraft.wdcWalletAddress} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, wdcWalletAddress: e.target.value }))} placeholder="WDC Wallet Address" style={input} />
+        <input value={ownerPaymentDraft.neuroChainAddress} onChange={(e) => setOwnerPaymentDraft((p) => ({ ...p, neuroChainAddress: e.target.value }))} placeholder="NeuroChain Address" style={input} />
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <select value={otpChannel} onChange={(e) => setOtpChannel(e.target.value as "email" | "sms")} style={input}>
+          <option value="email">email</option>
+          <option value="sms">sms</option>
+        </select>
+        <input
+          value={otpDestination}
+          onChange={(e) => setOtpDestination(e.target.value)}
+          placeholder={otpChannel === "sms" ? "Phone (e.g +254...)" : "Email destination"}
+          style={input}
+        />
+        <button style={chip} onClick={requestPaymentVerify}>Request Verification Code</button>
+        <input value={paymentVerifyChallengeId} onChange={(e) => setPaymentVerifyChallengeId(e.target.value)} placeholder="Challenge ID" style={input} />
+        <input value={paymentVerifyCode} onChange={(e) => setPaymentVerifyCode(e.target.value)} placeholder="Verification Code" style={input} />
+        <button style={primary} onClick={saveOwnerPaymentVerified}>Verify & Save Details</button>
+      </div>
+      <div style={{ ...muted, marginTop: 6 }}>
+        Verified profile: {ownerPayoutProfile?.verifiedAt ? new Date(ownerPayoutProfile.verifiedAt).toLocaleString() : "not verified yet"}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Request Payout</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={payoutReqTarget} onChange={(e) => setPayoutReqTarget(e.target.value as any)} style={input}>
+          <option value="cash">cash</option>
+          <option value="wdc">wdc</option>
+          <option value="points">points</option>
+        </select>
+        <input value={payoutReqUsd} onChange={(e) => setPayoutReqUsd(e.target.value)} placeholder="Amount USD" style={input} />
+        <input value={payoutReqWdc} onChange={(e) => setPayoutReqWdc(e.target.value)} placeholder="Amount WDC" style={input} />
+        <input value={payoutReqPoints} onChange={(e) => setPayoutReqPoints(e.target.value)} placeholder="Points" style={input} />
+        <button style={primary} onClick={requestOwnerPayout}>Submit Payout Request</button>
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 180, overflowY: "auto", display: "grid", gap: 6 }}>
+        {ownerPayoutRequests.length === 0 && <div style={muted}>No payout requests yet.</div>}
+        {ownerPayoutRequests.map((r) => (
+          <div key={r.id} style={log}>
+            {r.id} • {r.status} • ${Number(r.amountUsd || 0).toFixed(2)} • {Number(r.amountWdc || 0).toFixed(6)} WDC • {Number(r.points || 0)} pts
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const computePayoutAdminCard = (
+    <Card title="Compute Payout Budget & Approvals">
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={chip} onClick={refreshComputePayoutsAdmin}>Refresh</button>
+        <button style={primary} onClick={saveComputeBudget}>Save Budget</button>
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Auto Payout Scheduler</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 6 }}>
+        <label style={{ ...muted, display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(computeAutoPayoutConfig.enabled)}
+            onChange={(e) => setComputeAutoPayoutConfig((p) => ({ ...p, enabled: e.target.checked }))}
+          />
+          Enabled
+        </label>
+        <select
+          value={computeAutoPayoutConfig.period}
+          onChange={(e) =>
+            setComputeAutoPayoutConfig((p) => ({
+              ...p,
+              period: e.target.value as ComputeAutoPayoutConfig["period"],
+            }))
+          }
+          style={input}
+        >
+          <option value="hourly">hourly</option>
+          <option value="daily">daily</option>
+          <option value="weekly">weekly</option>
+          <option value="monthly">monthly</option>
+        </select>
+        <input
+          value={String(computeAutoPayoutConfig.maxPayoutsPerRun || 200)}
+          onChange={(e) =>
+            setComputeAutoPayoutConfig((p) => ({ ...p, maxPayoutsPerRun: Number(e.target.value) || 1 }))
+          }
+          placeholder="Max payouts / run"
+          style={input}
+        />
+        <button style={primary} onClick={saveComputePayoutScheduler}>Save Scheduler</button>
+      </div>
+      <div style={muted}>
+        Last run:{" "}
+        {computeAutoPayoutConfig.lastRunAt
+          ? `${new Date(Number(computeAutoPayoutConfig.lastRunAt)).toLocaleString()} (${String(
+              computeAutoPayoutConfig.lastRunBucket || "-"
+            )})`
+          : "not yet"}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+        <input value={computePayoutBudget.period} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, period: e.target.value }))} placeholder="Period YYYY-MM" style={input} />
+        <input value={String(computePayoutBudget.totalRevenueUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, totalRevenueUsd: Number(e.target.value) || 0 }))} placeholder="Total Revenue USD" style={input} />
+        <input value={String(computePayoutBudget.allocatedUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, allocatedUsd: Number(e.target.value) || 0 }))} placeholder="Allocated USD" style={input} />
+        <input value={String(computePayoutBudget.reserveUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, reserveUsd: Number(e.target.value) || 0 }))} placeholder="Reserve USD" style={input} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(130px, 1fr))", gap: 8, marginTop: 8 }}>
+        <Stat label="Pending" value={`$${Number(computePayoutBudget.pendingUsd || 0).toFixed(2)}`} />
+        <Stat label="Approved" value={`$${Number(computePayoutBudget.approvedUsd || 0).toFixed(2)}`} />
+        <Stat label="Sent" value={`$${Number(computePayoutBudget.sentUsd || 0).toFixed(2)}`} />
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "grid", gap: 6 }}>
+        {computePayoutRequestsAdmin.length === 0 && <div style={muted}>No payout requests.</div>}
+        {computePayoutRequestsAdmin.map((r) => (
+          <div key={r.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{r.userName} ({r.userId})</strong>
+              <span>{r.status}</span>
+            </div>
+            <div>{r.id} • target {r.target} • ${Number(r.amountUsd || 0).toFixed(2)} • {Number(r.amountWdc || 0).toFixed(6)} WDC • {Number(r.points || 0)} pts</div>
+            {String(r.status) === "pending_approval" && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button style={primary} onClick={() => approveComputePayout(r.id, "scheduled")}>Approve (Scheduler)</button>
+                <button style={chip} onClick={() => approveComputePayout(r.id, "instant")}>Approve Instant</button>
+                <button style={chip} onClick={() => rejectComputePayout(r.id)}>Reject</button>
+              </div>
+            )}
+            {r.txRef ? <div style={muted}>TX: {r.txRef}</div> : null}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const loanOpsShieldCard = (
+    <Card title="LoanOps Shield Center (Founder/Admin/Enterprise)">
+      <div style={muted}>
+        Consent-based device-loan security: registration, intake import, overdue restriction mode, paid-off unlock, API key integrations, and audited actions.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshLoanOps}>Refresh</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+        <Stat label="Companies" value={String(loanOpsCompanies.length)} />
+        <Stat label="Loan Devices" value={String(loanOpsDevices.length)} />
+        <Stat label="API Keys" value={String(loanOpsApiKeys.length)} />
+        <Stat label="Intake Logs" value={String(loanOpsIntakeLogs.length)} />
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Company Registry</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 1fr))", gap: 8 }}>
+        <input value={loanCompanyDraft.id} onChange={(e) => setLoanCompanyDraft((p) => ({ ...p, id: e.target.value }))} placeholder="Company ID (optional)" style={input} />
+        <input value={loanCompanyDraft.name} onChange={(e) => setLoanCompanyDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Company Name" style={input} />
+        <input value={loanCompanyDraft.contactEmail} onChange={(e) => setLoanCompanyDraft((p) => ({ ...p, contactEmail: e.target.value }))} placeholder="Contact Email" style={input} />
+        <input value={loanCompanyDraft.contactPhone} onChange={(e) => setLoanCompanyDraft((p) => ({ ...p, contactPhone: e.target.value }))} placeholder="Contact Phone" style={input} />
+        <input value={loanCompanyDraft.legalPolicyRef} onChange={(e) => setLoanCompanyDraft((p) => ({ ...p, legalPolicyRef: e.target.value }))} placeholder="Legal Policy Ref URL" style={input} />
+      </div>
+      <button style={primary} onClick={upsertLoanCompany}>Save Company</button>
+      <div style={{ marginTop: 8, fontWeight: 700 }}>Policy (Attestation + Re-lock)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 1fr))", gap: 8 }}>
+        <button style={chip} onClick={() => setLoanOpsPolicy((p) => ({ ...p, consentRequired: !p.consentRequired }))}>
+          Consent required: {loanOpsPolicy.consentRequired ? "on" : "off"}
+        </button>
+        <button
+          style={chip}
+          onClick={() =>
+            setLoanOpsPolicy((p) => ({ ...p, attestationRequiredDefault: !p.attestationRequiredDefault }))
+          }
+        >
+          Attestation default: {loanOpsPolicy.attestationRequiredDefault ? "on" : "off"}
+        </button>
+        <button
+          style={chip}
+          onClick={() => setLoanOpsPolicy((p) => ({ ...p, autoRelockOnLoanDefault: !p.autoRelockOnLoanDefault }))}
+        >
+          Auto re-lock on loan: {loanOpsPolicy.autoRelockOnLoanDefault ? "on" : "off"}
+        </button>
+        <input
+          value={loanOpsPolicy.allowedAttestationProvidersCsv}
+          onChange={(e) => setLoanOpsPolicy((p) => ({ ...p, allowedAttestationProvidersCsv: e.target.value }))}
+          placeholder="Attestation providers csv"
+          style={{ ...input, gridColumn: "span 3" }}
+        />
+      </div>
+      <button style={chip} onClick={saveLoanOpsPolicy}>Save LoanOps Policy</button>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Device Intake / Import</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 1fr))", gap: 8 }}>
+        <input value={loanDeviceDraft.companyId} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, companyId: e.target.value }))} placeholder="Company ID" style={input} />
+        <input value={loanDeviceDraft.id} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, id: e.target.value }))} placeholder="Device ID (optional)" style={input} />
+        <input value={loanDeviceDraft.model} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, model: e.target.value }))} placeholder="Model" style={input} />
+        <input value={loanDeviceDraft.serial} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, serial: e.target.value }))} placeholder="Serial" style={input} />
+        <input value={loanDeviceDraft.imei} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, imei: e.target.value }))} placeholder="IMEI" style={input} />
+        <input value={loanDeviceDraft.ownerRef} onChange={(e) => setLoanDeviceDraft((p) => ({ ...p, ownerRef: e.target.value }))} placeholder="Owner Reference" style={input} />
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={primary} onClick={upsertLoanDevice}>Save Loan Device</button>
+      </div>
+      <textarea
+        value={loanImportText}
+        onChange={(e) => setLoanImportText(e.target.value)}
+        placeholder="Paste device lines from OCR/PDF/Image text extraction. Format: externalId,model,serial,imei,ownerRef"
+        style={{ ...input, minHeight: 80, marginTop: 8 }}
+      />
+      <button style={chip} onClick={importLoanDevicesFromText}>Import Device Lines</button>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>API Keys + Integrations</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={loanApiKeyCompanyId} onChange={(e) => setLoanApiKeyCompanyId(e.target.value)} placeholder="Company ID" style={input} />
+        <input value={loanApiKeyName} onChange={(e) => setLoanApiKeyName(e.target.value)} placeholder="Key name" style={input} />
+        <button style={primary} onClick={createLoanApiKey}>Generate LoanOps API Key</button>
+        <button style={chip} onClick={saveLoanIntegration}>Save Plug-in Integration</button>
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Compliance / Re-enroll / Lock Controls</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={loanSelectedDeviceId}
+          onChange={(e) => setLoanSelectedDeviceId(e.target.value)}
+          placeholder="Selected Device ID"
+          style={input}
+        />
+        <select value={loanAttestationProvider} onChange={(e) => setLoanAttestationProvider(e.target.value)} style={input}>
+          <option value="android_play_integrity">android_play_integrity</option>
+          <option value="ios_devicecheck">ios_devicecheck</option>
+          <option value="desktop_tpm">desktop_tpm</option>
+        </select>
+        <select value={loanAttestationStatus} onChange={(e) => setLoanAttestationStatus(e.target.value as "passed" | "failed")} style={input}>
+          <option value="passed">passed</option>
+          <option value="failed">failed</option>
+        </select>
+        <button style={chip} onClick={reportLoanAttestation}>Record Attestation</button>
+        <button style={chip} onClick={() => setLoanBootIntegrityOk((v) => !v)}>
+          Boot integrity: {loanBootIntegrityOk ? "ok" : "failed"}
+        </button>
+        <button style={chip} onClick={runLoanBootCheck}>Run Boot Check</button>
+        <button style={chip} onClick={() => triggerLoanLock(true)}>Trigger Lock</button>
+        <button style={chip} onClick={() => triggerLoanLock(false)}>Trigger Unlock</button>
+        <button style={chip} onClick={markLoanReenrolled}>Mark Re-enrolled</button>
+      </div>
+
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "grid", gap: 6 }}>
+        {loanOpsDevices.slice(0, 80).map((d) => (
+          <div key={d.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{d.model} ({d.id})</strong>
+              <span>{d.loanStatus} • {d.securityState || "protected"}</span>
+            </div>
+            <div>Company: {d.companyId} • IMEI: {d.imei || "-"} • Serial: {d.serial || "-"}</div>
+            <div>
+              Compliance: {d.complianceState || "trusted"} • Attestation: {d.attestationStatus || "unknown"}{" "}
+              {d.attestationProvider ? `(${d.attestationProvider})` : ""} • Lock: {d.lockState || "unlocked"}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+              <button style={chip} onClick={() => setLoanSelectedDeviceId(d.id)}>Select Device</button>
+              <button style={chip} onClick={() => updateLoanStatus(d.id, "overdue", 15)}>Mark Overdue</button>
+              <button style={chip} onClick={() => updateLoanStatus(d.id, "grace", 0)}>Set Grace</button>
+              <button style={chip} onClick={() => updateLoanStatus(d.id, "paid_off", 0)}>Mark Paid Off (Unlock)</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Dispute + Legal Consent Workflow</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={loanDisputeReason}
+          onChange={(e) => setLoanDisputeReason(e.target.value)}
+          placeholder="Dispute reason"
+          style={input}
+        />
+        <input
+          value={loanDisputeEvidenceRef}
+          onChange={(e) => setLoanDisputeEvidenceRef(e.target.value)}
+          placeholder="Evidence ref URL"
+          style={input}
+        />
+        <button style={chip} onClick={openLoanDispute}>Open Dispute</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        <input
+          value={loanConsentSubjectRef}
+          onChange={(e) => setLoanConsentSubjectRef(e.target.value)}
+          placeholder="Consent subject ref (customer id/email)"
+          style={input}
+        />
+        <input
+          value={loanConsentType}
+          onChange={(e) => setLoanConsentType(e.target.value)}
+          placeholder="Consent type"
+          style={input}
+        />
+        <button style={chip} onClick={recordLoanLegalConsent}>Record Legal Consent</button>
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 140, overflowY: "auto", display: "grid", gap: 6 }}>
+        {loanOpsDisputes.slice(0, 20).map((d) => (
+          <div key={d.id} style={row}>
+            <span>{d.id} • {d.deviceId} • {d.status} • {d.reason || "-"}</span>
+            {d.status !== "resolved" ? (
+              <button style={chip} onClick={() => resolveLoanDispute(d.id)}>Resolve</button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 160, overflowY: "auto", display: "grid", gap: 6 }}>
+        {loanOpsApiKeys.map((k) => (
+          <div key={k.id} style={row}>
+            <span>{k.name} • {k.companyId} • {k.keyMasked} • {k.status}</span>
+            <button style={chip} onClick={() => revokeLoanApiKey(k.id)}>Revoke</button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const userProtectionCard = (
+    <Card title="My Device Protection Plan">
+      <div style={muted}>
+        Protection is consent-based and OS-compliant. Flash/uninstall resistance depends on device OEM/MDM capabilities; NeuroEdge does not bypass OS security controls.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshUserProtection}>Refresh</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+        <Stat label="Plan" value={String(userProtectionProfile?.planTier || "free")} />
+        <Stat label="Protected Devices" value={String(userProtectionProfile?.devices?.length || 0)} />
+        <Stat label="Max Devices" value={String(userProtectionProfile?.maxDevices || (userProtectionPolicy?.freeMaxDevices || 1))} />
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button
+          style={chip}
+          onClick={() =>
+            setUserProtectionProfile((p) => (p ? { ...p, antiTheftConsent: !p.antiTheftConsent } : p))
+          }
+        >
+          Anti-theft consent: {userProtectionProfile?.antiTheftConsent ? "on" : "off"}
+        </button>
+        <button
+          style={chip}
+          onClick={() =>
+            setUserProtectionProfile((p) => (p ? { ...p, locationConsent: !p.locationConsent } : p))
+          }
+        >
+          Location consent: {userProtectionProfile?.locationConsent ? "on" : "off"}
+        </button>
+        <button
+          style={chip}
+          onClick={() =>
+            setUserProtectionProfile((p) => (p ? { ...p, cameraEvidenceConsent: !p.cameraEvidenceConsent } : p))
+          }
+        >
+          Camera evidence consent: {userProtectionProfile?.cameraEvidenceConsent ? "on" : "off"}
+        </button>
+        <button style={primary} onClick={saveUserProtectionSettings}>Save Consent</button>
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Protected Devices</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(140px, 1fr))", gap: 8 }}>
+        <input value={userProtectDeviceDraft.id} onChange={(e) => setUserProtectDeviceDraft((p) => ({ ...p, id: e.target.value }))} placeholder="Device ID (optional)" style={input} />
+        <input value={userProtectDeviceDraft.label} onChange={(e) => setUserProtectDeviceDraft((p) => ({ ...p, label: e.target.value }))} placeholder="Device label" style={input} />
+        <select value={userProtectDeviceDraft.platform} onChange={(e) => setUserProtectDeviceDraft((p) => ({ ...p, platform: e.target.value }))} style={input}>
+          <option value="android">android</option>
+          <option value="ios">ios</option>
+          <option value="windows">windows</option>
+          <option value="macos">macos</option>
+          <option value="linux">linux</option>
+        </select>
+      </div>
+      <button style={primary} onClick={upsertProtectedDevice}>Save Protected Device</button>
+      <div style={{ marginTop: 8, maxHeight: 160, overflowY: "auto", display: "grid", gap: 6 }}>
+        {(userProtectionProfile?.devices || []).map((d) => (
+          <div key={d.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>{d.label} ({d.id})</strong>
+              <span>{d.status}</span>
+            </div>
+            <div>Platform: {d.platform}</div>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button style={chip} onClick={() => applyUserDeviceAction(d.id, "pause")}>Pause</button>
+              <button style={chip} onClick={() => applyUserDeviceAction(d.id, "resume")}>Resume</button>
+              <button style={chip} onClick={() => applyUserDeviceAction(d.id, "remove")}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Trusted Contact Recovery</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={trustedContactDraft.name} onChange={(e) => setTrustedContactDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Contact name" style={input} />
+        <input value={trustedContactDraft.endpoint} onChange={(e) => setTrustedContactDraft((p) => ({ ...p, endpoint: e.target.value }))} placeholder="Email or phone" style={input} />
+        <select value={trustedContactDraft.channel} onChange={(e) => setTrustedContactDraft((p) => ({ ...p, channel: e.target.value }))} style={input}>
+          <option value="email">email</option>
+          <option value="sms">sms</option>
+        </select>
+        <button style={primary} onClick={saveTrustedContact}>Save Contact</button>
+      </div>
+      <div style={{ marginTop: 8, maxHeight: 130, overflowY: "auto", display: "grid", gap: 6 }}>
+        {(userProtectionProfile?.trustedContacts || []).map((c) => (
+          <div key={c.id} style={log}>
+            {c.name} • {c.channel} • {c.endpoint} • {c.verified ? "verified" : "unverified"}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Incident Report (Tamper/Theft)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(140px, 1fr))", gap: 8 }}>
+        <input value={incidentDraft.deviceId} onChange={(e) => setIncidentDraft((p) => ({ ...p, deviceId: e.target.value }))} placeholder="Device ID" style={input} />
+        <input value={incidentDraft.cameraEvidenceRef} onChange={(e) => setIncidentDraft((p) => ({ ...p, cameraEvidenceRef: e.target.value }))} placeholder="Camera evidence ref URI" style={input} />
+        <input value={incidentDraft.note} onChange={(e) => setIncidentDraft((p) => ({ ...p, note: e.target.value }))} placeholder="Incident note" style={input} />
+        <input value={incidentDraft.lat} onChange={(e) => setIncidentDraft((p) => ({ ...p, lat: e.target.value }))} placeholder="Latitude (optional)" style={input} />
+        <input value={incidentDraft.lng} onChange={(e) => setIncidentDraft((p) => ({ ...p, lng: e.target.value }))} placeholder="Longitude (optional)" style={input} />
+      </div>
+      <button style={chip} onClick={reportProtectionIncident}>Report Incident</button>
+      <div style={{ marginTop: 8, maxHeight: 140, overflowY: "auto", display: "grid", gap: 6 }}>
+        {userProtectionIncidents.slice(0, 20).map((i) => (
+          <div key={i.id} style={log}>
+            {i.eventType} • device {i.deviceId} • {new Date(Number(i.createdAt || Date.now())).toLocaleString()}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+
+  const voiceOpsCopilotCard = (
+    <Card title="NeuroEdge Voice Ops Copilot">
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          value={opsVoiceQuery}
+          onChange={(e) => setOpsVoiceQuery(e.target.value)}
+          placeholder="Ask: which node is down, what was updated, what is trending, create coding plan..."
+          style={{ ...input, flex: 1, minWidth: 280 }}
+        />
+        <button style={primary} onClick={() => askOpsAssistant()}>
+          Ask
+        </button>
+        <button style={chip} onClick={opsVoiceListening ? stopOpsListening : startOpsListening} disabled={!opsVoiceSupported}>
+          {opsVoiceListening ? "Stop Mic" : "Start Mic"}
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={opsVoiceAutoSpeak}
+            onChange={(e) => setOpsVoiceAutoSpeak(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Auto Speak
+        </label>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={opsVoiceLiveInterrupt}
+            onChange={(e) => setOpsVoiceLiveInterrupt(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Live Interrupt
+        </label>
+        <label style={chip}>
+          <input
+            type="checkbox"
+            checked={opsVoicePushToTalk}
+            onChange={(e) => setOpsVoicePushToTalk(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          Push-to-Talk
+        </label>
+        <input
+          value={opsVoiceHotkey}
+          onChange={(e) => setOpsVoiceHotkey(e.target.value)}
+          placeholder="Hotkey e.g. Alt+V"
+          style={{ ...input, maxWidth: 150 }}
+        />
+        <select value={opsVoiceLanguage} onChange={(e) => setOpsVoiceLanguage(e.target.value)} style={{ ...input, maxWidth: 160 }}>
+          <option value="en-US">en-US</option>
+          <option value="en-GB">en-GB</option>
+          <option value="sw-KE">sw-KE</option>
+          <option value="fr-FR">fr-FR</option>
+          <option value="es-ES">es-ES</option>
+          <option value="de-DE">de-DE</option>
+        </select>
+        <span style={muted}>Role-aware: founder/admin/dev/enterprise/user • mic support: {opsVoiceSupported ? "yes" : "no"}</span>
+      </div>
+      {opsVoiceStreamText ? (
+        <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto", marginTop: 8 }}>
+          {opsVoiceStreamText}
+        </pre>
+      ) : null}
+      <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto", marginTop: 8 }}>
+        {opsVoiceOutput ? JSON.stringify(opsVoiceOutput, null, 2) : "No response yet. Try: 'Which node is down?' or 'What are users trending on?'."}
+      </pre>
+    </Card>
+  );
+
   const founderView = (
     <div style={grid}>
+      {voiceOpsCopilotCard}
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
@@ -3857,6 +7697,11 @@ const Dashboard: React.FC = () => {
       {aegisShieldCard}
       {creatorEngineCard}
       {cortexCoreCard}
+      {artifactWorkspaceCard}
+      {neuroExpansionBuilderCard}
+      {computePayoutAdminCard}
+      {loanOpsShieldCard}
+      {reliabilityOpsCard}
       <Card title="Platform Analytics">
         <Stat label="Users" value={String(users.length)} />
         <Stat label="Requests" value={String(reqTotal)} />
@@ -3921,6 +7766,24 @@ const Dashboard: React.FC = () => {
           value={cryptoRewards.founderWalletAddress}
           onChange={(e) => setCryptoRewards((p) => ({ ...p, founderWalletAddress: e.target.value }))}
           placeholder="Founder wallet address"
+          style={input}
+        />
+        <input
+          value={cryptoRewards.neuroChainRpcUrl || ""}
+          onChange={(e) => setCryptoRewards((p) => ({ ...p, neuroChainRpcUrl: e.target.value }))}
+          placeholder="NeuroChain RPC URL"
+          style={input}
+        />
+        <input
+          value={cryptoRewards.wdcContractAddress || ""}
+          onChange={(e) => setCryptoRewards((p) => ({ ...p, wdcContractAddress: e.target.value }))}
+          placeholder="WDC Contract Address"
+          style={input}
+        />
+        <input
+          value={cryptoRewards.wdcWalletAppUrl || ""}
+          onChange={(e) => setCryptoRewards((p) => ({ ...p, wdcWalletAppUrl: e.target.value }))}
+          placeholder="WDC Wallet App URL"
           style={input}
         />
         <div style={{ display: "flex", gap: 8 }}>
@@ -4107,6 +7970,18 @@ const Dashboard: React.FC = () => {
         )}
       </Card>
       <Card title="Integrations & API Platform (Founder Premium)">
+        <div style={{ ...muted, marginBottom: 8 }}>
+          Connector/MCP-ready integration hub for external apps and enterprise workflows.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          <button style={chip} onClick={() => createConnectorPreset("github")}>+ GitHub Connector</button>
+          <button style={chip} onClick={() => createConnectorPreset("google_drive")}>+ Google Drive Connector</button>
+          <button style={chip} onClick={() => createConnectorPreset("slack")}>+ Slack Connector</button>
+          <button style={chip} onClick={() => createConnectorPreset("notion")}>+ Notion Connector</button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, connectorsEnabled: !p.connectorsEnabled }))}>
+            MCP/Connectors: {marketReadinessConfig.connectorsEnabled ? "enabled" : "disabled"}
+          </button>
+        </div>
         <div style={{ display: "grid", gap: 8 }}>
           <input
             value={integrationDraft.appName}
@@ -4323,6 +8198,74 @@ const Dashboard: React.FC = () => {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={primary} onClick={saveBenchmarkBaselinesFromDashboard}>Save Baselines</button>
           <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/baselines")}>Load Baselines</button>
+        </div>
+      </Card>
+      <Card title="Market Readiness Control Center (Founder/Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={saveMarketReadiness}>Save Controls</button>
+          <button style={chip} onClick={refreshMarketReadiness}>Refresh</button>
+          <button style={chip} onClick={() => runBackendAction("GET:/admin/market-readiness/summary")}>Open Summary JSON</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, verifiedAnswerMode: !p.verifiedAnswerMode }))}>
+            Verified Answer Mode: {marketReadinessConfig.verifiedAnswerMode ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, trustUxByDefault: !p.trustUxByDefault }))}>
+            Trust UX by Default: {marketReadinessConfig.trustUxByDefault ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, hitlRiskyActions: !p.hitlRiskyActions }))}>
+            HITL Risky Actions: {marketReadinessConfig.hitlRiskyActions ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, deepResearchEnabled: !p.deepResearchEnabled }))}>
+            Deep Research: {marketReadinessConfig.deepResearchEnabled ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, connectorsEnabled: !p.connectorsEnabled }))}>
+            Connectors: {marketReadinessConfig.connectorsEnabled ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, artifactsWorkspaceEnabled: !p.artifactsWorkspaceEnabled }))}>
+            Artifacts Workspace: {marketReadinessConfig.artifactsWorkspaceEnabled ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, reliabilityGuardrails: !p.reliabilityGuardrails }))}>
+            Reliability Guardrails: {marketReadinessConfig.reliabilityGuardrails ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, benchmarkReleaseGates: !p.benchmarkReleaseGates }))}>
+            Benchmark Release Gates: {marketReadinessConfig.benchmarkReleaseGates ? "on" : "off"}
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <select
+            value={marketReadinessConfig.hybridRoutingMode}
+            onChange={(e) =>
+              setMarketReadinessConfig((p) => ({
+                ...p,
+                hybridRoutingMode: e.target.value as MarketReadinessConfig["hybridRoutingMode"],
+              }))
+            }
+            style={input}
+          >
+            <option value="balanced">hybrid routing: balanced</option>
+            <option value="mesh_first">hybrid routing: mesh_first</option>
+            <option value="local_first">hybrid routing: local_first</option>
+          </select>
+          <select
+            value={marketReadinessConfig.domainPackStrictness}
+            onChange={(e) =>
+              setMarketReadinessConfig((p) => ({
+                ...p,
+                domainPackStrictness: e.target.value as MarketReadinessConfig["domainPackStrictness"],
+              }))
+            }
+            style={input}
+          >
+            <option value="strict">domain packs: strict</option>
+            <option value="standard">domain packs: standard</option>
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Readiness Score" value={marketReadinessSummary?.readinessScore !== undefined ? `${Number(marketReadinessSummary.readinessScore * 100).toFixed(1)}%` : "-"} />
+          <Stat label="Trust Risk" value={marketReadinessSummary?.trust?.hallucinationRiskScore !== undefined ? String(marketReadinessSummary.trust.hallucinationRiskScore) : "-"} />
+          <Stat label="Reliability" value={marketReadinessSummary?.reliability?.successRate !== undefined ? `${Number(marketReadinessSummary.reliability.successRate * 100).toFixed(1)}%` : "-"} />
+          <Stat label="Stale Citations" value={marketReadinessSummary?.retrieval?.staleCitationRate !== undefined ? `${Number(marketReadinessSummary.retrieval.staleCitationRate * 100).toFixed(1)}%` : "-"} />
         </div>
       </Card>
       <Card title="Frontier Program Roadmap (Founder/Admin)">
@@ -4590,6 +8533,102 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => requestServiceRestart("orchestrator")}>Request</button>
         </div>
       </Card>
+      <Card title="Runtime Debug Matrix (Founder/Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {([
+            ["kernel", `Kernel (${runtimeCounts.kernel})`],
+            ["ml", `ML (${runtimeCounts.ml})`],
+            ["orchestrator", `Orchestrator (${runtimeCounts.orchestrator})`],
+            ["frontend", `Frontend modules (${runtimeCounts.frontend})`],
+          ] as Array<[RuntimeDomain, string]>).map(([key, label]) => (
+            <button
+              key={key}
+              style={{
+                ...(runtimeDomain === key ? primary : chip),
+                minWidth: 170,
+              }}
+              onClick={() => setRuntimeDomain(key)}
+            >
+              {label}
+            </button>
+          ))}
+          <button style={chip} onClick={loadRuntimeInventory}>
+            {runtimeScanLoading ? "Scanning..." : "Scan Runtime (Twin)"}
+          </button>
+          <button style={chip} onClick={() => runRuntimeDiagnostics(runtimeDomain)}>Run Diagnostics</button>
+          <button style={chip} onClick={() => runRuntimeAutoFix(runtimeDomain)}>Auto Fix / Restart</button>
+          <button
+            style={chip}
+            onClick={() =>
+              runBackendAction("/self-expansion/propose", {
+                goal: `expand and harden ${runtimeDomain} runtime modules`,
+              })
+            }
+          >
+            Expand Code
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Registered" value={String(runtimeSummary.registered)} />
+          <Stat label="Live" value={String(runtimeSummary.live)} />
+          <Stat label="Offline" value={String(runtimeSummary.offline)} />
+          <Stat label="Service State" value={runtimeServiceState[runtimeDomain]} />
+        </div>
+        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+          Source: backend live status + twin code scan. Last runtime scan:{" "}
+          {runtimeScanAt ? new Date(runtimeScanAt).toLocaleString() : "not yet"}
+        </div>
+        <div style={{ marginTop: 8, maxHeight: 260, overflowY: "auto", display: "grid", gap: 6, paddingRight: 4 }}>
+          {(runtimeUnits[runtimeDomain] || []).map((unit) => (
+            <button
+              key={unit.id}
+              style={{
+                ...log,
+                textAlign: "left",
+                border:
+                  selectedRuntimeUnit?.id === unit.id
+                    ? "1px solid rgba(59,130,246,0.85)"
+                    : "1px solid rgba(148,163,184,0.22)",
+                cursor: "pointer",
+                background: unit.live ? "rgba(15,23,42,0.72)" : "rgba(127,29,29,0.25)",
+              }}
+              onClick={() => inspectRuntimeUnit(unit)}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <strong>{unit.name}</strong>
+                <span style={{ fontSize: 12 }}>
+                  {unit.kind} • {unit.registered ? "registered" : "not-registered"} • {unit.live ? "live" : "offline"}
+                </span>
+              </div>
+              {!unit.live && (
+                <div style={{ marginTop: 4, fontSize: 12, color: "#fecaca" }}>Cause: {unit.cause}</div>
+              )}
+            </button>
+          ))}
+        </div>
+        <div style={{ ...log, marginTop: 8 }}>
+          {selectedRuntimeUnit ? (
+            <>
+              <div style={{ fontWeight: 700 }}>
+                {selectedRuntimeUnit.name} • {selectedRuntimeUnit.live ? "live" : "offline"}
+              </div>
+              <div style={{ marginTop: 4 }}>
+                Root cause: {selectedRuntimeUnit.cause}
+              </div>
+              <div style={{ marginTop: 4 }}>
+                Suggested fix: {selectedRuntimeUnit.suggestedFix}
+              </div>
+              {selectedRuntimeUnit.sourcePath ? (
+                <div style={{ marginTop: 4, opacity: 0.85 }}>
+                  Source path: {selectedRuntimeUnit.sourcePath}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            "Select any unit to inspect root cause and recommended fix."
+          )}
+        </div>
+      </Card>
       <Card title="Future Feature Pipeline">
         {futureFeatures.map((f) => (
           <div key={f.id} style={log}>
@@ -4763,6 +8802,381 @@ const Dashboard: React.FC = () => {
             <span style={muted}>Uploaded files: {twinUploadedFiles.length}</span>
             <span style={muted}>Uploaded zips: {twinUploadedZips.length}</span>
           </div>
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Personal Twin Channels (Consent-Based)</div>
+          <div style={muted}>
+            Uses official provider APIs only, with explicit consent, disclosure, and approval controls.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={chip} onClick={refreshTwinChannels}>Refresh Channels</button>
+            <button style={chip} onClick={loadTwinMarketMap}>Market Map</button>
+            <button style={chip} onClick={loadTwinAutoReplyLogs}>Auto-Reply Logs</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 8 }}>
+            <select
+              value={twinChannelDraft.channel}
+              onChange={(e) => setTwinChannelDraft((p) => ({ ...p, channel: e.target.value }))}
+              style={input}
+            >
+              <option value="phone_call">Phone Call</option>
+              <option value="sms">SMS</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="telegram">Telegram</option>
+              <option value="email">Email</option>
+              <option value="x">X</option>
+              <option value="facebook">Facebook</option>
+              <option value="instagram">Instagram</option>
+              <option value="linkedin">LinkedIn</option>
+            </select>
+            <input
+              value={twinChannelDraft.provider}
+              onChange={(e) => setTwinChannelDraft((p) => ({ ...p, provider: e.target.value }))}
+              placeholder="Provider (official_api)"
+              style={input}
+            />
+            <input
+              value={twinChannelDraft.handle}
+              onChange={(e) => setTwinChannelDraft((p) => ({ ...p, handle: e.target.value }))}
+              placeholder="Handle / phone / account id"
+              style={input}
+            />
+            <input
+              value={twinChannelDraft.display_name}
+              onChange={(e) => setTwinChannelDraft((p) => ({ ...p, display_name: e.target.value }))}
+              placeholder="Display name"
+              style={input}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <label style={chip}>
+              <input
+                type="checkbox"
+                checked={twinChannelDraft.consent_granted}
+                onChange={(e) => setTwinChannelDraft((p) => ({ ...p, consent_granted: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              Consent Granted
+            </label>
+            <label style={chip}>
+              <input
+                type="checkbox"
+                checked={twinChannelDraft.auto_reply_enabled}
+                onChange={(e) => setTwinChannelDraft((p) => ({ ...p, auto_reply_enabled: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              Auto Reply Enabled
+            </label>
+            <button style={primary} onClick={connectTwinChannel}>Connect Channel</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 8 }}>
+            <select value={twinAvailabilityMode} onChange={(e) => setTwinAvailabilityMode(e.target.value)} style={input}>
+              <option value="active">Active</option>
+              <option value="away">Away</option>
+              <option value="ill">Ill</option>
+              <option value="do_not_disturb">Do Not Disturb</option>
+            </select>
+            <input
+              value={twinAvailabilityNotes}
+              onChange={(e) => setTwinAvailabilityNotes(e.target.value)}
+              placeholder="Availability note"
+              style={input}
+            />
+            <button style={chip} onClick={setTwinAvailability}>Save Availability</button>
+          </div>
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Auto-Reply Draft</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 8 }}>
+            <select
+              value={twinAutoEventDraft.event_type}
+              onChange={(e) => setTwinAutoEventDraft((p) => ({ ...p, event_type: e.target.value }))}
+              style={input}
+            >
+              <option value="message">Message</option>
+              <option value="phone_call">Phone Call</option>
+            </select>
+            <select
+              value={twinAutoEventDraft.channel}
+              onChange={(e) => setTwinAutoEventDraft((p) => ({ ...p, channel: e.target.value }))}
+              style={input}
+            >
+              <option value="sms">SMS</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="telegram">Telegram</option>
+              <option value="email">Email</option>
+              <option value="x">X</option>
+            </select>
+            <input
+              value={twinAutoEventDraft.sender}
+              onChange={(e) => setTwinAutoEventDraft((p) => ({ ...p, sender: e.target.value }))}
+              placeholder="Sender / caller"
+              style={input}
+            />
+            <input
+              value={twinAutoEventDraft.incoming_text}
+              onChange={(e) => setTwinAutoEventDraft((p) => ({ ...p, incoming_text: e.target.value }))}
+              placeholder="Incoming message"
+              style={input}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button style={primary} onClick={draftTwinAutoReply}>Generate Draft Reply</button>
+            <input
+              value={twinApprover}
+              onChange={(e) => setTwinApprover(e.target.value)}
+              placeholder="Approver"
+              style={{ ...input, maxWidth: 220 }}
+            />
+            <button style={chip} onClick={() => approveTwinAutoReply("approve_send")}>Approve & Send</button>
+            <button style={chip} onClick={() => approveTwinAutoReply("reject")}>Reject</button>
+          </div>
+          {twinAutoReplyDraft && (
+            <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 140, overflow: "auto" }}>
+              {JSON.stringify(twinAutoReplyDraft, null, 2)}
+            </pre>
+          )}
+          {twinChannelsBootstrap?.channels?.length ? (
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ fontWeight: 700 }}>Connected Channels</div>
+              {twinChannelsBootstrap.channels.map((c: any) => (
+                <div
+                  key={c.id}
+                  style={{
+                    border: "1px solid var(--ne-border)",
+                    background: "var(--ne-card)",
+                    borderRadius: 10,
+                    padding: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{c.channel} • {c.handle}</div>
+                    <div style={muted}>Provider: {c.provider} • Auto reply: {c.auto_reply_enabled ? "on" : "off"}</div>
+                  </div>
+                  <button
+                    style={chip}
+                    onClick={async () => {
+                      await runTwinAction("/neurotwin/channels/disconnect", { id: c.id });
+                      await refreshTwinChannels();
+                    }}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Provider Adapter Test Dispatch</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={twinSendChannelId}
+              onChange={(e) => setTwinSendChannelId(e.target.value)}
+              placeholder="channel id"
+              style={{ ...input, maxWidth: 180 }}
+            />
+            <input
+              value={twinSendTestMessage}
+              onChange={(e) => setTwinSendTestMessage(e.target.value)}
+              placeholder="Test message"
+              style={{ ...input, flex: 1, minWidth: 240 }}
+            />
+            <button style={chip} onClick={sendTwinChannelTest}>Send Test</button>
+          </div>
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Call Assistant (Permission-Based)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={chip} onClick={loadTwinCallAssistantConfig}>Load Call Config</button>
+            <button style={chip} onClick={saveTwinCallAssistantConfig}>Save Call Config</button>
+          </div>
+          {twinCallConfig ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={chip}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(twinCallConfig.enabled)}
+                    onChange={(e) => setTwinCallConfig((p: any) => ({ ...(p || {}), enabled: e.target.checked }))}
+                    style={{ marginRight: 6 }}
+                  />
+                  Enable Call Assistant
+                </label>
+                <label style={chip}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(twinCallConfig.allow_phone_call_assist)}
+                    onChange={(e) =>
+                      setTwinCallConfig((p: any) => ({ ...(p || {}), allow_phone_call_assist: e.target.checked }))
+                    }
+                    style={{ marginRight: 6 }}
+                  />
+                  Phone Call Assist
+                </label>
+                <label style={chip}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(twinCallConfig.allow_whatsapp_call_assist)}
+                    onChange={(e) =>
+                      setTwinCallConfig((p: any) => ({ ...(p || {}), allow_whatsapp_call_assist: e.target.checked }))
+                    }
+                    style={{ marginRight: 6 }}
+                  />
+                  WhatsApp Call Assist
+                </label>
+              </div>
+              <div style={muted}>
+                {String(twinCallConfig.platform_note || "")}
+              </div>
+            </div>
+          ) : null}
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Clone Customization (Voice/Video Presets)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={chip} onClick={loadTwinCloneCustomization}>Load Clone Profile</button>
+            <button style={chip} onClick={saveTwinCloneCustomization}>Save Clone Profile</button>
+          </div>
+          <textarea
+            value={twinCloneVoiceJson}
+            onChange={(e) => setTwinCloneVoiceJson(e.target.value)}
+            placeholder='[{"id":"voice-default","name":"Default Voice","asset_ref":"s3://..."}]'
+            style={{ ...input, minHeight: 80, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+          />
+          <textarea
+            value={twinCloneVideoJson}
+            onChange={(e) => setTwinCloneVideoJson(e.target.value)}
+            placeholder='[{"id":"video-default","name":"Default Video Persona","asset_ref":"s3://..."}]'
+            style={{ ...input, minHeight: 80, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+          />
+          <textarea
+            value={twinClonePresetsJson}
+            onChange={(e) => setTwinClonePresetsJson(e.target.value)}
+            placeholder='[{"id":"investor","label":"Investor Persona","tone":"strategic"}]'
+            style={{ ...input, minHeight: 80, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+          />
+          <div style={{ marginTop: 8, fontWeight: 700 }}>Native Mobile Bridge (Android/iOS App Handoff)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={chip} onClick={refreshMobileTwinBridge}>Refresh Bridge</button>
+            <input
+              value={mobileTwinDeviceDraft.id}
+              onChange={(e) => setMobileTwinDeviceDraft((p) => ({ ...p, id: e.target.value }))}
+              placeholder="Device ID"
+              style={{ ...input, maxWidth: 180 }}
+            />
+            <select
+              value={mobileTwinDeviceDraft.platform}
+              onChange={(e) => setMobileTwinDeviceDraft((p) => ({ ...p, platform: e.target.value }))}
+              style={{ ...input, maxWidth: 150 }}
+            >
+              <option value="android">Android</option>
+              <option value="ios">iOS</option>
+            </select>
+            <input
+              value={mobileTwinDeviceDraft.deviceName}
+              onChange={(e) => setMobileTwinDeviceDraft((p) => ({ ...p, deviceName: e.target.value }))}
+              placeholder="Device name"
+              style={{ ...input, maxWidth: 200 }}
+            />
+            <button style={chip} onClick={registerMobileTwinDevice}>Register Device</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={mobileTwinSyncDraft.deviceId}
+              onChange={(e) => setMobileTwinSyncDraft((p) => ({ ...p, deviceId: e.target.value }))}
+              placeholder="Sync deviceId"
+              style={{ ...input, maxWidth: 180 }}
+            />
+            <input
+              value={mobileTwinSyncDraft.pushToken}
+              onChange={(e) => setMobileTwinSyncDraft((p) => ({ ...p, pushToken: e.target.value }))}
+              placeholder="Push token"
+              style={{ ...input, maxWidth: 220 }}
+            />
+            <label style={chip}>
+              <input
+                type="checkbox"
+                checked={mobileTwinSyncDraft.permissionCallScreening}
+                onChange={(e) => setMobileTwinSyncDraft((p) => ({ ...p, permissionCallScreening: e.target.checked }))}
+                style={{ marginRight: 6 }}
+              />
+              Call Permission
+            </label>
+            <button style={chip} onClick={syncMobileTwinDevice}>Sync Device</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={mobileTwinActionDraft.deviceId}
+              onChange={(e) => setMobileTwinActionDraft((p) => ({ ...p, deviceId: e.target.value }))}
+              placeholder="Action deviceId"
+              style={{ ...input, maxWidth: 180 }}
+            />
+            <select
+              value={mobileTwinActionDraft.actionType}
+              onChange={(e) => setMobileTwinActionDraft((p) => ({ ...p, actionType: e.target.value }))}
+              style={{ ...input, maxWidth: 220 }}
+            >
+              <option value="answer_phone_call">Answer Phone Call</option>
+              <option value="answer_whatsapp_call">Answer WhatsApp Call</option>
+              <option value="answer_video_call">Answer Video Call</option>
+              <option value="sync_availability">Sync Availability</option>
+            </select>
+            <input
+              value={mobileTwinActionDraft.payloadJson}
+              onChange={(e) => setMobileTwinActionDraft((p) => ({ ...p, payloadJson: e.target.value }))}
+              placeholder='{"reason":"user_away"}'
+              style={{ ...input, flex: 1, minWidth: 260 }}
+            />
+            <button style={chip} onClick={enqueueMobileTwinAction}>Enqueue Action</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={mobileTwinPendingDeviceId}
+              onChange={(e) => setMobileTwinPendingDeviceId(e.target.value)}
+              placeholder="Pending actions deviceId"
+              style={{ ...input, maxWidth: 200 }}
+            />
+            <button style={chip} onClick={loadMobileTwinPending}>Load Pending</button>
+            <input
+              value={mobileTwinReceiptDraft.actionId}
+              onChange={(e) => setMobileTwinReceiptDraft((p) => ({ ...p, actionId: e.target.value }))}
+              placeholder="Receipt actionId"
+              style={{ ...input, maxWidth: 200 }}
+            />
+            <input
+              value={mobileTwinReceiptDraft.deviceId}
+              onChange={(e) => setMobileTwinReceiptDraft((p) => ({ ...p, deviceId: e.target.value }))}
+              placeholder="Receipt deviceId"
+              style={{ ...input, maxWidth: 200 }}
+            />
+            <select
+              value={mobileTwinReceiptDraft.status}
+              onChange={(e) => setMobileTwinReceiptDraft((p) => ({ ...p, status: e.target.value }))}
+              style={{ ...input, maxWidth: 150 }}
+            >
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </select>
+            <button style={chip} onClick={ackMobileTwinActionReceipt}>Ack Receipt</button>
+          </div>
+          {mobileTwinBridge ? (
+            <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 140, overflow: "auto" }}>
+              {JSON.stringify(
+                {
+                  devices: Array.isArray(mobileTwinBridge?.devices) ? mobileTwinBridge.devices.length : 0,
+                  pendingActions: Array.isArray(mobileTwinBridge?.pendingActions) ? mobileTwinBridge.pendingActions.length : 0,
+                  actionReceipts: Array.isArray(mobileTwinBridge?.actionReceipts) ? mobileTwinBridge.actionReceipts.length : 0,
+                  policy: mobileTwinBridge?.policy || {},
+                },
+                null,
+                2
+              )}
+            </pre>
+          ) : null}
+          {mobileTwinPendingActions.length ? (
+            <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 140, overflow: "auto" }}>
+              {JSON.stringify(mobileTwinPendingActions, null, 2)}
+            </pre>
+          ) : null}
+          {twinMarketMap ? (
+            <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 140, overflow: "auto" }}>
+              {JSON.stringify(twinMarketMap, null, 2)}
+            </pre>
+          ) : null}
         </div>
         <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
           {twinOutput
@@ -4777,6 +9191,7 @@ const Dashboard: React.FC = () => {
 
   const adminView = (
     <div style={grid}>
+      {voiceOpsCopilotCard}
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
@@ -4784,6 +9199,79 @@ const Dashboard: React.FC = () => {
       {aegisShieldCard}
       {creatorEngineCard}
       {cortexCoreCard}
+      {artifactWorkspaceCard}
+      {neuroExpansionBuilderCard}
+      {computePayoutAdminCard}
+      {loanOpsShieldCard}
+      {reliabilityOpsCard}
+      <Card title="Runtime Debug Matrix (Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {([
+            ["kernel", `Kernel (${runtimeCounts.kernel})`],
+            ["ml", `ML (${runtimeCounts.ml})`],
+            ["orchestrator", `Orchestrator (${runtimeCounts.orchestrator})`],
+            ["frontend", `Frontend modules (${runtimeCounts.frontend})`],
+          ] as Array<[RuntimeDomain, string]>).map(([key, label]) => (
+            <button key={key} style={runtimeDomain === key ? primary : chip} onClick={() => setRuntimeDomain(key)}>
+              {label}
+            </button>
+          ))}
+          <button style={chip} onClick={loadRuntimeInventory}>
+            {runtimeScanLoading ? "Scanning..." : "Scan Runtime (Twin)"}
+          </button>
+          <button style={chip} onClick={() => runRuntimeDiagnostics(runtimeDomain)}>Diagnostics</button>
+          <button style={chip} onClick={() => runRuntimeAutoFix(runtimeDomain)}>Auto Fix</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Registered" value={String(runtimeSummary.registered)} />
+          <Stat label="Live" value={String(runtimeSummary.live)} />
+          <Stat label="Offline" value={String(runtimeSummary.offline)} />
+          <Stat label="State" value={runtimeServiceState[runtimeDomain]} />
+        </div>
+        <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "grid", gap: 6 }}>
+          {(runtimeUnits[runtimeDomain] || []).slice(0, 80).map((unit) => (
+            <button key={unit.id} style={{ ...log, textAlign: "left", cursor: "pointer" }} onClick={() => inspectRuntimeUnit(unit)}>
+              {unit.name} • {unit.kind} • {unit.registered ? "registered" : "not-registered"} • {unit.live ? "live" : "offline"}
+            </button>
+          ))}
+        </div>
+        <div style={{ ...log, marginTop: 8 }}>
+          {selectedRuntimeUnit
+            ? `${selectedRuntimeUnit.name}: ${selectedRuntimeUnit.cause} | Fix: ${selectedRuntimeUnit.suggestedFix}`
+            : "Select a unit to inspect cause and fix guidance."}
+        </div>
+      </Card>
+      <Card title="Market Readiness (Admin)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={chip} onClick={refreshMarketReadiness}>Refresh</button>
+          <button style={chip} onClick={saveMarketReadiness}>Save Controls</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, verifiedAnswerMode: !p.verifiedAnswerMode }))}>
+            Verified Answer: {marketReadinessConfig.verifiedAnswerMode ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, hitlRiskyActions: !p.hitlRiskyActions }))}>
+            HITL Risk: {marketReadinessConfig.hitlRiskyActions ? "on" : "off"}
+          </button>
+          <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, deepResearchEnabled: !p.deepResearchEnabled }))}>
+            Deep Research: {marketReadinessConfig.deepResearchEnabled ? "on" : "off"}
+          </button>
+          <select
+            value={marketReadinessConfig.hybridRoutingMode}
+            onChange={(e) =>
+              setMarketReadinessConfig((p) => ({
+                ...p,
+                hybridRoutingMode: e.target.value as MarketReadinessConfig["hybridRoutingMode"],
+              }))
+            }
+            style={input}
+          >
+            <option value="balanced">routing: balanced</option>
+            <option value="mesh_first">routing: mesh_first</option>
+            <option value="local_first">routing: local_first</option>
+          </select>
+        </div>
+      </Card>
       <Card title="User Moderation">
         {users.map((u) => (
           <div key={u.id} style={row}>
@@ -4878,6 +9366,7 @@ const Dashboard: React.FC = () => {
 
   const developerView = (
     <div style={grid}>
+      {voiceOpsCopilotCard}
       {creatorEngineCard}
       {cortexCoreCard}
       <Card title="API Keys">
@@ -4951,6 +9440,7 @@ const Dashboard: React.FC = () => {
           <option value="prod">prod</option>
         </select>
       </Card>
+      {neuroExpansionBuilderCard}
       <Card title="Debug Tools">
         <button style={chip} onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "history" }))}>Open History + Logs</button>
         <button style={chip} onClick={() => exportData("debug_logs", adminLogs.slice(0, 100))}>Export Debug Logs</button>
@@ -5050,12 +9540,266 @@ const Dashboard: React.FC = () => {
 
   const userView = (
     <div style={grid}>
+      {voiceOpsCopilotCard}
       {creatorEngineCard}
       {cortexCoreCard}
       <Card title="Chat & Prompt Workspace">
         <Stat label="Chats" value={String(conversationStats.chats)} />
         <Stat label="Messages" value={String(conversationStats.messages)} />
         <Stat label="Latest Chat" value={conversationStats.latest} />
+      </Card>
+      {ownerComputeCard}
+      {ownerPayoutCard}
+      {userProtectionCard}
+      <Card title="My Assistant Builder (User Freedom)">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={primary} onClick={addUserAssistant}>+ Create Assistant</button>
+          <button style={chip} onClick={() => addUserAssistantFromTemplate("study_tutor")}>Template: Study Tutor</button>
+          <button style={chip} onClick={() => addUserAssistantFromTemplate("research_analyst")}>Template: Research Analyst</button>
+          <button style={chip} onClick={() => addUserAssistantFromTemplate("product_manager")}>Template: Product Manager</button>
+          <button style={chip} onClick={() => addUserAssistantFromTemplate("translator")}>Template: Translator</button>
+          <button style={chip} onClick={() => addUserAssistantFromTemplate("fitness_coach")}>Template: Fitness Coach</button>
+          <label style={chip}>
+            Import Profile
+            <input
+              type="file"
+              accept="application/json,.json"
+              style={{ display: "none" }}
+              onChange={(e) => importUserAssistant(e.target.files)}
+            />
+          </label>
+          {selectedUserAssistant && (
+            <>
+              <button style={chip} onClick={() => activateUserAssistant(selectedUserAssistant.id)}>Set Active in Chat</button>
+              <button style={chip} onClick={() => setDefaultUserAssistant(selectedUserAssistant.id)}>Set Startup Default</button>
+              <button style={chip} onClick={() => duplicateUserAssistant(selectedUserAssistant.id)}>Duplicate</button>
+              <button style={chip} onClick={() => exportUserAssistant(selectedUserAssistant.id)}>Export</button>
+              <button style={chip} onClick={() => deleteUserAssistant(selectedUserAssistant.id)}>Delete</button>
+            </>
+          )}
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+          {userAssistants.length === 0 && <div style={muted}>No personal assistants yet. Create one to start customizing.</div>}
+          {userAssistants.map((a) => (
+            <div
+              key={a.id}
+              style={{
+                ...row,
+                border: selectedUserAssistantId === a.id ? "1px solid rgba(59,130,246,0.65)" : "1px solid rgba(148,163,184,0.25)",
+                borderRadius: 8,
+                padding: 8,
+              }}
+            >
+              <button style={chip} onClick={() => setSelectedUserAssistantId(a.id)}>
+                {a.avatarEmoji || "🤖"} {a.name}
+              </button>
+              <span style={{ fontSize: 12, opacity: 0.85 }}>
+                {a.tone} • {a.language} • {a.memoryDays}d • {a.tools.join(", ")}
+                {defaultUserAssistantId === a.id ? " • startup default" : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+        {selectedUserAssistant ? (
+          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            <input
+              value={selectedUserAssistant.name}
+              onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { name: e.target.value })}
+              placeholder="Assistant name"
+              style={input}
+            />
+            <input
+              value={selectedUserAssistant.avatarEmoji || ""}
+              onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { avatarEmoji: e.target.value.slice(0, 2) })}
+              placeholder="Avatar emoji (e.g. 🤖)"
+              style={input}
+            />
+            <textarea
+              value={selectedUserAssistant.rolePrompt}
+              onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { rolePrompt: e.target.value })}
+              placeholder="Assistant instruction / personality"
+              style={{ ...input, minHeight: 90 }}
+            />
+            <textarea
+              value={selectedUserAssistant.startupPrompt || ""}
+              onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { startupPrompt: e.target.value })}
+              placeholder="Startup behavior prompt (optional)"
+              style={{ ...input, minHeight: 72 }}
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <select
+                value={selectedUserAssistant.tone}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { tone: e.target.value as UserAssistantProfile["tone"] })}
+                style={input}
+              >
+                <option value="balanced">balanced</option>
+                <option value="formal">formal</option>
+                <option value="casual">casual</option>
+                <option value="technical">technical</option>
+                <option value="creative">creative</option>
+              </select>
+              <input
+                value={selectedUserAssistant.language}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { language: e.target.value })}
+                placeholder="Language code (en, sw, fr...)"
+                style={input}
+              />
+              <input
+                value={selectedUserAssistant.domainFocus || "general"}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { domainFocus: e.target.value })}
+                placeholder="Domain focus (general, coding, school, finance...)"
+                style={input}
+              />
+              <select
+                value={selectedUserAssistant.responseMode || "balanced"}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { responseMode: e.target.value as UserAssistantProfile["responseMode"] })}
+                style={input}
+              >
+                <option value="concise">response: concise</option>
+                <option value="balanced">response: balanced</option>
+                <option value="detailed">response: detailed</option>
+              </select>
+              <select
+                value={selectedUserAssistant.memoryMode || "long_term"}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { memoryMode: e.target.value as UserAssistantProfile["memoryMode"] })}
+                style={input}
+              >
+                <option value="session">memory: session</option>
+                <option value="long_term">memory: long_term</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={selectedUserAssistant.memoryDays}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { memoryDays: Number(e.target.value) || 1 })}
+                placeholder="Memory days"
+                style={input}
+              />
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={selectedUserAssistant.creativity}
+                onChange={(e) => updateUserAssistant(selectedUserAssistant.id, { creativity: Number(e.target.value) || 0 })}
+                placeholder="Creativity"
+                style={input}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["chat", "research", "code", "math", "files", "voice", "web"].map((tool) => (
+                <button key={tool} style={chip} onClick={() => toggleUserAssistantTool(selectedUserAssistant.id, tool)}>
+                  {tool}: {selectedUserAssistant.tools.includes(tool) ? "on" : "off"}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button style={chip} onClick={() => updateUserAssistant(selectedUserAssistant.id, { privacyMode: !selectedUserAssistant.privacyMode })}>
+                Privacy mode: {selectedUserAssistant.privacyMode ? "on" : "off"}
+              </button>
+              <button style={chip} onClick={() => updateUserAssistant(selectedUserAssistant.id, { safeMode: !selectedUserAssistant.safeMode })}>
+                Safety mode: {selectedUserAssistant.safeMode ? "on" : "off"}
+              </button>
+              <button style={chip} onClick={() => updateUserAssistant(selectedUserAssistant.id, { autoCitations: !selectedUserAssistant.autoCitations })}>
+                Auto citations: {selectedUserAssistant.autoCitations ? "on" : "off"}
+              </button>
+            </div>
+            <div style={{ border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, padding: 8, display: "grid", gap: 8 }}>
+              <strong>Knowledge Base (Per Assistant)</strong>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  value={assistantKnowledgeUrlDraft}
+                  onChange={(e) => setAssistantKnowledgeUrlDraft(e.target.value)}
+                  placeholder="Add URL source for this assistant"
+                  style={{ ...input, minWidth: 240 }}
+                />
+                <button style={chip} onClick={addKnowledgeUrlToAssistant}>Add URL</button>
+                <label style={chip}>
+                  Attach files
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => attachKnowledgeFilesToAssistant(e.target.files)}
+                  />
+                </label>
+              </div>
+              {(selectedUserAssistant.knowledgeSources || []).map((u) => (
+                <div key={u} style={row}>
+                  <span style={{ fontSize: 12 }}>{u}</span>
+                  <button style={chip} onClick={() => removeKnowledgeUrlFromAssistant(u)}>Remove</button>
+                </div>
+              ))}
+              {(selectedUserAssistant.knowledgeFiles || []).map((f) => (
+                <div key={f.id} style={row}>
+                  <span style={{ fontSize: 12 }}>
+                    {f.name} • {(f.size / 1024).toFixed(1)} KB • {f.mime}
+                  </span>
+                  <button style={chip} onClick={() => removeKnowledgeFileFromAssistant(f.id)}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, padding: 8, display: "grid", gap: 8 }}>
+              <strong>Usage Analytics + Quality Score</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(100px, 1fr))", gap: 8 }}>
+                <Stat label="Turns" value={String(assistantAnalytics[selectedUserAssistant.id]?.turns || 0)} />
+                <Stat label="Avg Confidence" value={`${Math.round((assistantAnalytics[selectedUserAssistant.id]?.avgConfidence || 0) * 100)}%`} />
+                <Stat label="Citation Coverage" value={`${Math.round((assistantAnalytics[selectedUserAssistant.id]?.citationCoverage || 0) * 100)}%`} />
+                <Stat label="Quality Score" value={`${assistantQualityScore(selectedUserAssistant.id)} / 100`} />
+              </div>
+              <div style={muted}>
+                Reactions: 👍 {assistantAnalytics[selectedUserAssistant.id]?.up || 0} • 👎 {assistantAnalytics[selectedUserAssistant.id]?.down || 0} • 😂 {assistantAnalytics[selectedUserAssistant.id]?.laugh || 0} • 😢 {assistantAnalytics[selectedUserAssistant.id]?.sad || 0}
+              </div>
+            </div>
+            <div style={{ border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, padding: 8, display: "grid", gap: 8 }}>
+              <strong>Assistant Sharing Marketplace</strong>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  value={marketplaceDescription}
+                  onChange={(e) => setMarketplaceDescription(e.target.value)}
+                  placeholder="Pack description"
+                  style={{ ...input, minWidth: 220 }}
+                />
+                <input
+                  value={marketplaceTagsCsv}
+                  onChange={(e) => setMarketplaceTagsCsv(e.target.value)}
+                  placeholder="Tags (comma-separated)"
+                  style={{ ...input, minWidth: 180 }}
+                />
+                <select
+                  value={marketplaceVisibility}
+                  onChange={(e) => setMarketplaceVisibility(e.target.value as "public" | "private")}
+                  style={input}
+                >
+                  <option value="public">public pack</option>
+                  <option value="private">private pack</option>
+                </select>
+                <button style={primary} onClick={publishAssistantPack}>Publish Pack</button>
+              </div>
+              <input
+                value={marketplaceSearch}
+                onChange={(e) => setMarketplaceSearch(e.target.value)}
+                placeholder="Search packs by name, owner, tag..."
+                style={input}
+              />
+              {filteredMarketplacePacks.slice(0, 20).map((pack) => (
+                <div key={pack.id} style={{ ...row, border: "1px solid rgba(148,163,184,0.2)", borderRadius: 8, padding: 8 }}>
+                  <span style={{ fontSize: 12 }}>
+                    {pack.name} • {pack.visibility} • owner: {pack.owner} • downloads: {pack.downloads} • rating: {pack.rating.toFixed(1)}
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={chip} onClick={() => installAssistantPack(pack.id)}>Install</button>
+                    <button style={chip} onClick={() => rateAssistantPack(pack.id, 5)}>Rate ★★★★★</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div style={{ ...log, marginTop: 8 }}>
+          Live features: assistant templates, private/public marketplace packs, per-assistant knowledge attachments, per-assistant telemetry, startup defaults, and active profile sync into chat.
+        </div>
       </Card>
       <Card title="Plan & Usage">
         <Stat label="Plan" value={plans.find((p) => p.active)?.name || "Free"} />
@@ -5081,7 +9825,11 @@ const Dashboard: React.FC = () => {
               <button style={chip} onClick={() => navigator.clipboard?.writeText(p.text)}>Copy</button>
               <button
                 style={chip}
-                onClick={() => runGuarded(`prompt ${p.title}`, () => callAction("/admin/dashboard/prompts/delete", { id: p.id }))}
+                onClick={() =>
+                  canAccessAdminOps
+                    ? runGuarded(`prompt ${p.title}`, () => callAction("/admin/dashboard/prompts/delete", { id: p.id }))
+                    : setSavedPrompts((prev) => prev.filter((x) => x.id !== p.id))
+                }
               >
                 Delete
               </button>
@@ -5094,8 +9842,10 @@ const Dashboard: React.FC = () => {
 
   const enterpriseView = (
     <div style={grid}>
+      {voiceOpsCopilotCard}
       {deviceProtectionCard}
       {aegisShieldCard}
+      {loanOpsShieldCard}
       {creatorEngineCard}
       {cortexCoreCard}
       <Card title="Team Roles & Department Controls">

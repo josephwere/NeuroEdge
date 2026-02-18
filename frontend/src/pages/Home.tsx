@@ -7,6 +7,7 @@ import UnifiedChat from "@/components/UnifiedChat";
 import ProfileSettings from "@/components/ProfileSettings";
 import Dashboard from "@/components/Dashboard";
 import { OrchestratorClient } from "@/services/orchestrator_client";
+import { ViewType } from "@/components/Sidebar";
 
 /* -------------------- */
 /* Types / Session */
@@ -25,7 +26,7 @@ const Home: React.FC = () => {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState<"chat" | "dashboard" | "settings">("chat");
+  const [activeView, setActiveView] = useState<ViewType>("chat");
   const [profileOpen, setProfileOpen] = useState(false);
 
   /* ---------------- Load session ---------------- */
@@ -40,7 +41,7 @@ const Home: React.FC = () => {
 
   const toggleSidebar = () => setSidebarCollapsed(prev => !prev);
 
-  const handleNavigate = (view: "chat" | "dashboard" | "settings") => {
+  const handleNavigate = (view: ViewType) => {
     setActiveView(view);
     if (view === "settings") setProfileOpen(true);
     else setProfileOpen(false);

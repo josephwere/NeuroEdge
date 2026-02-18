@@ -10,7 +10,8 @@ import {
   deleteCachedItem,
 } from "@/services/offlineCache";
 import AISuggestionOverlay from "@/components/AISuggestionsOverlay";
-import { generateSuggestions, AISuggestion } from "@/services/aiSuggestionEngine";
+import { AISuggestion as OverlaySuggestion } from "@/components/AISuggestionsOverlay";
+import { generateSuggestions } from "@/services/aiSuggestionEngine";
 import { FounderMessage } from "@/components/FounderAssistant";
 import { useChatHistory } from "@/services/chatHistoryStore";
 import { isFounderUser } from "@/services/founderAccess";
@@ -37,20 +38,61 @@ interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
-  type?: "info" | "warn" | "error" | "ml";
+  type?: "info" | "warn" | "error" | "ml" | "mesh";
   isCode?: boolean;
   codeLanguage?: string;
   collapsible?: boolean;
   collapsibleOpen?: boolean;
   timestamp?: number;
+  trustMeta?: TrustMetadata;
+  assistantId?: string;
 }
 
 interface MainChatProps {
   orchestrator: OrchestratorClient;
 }
 
+interface ActiveAssistantProfile {
+  id?: string;
+  name?: string;
+  rolePrompt?: string;
+  tone?: string;
+  language?: string;
+  responseMode?: "concise" | "balanced" | "detailed";
+  domainFocus?: string;
+  startupPrompt?: string;
+  avatarEmoji?: string;
+  creativity?: number;
+  tools?: string[];
+  memoryDays?: number;
+  memoryMode?: "session" | "long_term";
+  privacyMode?: boolean;
+  safeMode?: boolean;
+  autoCitations?: boolean;
+  knowledgeSources?: string[];
+  knowledgeFiles?: Array<{ id: string; name: string; size: number; mime: string; addedAt: number }>;
+}
+
+interface TrustCitation {
+  title?: string;
+  url?: string;
+  snippet?: string;
+}
+
+interface TrustMetadata {
+  why?: string;
+  freshnessHours?: number | null;
+  sourceQualityScore?: number;
+  contradictionRisk?: number;
+  confidence?: number;
+  citations?: TrustCitation[];
+}
+
 const PAGE_SIZE = 30;
 const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
+const ASSISTANTS_KEY = "neuroedge_user_assistants_v1";
+const CHAT_ASSISTANT_OVERRIDES_KEY = "neuroedge_chat_assistant_overrides_v1";
+const ASSISTANT_ANALYTICS_KEY = "neuroedge_assistant_analytics_v1";
 
 const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const {
@@ -63,7 +105,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [displayed, setDisplayed] = useState<Message[]>([]);
   const [page, setPage] = useState(0);
   const [input, setInput] = useState("");
-  const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<OverlaySuggestion[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, string>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -81,6 +123,23 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   const [listenSeq, setListenSeq] = useState(0);
   const [brainstormMode, setBrainstormMode] = useState(false);
   const [branding, setBranding] = useState(() => loadEffectiveChatBranding());
+  const [activeAssistant, setActiveAssistant] = useState<ActiveAssistantProfile | null>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_active_user_assistant_v1");
+      return raw ? (JSON.parse(raw) as ActiveAssistantProfile) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [availableAssistants, setAvailableAssistants] = useState<ActiveAssistantProfile[]>(() => {
+    try {
+      const raw = localStorage.getItem(ASSISTANTS_KEY);
+      return raw ? (JSON.parse(raw) as ActiveAssistantProfile[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [chatAssistantOverrideId, setChatAssistantOverrideId] = useState<string>("");
 
   useEffect(() => {
     const refreshBranding = () => setBranding(loadEffectiveChatBranding());
@@ -100,6 +159,40 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     };
   }, []);
 
+  useEffect(() => {
+    const syncAssistant = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_active_user_assistant_v1");
+        setActiveAssistant(raw ? (JSON.parse(raw) as ActiveAssistantProfile) : null);
+      } catch {
+        setActiveAssistant(null);
+      }
+      try {
+        const rawList = localStorage.getItem(ASSISTANTS_KEY);
+        setAvailableAssistants(rawList ? (JSON.parse(rawList) as ActiveAssistantProfile[]) : []);
+      } catch {
+        setAvailableAssistants([]);
+      }
+    };
+    window.addEventListener("neuroedge:userAssistantUpdated", syncAssistant as EventListener);
+    window.addEventListener("storage", syncAssistant);
+    return () => {
+      window.removeEventListener("neuroedge:userAssistantUpdated", syncAssistant as EventListener);
+      window.removeEventListener("storage", syncAssistant);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeConversationId) return;
+    try {
+      const raw = localStorage.getItem(CHAT_ASSISTANT_OVERRIDES_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      setChatAssistantOverrideId(parsed[activeConversationId] || "");
+    } catch {
+      setChatAssistantOverrideId("");
+    }
+  }, [activeConversationId]);
+
   const syncContextFromMessages = (nextMessages: Message[]) => {
     chatContext.clear();
     nextMessages.forEach((m) => {
@@ -108,6 +201,88 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         content: m.text,
       });
     });
+  };
+
+  const resolvedAssistantProfile = (): ActiveAssistantProfile | null => {
+    if (chatAssistantOverrideId) {
+      const scoped = availableAssistants.find((a) => a.id === chatAssistantOverrideId);
+      if (scoped) return scoped;
+    }
+    return activeAssistant;
+  };
+
+  const setChatScopedAssistant = (assistantId: string) => {
+    setChatAssistantOverrideId(assistantId);
+    if (!activeConversationId) return;
+    try {
+      const raw = localStorage.getItem(CHAT_ASSISTANT_OVERRIDES_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      if (!assistantId) {
+        delete parsed[activeConversationId];
+      } else {
+        parsed[activeConversationId] = assistantId;
+      }
+      localStorage.setItem(CHAT_ASSISTANT_OVERRIDES_KEY, JSON.stringify(parsed));
+    } catch {
+      // ignore localStorage failure
+    }
+  };
+
+  const recordAssistantAnalytics = (
+    assistantId: string | undefined,
+    patch: Partial<{
+      turns: number;
+      up: number;
+      down: number;
+      laugh: number;
+      sad: number;
+      confidence: number;
+      cited: boolean;
+    }>
+  ) => {
+    if (!assistantId) return;
+    try {
+      const raw = localStorage.getItem(ASSISTANT_ANALYTICS_KEY);
+      const state = raw ? (JSON.parse(raw) as Record<string, any>) : {};
+      const current = state[assistantId] || {
+        assistantId,
+        turns: 0,
+        up: 0,
+        down: 0,
+        laugh: 0,
+        sad: 0,
+        avgConfidence: 0,
+        citationCoverage: 0,
+        updatedAt: Date.now(),
+      };
+      const nextTurns = current.turns + (patch.turns || 0);
+      const confidenceSamplesBefore = Math.max(0, Number(current.turns) || 0);
+      const nextAvgConfidence =
+        typeof patch.confidence === "number"
+          ? ((Number(current.avgConfidence || 0) * confidenceSamplesBefore + patch.confidence) /
+              Math.max(1, confidenceSamplesBefore + 1))
+          : Number(current.avgConfidence || 0);
+      const nextCitationCoverage =
+        typeof patch.cited === "boolean"
+          ? ((Number(current.citationCoverage || 0) * confidenceSamplesBefore + (patch.cited ? 1 : 0)) /
+              Math.max(1, confidenceSamplesBefore + 1))
+          : Number(current.citationCoverage || 0);
+      state[assistantId] = {
+        assistantId,
+        turns: nextTurns,
+        up: Number(current.up || 0) + (patch.up || 0),
+        down: Number(current.down || 0) + (patch.down || 0),
+        laugh: Number(current.laugh || 0) + (patch.laugh || 0),
+        sad: Number(current.sad || 0) + (patch.sad || 0),
+        avgConfidence: Number(nextAvgConfidence.toFixed(4)),
+        citationCoverage: Number(nextCitationCoverage.toFixed(4)),
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem(ASSISTANT_ANALYTICS_KEY, JSON.stringify(state));
+      window.dispatchEvent(new CustomEvent("neuroedge:assistantAnalyticsUpdated"));
+    } catch {
+      // ignore telemetry write issues
+    }
   };
 
   const loadConversation = (conversationId: string) => {
@@ -135,8 +310,21 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
 
   useEffect(() => {
     importLegacyCacheOnce();
-    const active = ensureActiveConversation();
-    loadConversation(active.id);
+    const navEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    const isReload =
+      navEntry?.type === "reload" ||
+      // fallback for older browsers
+      (typeof (performance as any).navigation?.type === "number" &&
+        (performance as any).navigation.type === 1);
+
+    if (isReload) {
+      const active = ensureActiveConversation();
+      loadConversation(active.id);
+      return;
+    }
+
+    const fresh = createConversation();
+    loadConversation(fresh.id);
   }, []);
 
   useEffect(() => {
@@ -198,12 +386,16 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     if (!input.trim()) return setSuggestions([]);
     const timer = setTimeout(async () => {
       const s = await generateSuggestions(input, "main");
-      setSuggestions(s);
+      setSuggestions(s as OverlaySuggestion[]);
     }, 250);
     return () => clearTimeout(timer);
   }, [input]);
 
-  const acceptSuggestion = (s: AISuggestion) => {
+  const acceptSuggestion = (s: OverlaySuggestion | null) => {
+    if (!s) {
+      setSuggestions([]);
+      return;
+    }
     if (s.type === "command") {
       setInput(s.text);
       setSuggestions([]);
@@ -234,7 +426,9 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       } else {
         // Other founder messages
         if (isFounderUser()) {
-          addMessage(`📣 Founder: ${msg.message}`, msg.type);
+          const mappedType: Message["type"] =
+            msg.type === "warning" ? "warn" : msg.type === "status" ? "info" : msg.type;
+          addMessage(`📣 Founder: ${msg.message}`, mappedType);
           speak(msg.message);
         }
       }
@@ -251,11 +445,83 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         role: m.role,
         content: m.text,
       }));
+      const profile = resolvedAssistantProfile();
+      try {
+        if (profile) {
+          const a = profile;
+          const systemInstruction = [
+            `Active assistant profile: ${a.name || "User Assistant"}.`,
+            a.rolePrompt ? `Role: ${a.rolePrompt}` : "",
+            a.tone ? `Tone: ${a.tone}` : "",
+            a.language ? `Language: ${a.language}` : "",
+            a.responseMode ? `Response mode: ${a.responseMode}` : "",
+            a.domainFocus ? `Domain focus: ${a.domainFocus}` : "",
+            a.startupPrompt ? `Startup behavior: ${a.startupPrompt}` : "",
+            a.creativity !== undefined ? `Creativity: ${a.creativity}` : "",
+            a.memoryDays !== undefined ? `Memory days: ${a.memoryDays}` : "",
+            a.memoryMode ? `Memory mode: ${a.memoryMode}` : "",
+            Array.isArray(a.tools) ? `Tools allowed: ${a.tools.join(", ")}` : "",
+            Array.isArray(a.knowledgeSources) && a.knowledgeSources.length
+              ? `Knowledge URLs: ${a.knowledgeSources.slice(0, 6).join(", ")}`
+              : "",
+            Array.isArray(a.knowledgeFiles) && a.knowledgeFiles.length
+              ? `Knowledge files: ${a.knowledgeFiles.map((f) => f.name).slice(0, 8).join(", ")}`
+              : "",
+            a.autoCitations !== undefined ? `Auto citations: ${a.autoCitations ? "on" : "off"}` : "",
+            a.privacyMode !== undefined ? `Privacy mode: ${a.privacyMode ? "on" : "off"}` : "",
+            a.safeMode !== undefined ? `Safety mode: ${a.safeMode ? "on" : "off"}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+          if (systemInstruction.trim()) {
+            currentContext.unshift({
+              role: "system",
+              content: systemInstruction,
+            });
+          }
+        }
+      } catch {
+        // ignore assistant profile parsing issues
+      }
       const res = await orchestrator.execute({
         command: userInput,
         context: currentContext.slice(-25),
       });
       if (runId !== sendRunRef.current) return;
+
+      const trustMeta: TrustMetadata | undefined = (() => {
+        const trust = (res as any)?.trust || {};
+        const citations = Array.isArray((res as any)?.citations)
+          ? (res as any).citations
+          : Array.isArray(trust?.citations)
+          ? trust.citations
+          : [];
+        const confidence = Number((res as any)?.confidence);
+        const sourceQualityScore = Number(trust?.sourceQualityScore);
+        const contradictionRisk = Number(trust?.contradictionRisk);
+        const freshnessHours = Number(trust?.freshnessHours);
+        const hasAny =
+          typeof trust?.why === "string" ||
+          Number.isFinite(confidence) ||
+          Number.isFinite(sourceQualityScore) ||
+          Number.isFinite(contradictionRisk) ||
+          Number.isFinite(freshnessHours) ||
+          citations.length > 0;
+        if (!hasAny) return undefined;
+        return {
+          why: typeof trust?.why === "string" ? trust.why : undefined,
+          confidence: Number.isFinite(confidence) ? confidence : undefined,
+          sourceQualityScore: Number.isFinite(sourceQualityScore) ? sourceQualityScore : undefined,
+          contradictionRisk: Number.isFinite(contradictionRisk) ? contradictionRisk : undefined,
+          freshnessHours: Number.isFinite(freshnessHours) ? freshnessHours : null,
+          citations,
+        };
+      })();
+      recordAssistantAnalytics(profile?.id, {
+        turns: 1,
+        confidence: typeof trustMeta?.confidence === "number" ? trustMeta.confidence : 0,
+        cited: Array.isArray(trustMeta?.citations) && trustMeta.citations.length > 0,
+      });
 
       const founderDebugVisible = SHOW_AI_META || isFounderUser();
       if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
@@ -263,6 +529,11 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       if (founderDebugVisible && res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
 
       if (founderDebugVisible && res.logs) res.logs.forEach((l: string) => addMessage(`[Log] ${l}`, "info"));
+      let responseAdded = false;
+      if (res.response && String(res.response).trim()) {
+        addMessage(String(res.response), "info", undefined, undefined, trustMeta, profile?.id);
+        responseAdded = true;
+      }
       if (res.results) {
         res.results.forEach((r: any) => {
           const stderr = String(r?.stderr || "");
@@ -271,12 +542,22 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             return;
           }
           const stdout = String(r?.stdout || "");
-          if (r.success && stdout.includes("kernel accepted")) {
-            const normalized = stdout.replace("kernel accepted execute:", "NeuroEdge received:");
-            addMessage(normalized, "info");
+          if (responseAdded && stdout.trim() && stdout.trim() === String(res.response || "").trim()) {
             return;
           }
-          addMessage(r.success ? stdout : `❌ ${r.stderr}`, r.success ? "info" : "error");
+          if (r.success && stdout.includes("kernel accepted")) {
+            const normalized = stdout.replace("kernel accepted execute:", "NeuroEdge received:");
+            addMessage(normalized, "info", undefined, undefined, undefined, profile?.id);
+            return;
+          }
+          addMessage(
+            r.success ? stdout : `❌ ${r.stderr}`,
+            r.success ? "info" : "error",
+            undefined,
+            undefined,
+            undefined,
+            profile?.id
+          );
         });
       }
     } catch (err: any) {
@@ -377,7 +658,14 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     return raw;
   };
 
-  const addMessage = (text: string, type?: Message["type"], codeLanguage?: string, isCode?: boolean) => {
+  const addMessage = (
+    text: string,
+    type?: Message["type"],
+    codeLanguage?: string,
+    isCode?: boolean,
+    trustMeta?: TrustMetadata,
+    assistantId?: string
+  ) => {
     const id = Date.now().toString() + Math.random();
     const safeText = normalizeAssistantText(text);
     const msg: Message = {
@@ -390,6 +678,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       collapsibleOpen: true,
       role: "assistant",
       timestamp: Date.now(),
+      trustMeta,
+      assistantId,
     };
     setMessages(m => [...m, msg]);
     setDisplayed(d => [...d, msg]);
@@ -587,6 +877,12 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         tags,
       });
       setReactionsByMessage((prev) => ({ ...prev, [msg.id]: reaction }));
+      recordAssistantAnalytics(msg.assistantId || resolvedAssistantProfile()?.id, {
+        up: reaction === "up" ? 1 : 0,
+        down: reaction === "down" ? 1 : 0,
+        laugh: reaction === "laugh" ? 1 : 0,
+        sad: reaction === "sad" ? 1 : 0,
+      });
     } catch {
       setReactionsByMessage((prev) => ({ ...prev, [msg.id]: "error" }));
     }
@@ -725,6 +1021,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         };
 
     const showActions = msg.role === "assistant";
+    const showTrust = msg.role === "assistant" && msg.trustMeta;
     const isEditingThisUserMessage =
       msg.role === "user" && editingMessageId === msg.id;
     const previousUserText = (() => {
@@ -798,7 +1095,10 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
                     if (!updated) return;
                     const edited = updated.find((m) => m.id === msg.id);
                     if (!edited) return;
-                    await executeWithContext(edited.text, updated);
+                    const rerunId = Date.now();
+                    sendRunRef.current = rerunId;
+                    setIsSending(true);
+                    await executeWithContext(edited.text, updated, rerunId);
                   }}
                   style={{
                     border: "none",
@@ -819,6 +1119,63 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             renderRichText(msg.text)
           )}
         </div>
+        {showTrust && (
+          <div
+            style={{
+              marginRight: "auto",
+              maxWidth: "86%",
+              background: "rgba(15, 23, 42, 0.52)",
+              border: "1px solid rgba(56, 189, 248, 0.35)",
+              color: "#cbd5e1",
+              borderRadius: "10px",
+              padding: "0.5rem 0.6rem",
+              fontSize: "0.74rem",
+              lineHeight: 1.45,
+            }}
+          >
+            {msg.trustMeta?.why && (
+              <div style={{ marginBottom: "0.28rem" }}>
+                <strong style={{ color: "#e2e8f0" }}>Why this answer:</strong> {msg.trustMeta.why}
+              </div>
+            )}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: msg.trustMeta?.citations?.length ? "0.35rem" : 0 }}>
+              {typeof msg.trustMeta?.freshnessHours === "number" && (
+                <span>Freshness: {msg.trustMeta.freshnessHours}h ago</span>
+              )}
+              {typeof msg.trustMeta?.sourceQualityScore === "number" && (
+                <span>Quality score: {(msg.trustMeta.sourceQualityScore * 100).toFixed(0)}%</span>
+              )}
+              {typeof msg.trustMeta?.confidence === "number" && (
+                <span>Confidence: {(msg.trustMeta.confidence * 100).toFixed(0)}%</span>
+              )}
+              {typeof msg.trustMeta?.contradictionRisk === "number" && (
+                <span>Contradiction risk: {(msg.trustMeta.contradictionRisk * 100).toFixed(0)}%</span>
+              )}
+            </div>
+            {Array.isArray(msg.trustMeta?.citations) && msg.trustMeta.citations.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                {msg.trustMeta.citations.slice(0, 3).map((c, i) => (
+                  <a
+                    key={`${msg.id}-cite-${i}`}
+                    href={c.url || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      color: "#7dd3fc",
+                      textDecoration: "none",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={c.url || c.title || `Source ${i + 1}`}
+                  >
+                    [{i + 1}] {c.title || c.url || `Source ${i + 1}`}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {showActions && (
           <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.12rem" }}>
             <button
@@ -922,6 +1279,11 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     );
   };
 
+  const chatScopedAssistant =
+    chatAssistantOverrideId && availableAssistants.length > 0
+      ? availableAssistants.find((a) => a.id === chatAssistantOverrideId) || null
+      : null;
+
   // --- Render ---
   return (
     <div
@@ -961,6 +1323,26 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
               {activeConversationId ? "Saved thread" : "Unsaved"}
             </span>
           </span>
+          {(chatScopedAssistant?.name || activeAssistant?.name) && (
+            <span
+              style={{
+                marginLeft: 8,
+                padding: "0.16rem 0.5rem",
+                borderRadius: 999,
+                border: "1px solid rgba(125,211,252,0.35)",
+                color: "#bae6fd",
+                fontSize: "0.72rem",
+              }}
+              title={
+                (chatScopedAssistant?.rolePrompt || activeAssistant?.rolePrompt || "") +
+                (chatScopedAssistant ? " (chat-only)" : "")
+              }
+            >
+              {((chatScopedAssistant?.avatarEmoji || activeAssistant?.avatarEmoji || "🤖") + " ")}
+              {chatScopedAssistant?.name || activeAssistant?.name}
+              {chatScopedAssistant ? " • chat-only" : ""}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: "0.45rem" }}>
           <button
@@ -1086,6 +1468,27 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
               🧠
             </button>
           )}
+          <select
+            value={chatAssistantOverrideId || ""}
+            onChange={(e) => setChatScopedAssistant(e.target.value)}
+            style={{
+              background: "rgba(15,23,42,0.78)",
+              color: "#e2e8f0",
+              border: "1px solid rgba(148,163,184,0.28)",
+              borderRadius: 10,
+              padding: "0.48rem 0.55rem",
+              fontSize: "0.75rem",
+              minWidth: 170,
+            }}
+            title="Quick switch assistant for this chat only"
+          >
+            <option value="">Global assistant</option>
+            {availableAssistants.map((a) => (
+              <option key={a.id || a.name} value={a.id || ""}>
+                {(a.avatarEmoji || "🤖") + " " + (a.name || "Assistant")}
+              </option>
+            ))}
+          </select>
           <div style={{ flex: 1, position: "relative" }}>
             <input
               value={input}
