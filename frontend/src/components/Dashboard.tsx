@@ -7247,13 +7247,13 @@ const Dashboard: React.FC = () => {
   );
 
   const computePayoutAdminCard = (
-    <Card title="Compute Payout Budget & Approvals">
+    <Card title="Compute Payout Budget & Approvals" wide>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button style={chip} onClick={refreshComputePayoutsAdmin}>Refresh</button>
         <button style={primary} onClick={saveComputeBudget}>Save Budget</button>
       </div>
       <div style={{ marginTop: 10, fontWeight: 700 }}>Auto Payout Scheduler</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 6 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 6 }}>
         <label style={{ ...muted, display: "flex", alignItems: "center", gap: 6 }}>
           <input
             type="checkbox"
@@ -7270,7 +7270,7 @@ const Dashboard: React.FC = () => {
               period: e.target.value as ComputeAutoPayoutConfig["period"],
             }))
           }
-          style={input}
+          style={{ ...input, minWidth: 0 }}
         >
           <option value="hourly">hourly</option>
           <option value="daily">daily</option>
@@ -7283,7 +7283,7 @@ const Dashboard: React.FC = () => {
             setComputeAutoPayoutConfig((p) => ({ ...p, maxPayoutsPerRun: Number(e.target.value) || 1 }))
           }
           placeholder="Max payouts / run"
-          style={input}
+          style={{ ...input, minWidth: 0 }}
         />
         <button style={primary} onClick={saveComputePayoutScheduler}>Save Scheduler</button>
       </div>
@@ -7295,11 +7295,11 @@ const Dashboard: React.FC = () => {
             )})`
           : "not yet"}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
-        <input value={computePayoutBudget.period} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, period: e.target.value }))} placeholder="Period YYYY-MM" style={input} />
-        <input value={String(computePayoutBudget.totalRevenueUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, totalRevenueUsd: Number(e.target.value) || 0 }))} placeholder="Total Revenue USD" style={input} />
-        <input value={String(computePayoutBudget.allocatedUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, allocatedUsd: Number(e.target.value) || 0 }))} placeholder="Allocated USD" style={input} />
-        <input value={String(computePayoutBudget.reserveUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, reserveUsd: Number(e.target.value) || 0 }))} placeholder="Reserve USD" style={input} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+        <input value={computePayoutBudget.period} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, period: e.target.value }))} placeholder="Period YYYY-MM" style={{ ...input, minWidth: 0 }} />
+        <input value={String(computePayoutBudget.totalRevenueUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, totalRevenueUsd: Number(e.target.value) || 0 }))} placeholder="Total Revenue USD" style={{ ...input, minWidth: 0 }} />
+        <input value={String(computePayoutBudget.allocatedUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, allocatedUsd: Number(e.target.value) || 0 }))} placeholder="Allocated USD" style={{ ...input, minWidth: 0 }} />
+        <input value={String(computePayoutBudget.reserveUsd)} onChange={(e) => setComputePayoutBudget((p) => ({ ...p, reserveUsd: Number(e.target.value) || 0 }))} placeholder="Reserve USD" style={{ ...input, minWidth: 0 }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(130px, 1fr))", gap: 8, marginTop: 8 }}>
         <Stat label="Pending" value={`$${Number(computePayoutBudget.pendingUsd || 0).toFixed(2)}`} />
@@ -7316,7 +7316,7 @@ const Dashboard: React.FC = () => {
             </div>
             <div>{r.id} • target {r.target} • ${Number(r.amountUsd || 0).toFixed(2)} • {Number(r.amountWdc || 0).toFixed(6)} WDC • {Number(r.points || 0)} pts</div>
             {String(r.status) === "pending_approval" && (
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 <button style={primary} onClick={() => approveComputePayout(r.id, "scheduled")}>Approve (Scheduler)</button>
                 <button style={chip} onClick={() => approveComputePayout(r.id, "instant")}>Approve Instant</button>
                 <button style={chip} onClick={() => rejectComputePayout(r.id)}>Reject</button>
@@ -8200,13 +8200,13 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runBackendAction("GET:/admin/quality/benchmark/baselines")}>Load Baselines</button>
         </div>
       </Card>
-      <Card title="Market Readiness Control Center (Founder/Admin)">
+      <Card title="Market Readiness Control Center (Founder/Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={primary} onClick={saveMarketReadiness}>Save Controls</button>
           <button style={chip} onClick={refreshMarketReadiness}>Refresh</button>
           <button style={chip} onClick={() => runBackendAction("GET:/admin/market-readiness/summary")}>Open Summary JSON</button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginTop: 8 }}>
           <button style={chip} onClick={() => setMarketReadinessConfig((p) => ({ ...p, verifiedAnswerMode: !p.verifiedAnswerMode }))}>
             Verified Answer Mode: {marketReadinessConfig.verifiedAnswerMode ? "on" : "off"}
           </button>
@@ -8232,7 +8232,7 @@ const Dashboard: React.FC = () => {
             Benchmark Release Gates: {marketReadinessConfig.benchmarkReleaseGates ? "on" : "off"}
           </button>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginTop: 8 }}>
           <select
             value={marketReadinessConfig.hybridRoutingMode}
             onChange={(e) =>
@@ -8241,7 +8241,7 @@ const Dashboard: React.FC = () => {
                 hybridRoutingMode: e.target.value as MarketReadinessConfig["hybridRoutingMode"],
               }))
             }
-            style={input}
+            style={{ ...input, minWidth: 0 }}
           >
             <option value="balanced">hybrid routing: balanced</option>
             <option value="mesh_first">hybrid routing: mesh_first</option>
@@ -8255,27 +8255,27 @@ const Dashboard: React.FC = () => {
                 domainPackStrictness: e.target.value as MarketReadinessConfig["domainPackStrictness"],
               }))
             }
-            style={input}
+            style={{ ...input, minWidth: 0 }}
           >
             <option value="strict">domain packs: strict</option>
             <option value="standard">domain packs: standard</option>
           </select>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, marginTop: 8 }}>
           <Stat label="Readiness Score" value={marketReadinessSummary?.readinessScore !== undefined ? `${Number(marketReadinessSummary.readinessScore * 100).toFixed(1)}%` : "-"} />
           <Stat label="Trust Risk" value={marketReadinessSummary?.trust?.hallucinationRiskScore !== undefined ? String(marketReadinessSummary.trust.hallucinationRiskScore) : "-"} />
           <Stat label="Reliability" value={marketReadinessSummary?.reliability?.successRate !== undefined ? `${Number(marketReadinessSummary.reliability.successRate * 100).toFixed(1)}%` : "-"} />
           <Stat label="Stale Citations" value={marketReadinessSummary?.retrieval?.staleCitationRate !== undefined ? `${Number(marketReadinessSummary.retrieval.staleCitationRate * 100).toFixed(1)}%` : "-"} />
         </div>
       </Card>
-      <Card title="Frontier Program Roadmap (Founder/Admin)">
+      <Card title="Frontier Program Roadmap (Founder/Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={primary} onClick={refreshFrontierProgram}>Refresh Program</button>
           <button style={chip} onClick={() => runBackendAction("GET:/admin/frontier-program/readiness")}>Open Readiness JSON</button>
           <button style={chip} onClick={() => runBackendAction("GET:/admin/frontier-program")}>Open Program JSON</button>
           <button style={chip} onClick={resetFrontierProgramFromDashboard}>Reset Program</button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
           <Stat label="Readiness Gate" value={frontierReadiness?.gate ? "pass" : "hold"} />
           <Stat label="Readiness Score" value={frontierReadiness?.readinessScore !== undefined ? `${Number(frontierReadiness.readinessScore * 100).toFixed(1)}%` : "0%"} />
           <Stat label="Blocked Items" value={String(frontierReadiness?.totals?.blocked || 0)} />
@@ -8288,22 +8288,22 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div style={{ marginTop: 10, fontWeight: 700 }}>Update Single Item</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(180px, 1fr))", gap: 8 }}>
-          <input value={frontierItemId} onChange={(e) => setFrontierItemId(e.target.value)} placeholder="Item ID (model_core_01)" style={input} />
-          <input value={frontierItemOwner} onChange={(e) => setFrontierItemOwner(e.target.value)} placeholder="Owner" style={input} />
-          <select value={frontierItemStatus} onChange={(e) => setFrontierItemStatus(e.target.value as any)} style={input}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+          <input value={frontierItemId} onChange={(e) => setFrontierItemId(e.target.value)} placeholder="Item ID (model_core_01)" style={{ ...input, minWidth: 0 }} />
+          <input value={frontierItemOwner} onChange={(e) => setFrontierItemOwner(e.target.value)} placeholder="Owner" style={{ ...input, minWidth: 0 }} />
+          <select value={frontierItemStatus} onChange={(e) => setFrontierItemStatus(e.target.value as any)} style={{ ...input, minWidth: 0 }}>
             <option value="planned">planned</option>
             <option value="in_progress">in_progress</option>
             <option value="blocked">blocked</option>
             <option value="done">done</option>
           </select>
-          <select value={frontierItemPriority} onChange={(e) => setFrontierItemPriority(e.target.value as any)} style={input}>
+          <select value={frontierItemPriority} onChange={(e) => setFrontierItemPriority(e.target.value as any)} style={{ ...input, minWidth: 0 }}>
             <option value="critical">critical</option>
             <option value="high">high</option>
             <option value="medium">medium</option>
             <option value="low">low</option>
           </select>
-          <input value={frontierItemNotes} onChange={(e) => setFrontierItemNotes(e.target.value)} placeholder="Notes" style={{ ...input, gridColumn: "span 2" }} />
+          <input value={frontierItemNotes} onChange={(e) => setFrontierItemNotes(e.target.value)} placeholder="Notes" style={{ ...input, gridColumn: "span 2", minWidth: 0 }} />
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
           <button style={primary} onClick={upsertFrontierItemFromDashboard}>Save Item</button>
@@ -8316,8 +8316,8 @@ const Dashboard: React.FC = () => {
           placeholder={"Item IDs (comma/newline separated)\nmodel_core_01\neval_03\nsre_02"}
           style={{ ...input, minHeight: 72 }}
         />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8 }}>
-          <select value={frontierBulkStatus} onChange={(e) => setFrontierBulkStatus(e.target.value as any)} style={input}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+          <select value={frontierBulkStatus} onChange={(e) => setFrontierBulkStatus(e.target.value as any)} style={{ ...input, minWidth: 0 }}>
             <option value="planned">planned</option>
             <option value="in_progress">in_progress</option>
             <option value="blocked">blocked</option>
@@ -8327,12 +8327,12 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div style={{ marginTop: 10, fontWeight: 700 }}>Milestones</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8 }}>
-          <input value={frontierMilestoneId} onChange={(e) => setFrontierMilestoneId(e.target.value)} placeholder="Milestone ID" style={input} />
-          <input value={frontierMilestoneName} onChange={(e) => setFrontierMilestoneName(e.target.value)} placeholder="Milestone Name" style={input} />
-          <input value={frontierMilestoneQuarter} onChange={(e) => setFrontierMilestoneQuarter(e.target.value)} placeholder="Quarter (Q2-2026)" style={input} />
-          <input value={frontierMilestoneOwner} onChange={(e) => setFrontierMilestoneOwner(e.target.value)} placeholder="Owner" style={input} />
-          <select value={frontierMilestoneStatus} onChange={(e) => setFrontierMilestoneStatus(e.target.value as any)} style={input}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+          <input value={frontierMilestoneId} onChange={(e) => setFrontierMilestoneId(e.target.value)} placeholder="Milestone ID" style={{ ...input, minWidth: 0 }} />
+          <input value={frontierMilestoneName} onChange={(e) => setFrontierMilestoneName(e.target.value)} placeholder="Milestone Name" style={{ ...input, minWidth: 0 }} />
+          <input value={frontierMilestoneQuarter} onChange={(e) => setFrontierMilestoneQuarter(e.target.value)} placeholder="Quarter (Q2-2026)" style={{ ...input, minWidth: 0 }} />
+          <input value={frontierMilestoneOwner} onChange={(e) => setFrontierMilestoneOwner(e.target.value)} placeholder="Owner" style={{ ...input, minWidth: 0 }} />
+          <select value={frontierMilestoneStatus} onChange={(e) => setFrontierMilestoneStatus(e.target.value as any)} style={{ ...input, minWidth: 0 }}>
             <option value="planned">planned</option>
             <option value="in_progress">in_progress</option>
             <option value="blocked">blocked</option>
@@ -8533,7 +8533,7 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => requestServiceRestart("orchestrator")}>Request</button>
         </div>
       </Card>
-      <Card title="Runtime Debug Matrix (Founder/Admin)">
+      <Card title="Runtime Debug Matrix (Founder/Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {([
             ["kernel", `Kernel (${runtimeCounts.kernel})`],
@@ -8578,13 +8578,18 @@ const Dashboard: React.FC = () => {
           Source: backend live status + twin code scan. Last runtime scan:{" "}
           {runtimeScanAt ? new Date(runtimeScanAt).toLocaleString() : "not yet"}
         </div>
-        <div style={{ marginTop: 8, maxHeight: 260, overflowY: "auto", display: "grid", gap: 6, paddingRight: 4 }}>
+        <div style={{ marginTop: 8, maxHeight: 320, overflowY: "auto", overflowX: "hidden", display: "grid", gap: 6, paddingRight: 4 }}>
           {(runtimeUnits[runtimeDomain] || []).map((unit) => (
             <button
               key={unit.id}
               style={{
                 ...log,
                 textAlign: "left",
+                width: "100%",
+                minWidth: 0,
+                whiteSpace: "normal",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
                 border:
                   selectedRuntimeUnit?.id === unit.id
                     ? "1px solid rgba(59,130,246,0.85)"
@@ -8594,8 +8599,8 @@ const Dashboard: React.FC = () => {
               }}
               onClick={() => inspectRuntimeUnit(unit)}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                <strong>{unit.name}</strong>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <strong style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{unit.name}</strong>
                 <span style={{ fontSize: 12 }}>
                   {unit.kind} • {unit.registered ? "registered" : "not-registered"} • {unit.live ? "live" : "offline"}
                 </span>
@@ -9204,7 +9209,7 @@ const Dashboard: React.FC = () => {
       {computePayoutAdminCard}
       {loanOpsShieldCard}
       {reliabilityOpsCard}
-      <Card title="Runtime Debug Matrix (Admin)">
+      <Card title="Runtime Debug Matrix (Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {([
             ["kernel", `Kernel (${runtimeCounts.kernel})`],
@@ -9212,7 +9217,7 @@ const Dashboard: React.FC = () => {
             ["orchestrator", `Orchestrator (${runtimeCounts.orchestrator})`],
             ["frontend", `Frontend modules (${runtimeCounts.frontend})`],
           ] as Array<[RuntimeDomain, string]>).map(([key, label]) => (
-            <button key={key} style={runtimeDomain === key ? primary : chip} onClick={() => setRuntimeDomain(key)}>
+            <button key={key} style={{ ...(runtimeDomain === key ? primary : chip), minWidth: 170 }} onClick={() => setRuntimeDomain(key)}>
               {label}
             </button>
           ))}
@@ -9228,9 +9233,22 @@ const Dashboard: React.FC = () => {
           <Stat label="Offline" value={String(runtimeSummary.offline)} />
           <Stat label="State" value={runtimeServiceState[runtimeDomain]} />
         </div>
-        <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "grid", gap: 6 }}>
+        <div style={{ marginTop: 8, maxHeight: 320, overflowY: "auto", overflowX: "hidden", display: "grid", gap: 6, paddingRight: 4 }}>
           {(runtimeUnits[runtimeDomain] || []).slice(0, 80).map((unit) => (
-            <button key={unit.id} style={{ ...log, textAlign: "left", cursor: "pointer" }} onClick={() => inspectRuntimeUnit(unit)}>
+            <button
+              key={unit.id}
+              style={{
+                ...log,
+                textAlign: "left",
+                cursor: "pointer",
+                width: "100%",
+                minWidth: 0,
+                whiteSpace: "normal",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+              }}
+              onClick={() => inspectRuntimeUnit(unit)}
+            >
               {unit.name} • {unit.kind} • {unit.registered ? "registered" : "not-registered"} • {unit.live ? "live" : "offline"}
             </button>
           ))}
@@ -10035,7 +10053,7 @@ const Dashboard: React.FC = () => {
   );
 };
 
-const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
+const Card: React.FC<{ title: string; children: React.ReactNode; wide?: boolean }> = ({ title, children, wide = false }) => {
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [closed, setClosed] = useState(false);
@@ -10049,7 +10067,7 @@ const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, c
   }
 
   return (
-    <div style={maximized ? { ...card, ...cardMaximized } : card}>
+    <div style={maximized ? { ...card, ...cardMaximized } : { ...card, ...(wide ? cardWide : null) }}>
       <div style={cardHeader}>
         <h3 style={{ margin: 0 }}>{title}</h3>
         <div style={{ display: "flex", gap: 6 }}>
@@ -10064,7 +10082,7 @@ const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, c
           </button>
         </div>
       </div>
-      {!minimized && <div style={{ display: "grid", gap: 8 }}>{children}</div>}
+      {!minimized && <div style={{ display: "grid", gap: 8, minWidth: 0 }}>{children}</div>}
     </div>
   );
 };
@@ -10154,6 +10172,11 @@ const card: React.CSSProperties = {
   background: "rgba(15,23,42,0.74)",
   padding: "0.88rem",
   boxShadow: "0 10px 30px rgba(2,6,23,0.35)",
+  overflow: "hidden",
+  minWidth: 0,
+};
+const cardWide: React.CSSProperties = {
+  gridColumn: "1 / -1",
 };
 const cardMaximized: React.CSSProperties = {
   position: "fixed",
