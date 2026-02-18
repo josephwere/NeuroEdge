@@ -1,0 +1,26 @@
+What this gives you:
+
+Native iOS shell that loads full NeuroEdge in WKWebView
+File picker support for uploads
+Mic/camera usage keys configured
+One-command project generation (xcodegen)
+Use it:
+
+cd mobile/neuroedge-ios-shell
+Set URL in Config.swift
+generate.sh
+Open NeuroEdgeShell.xcodeproj in Xcode and build.
+
+
+
+
+Set your URL here:
+
+strings.xml
+neuroedge_start_url
+Build APK:
+
+Open Android Studio
+Open folder mobile/neuroedge-android-studio
+Let Gradle sync
+Build APK from Android Studio menu
