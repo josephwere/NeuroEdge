@@ -19,6 +19,7 @@ interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
   onNavigate: (view: ViewType) => void;
+  allowedViews?: ViewType[];
   onNewChat?: () => void;
   onLogin?: () => void;
   onOpenNotifications?: () => void;
@@ -38,6 +39,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggle,
   onNavigate,
+  allowedViews = ["chat", "my_chats", "projects", "dashboard", "settings", "history", "extensions"],
   onNewChat,
   onLogin,
   onOpenNotifications,
@@ -47,23 +49,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   user = { name: "Guest User", mode: "local" },
 }) => {
   const { notifications, removeNotification } = useNotifications();
-  const { toggleTheme, logout } = useUI();
+  const { toggleTheme, logout, user: currentUser } = useUI();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileActions, setShowProfileActions] = useState(false);
   const [profileAvatar, setProfileAvatar] = useState<string>("");
   const [profileName, setProfileName] = useState<string>(user.name);
   const [branding, setBranding] = useState(() => loadBranding());
+  const canView = (v: ViewType) => allowedViews.includes(v);
+  const effectiveSignedIn =
+    Boolean(currentUser) &&
+    !(
+      currentUser?.guest &&
+      !currentUser?.email &&
+      !currentUser?.token &&
+      String(currentUser?.role || "").toLowerCase() !== "founder" &&
+      String(currentUser?.role || "").toLowerCase() !== "admin" &&
+      String(currentUser?.role || "").toLowerCase() !== "developer" &&
+      String(currentUser?.role || "").toLowerCase() !== "enterprise" &&
+      String(currentUser?.role || "").toLowerCase() !== "user"
+    );
+  const effectiveMode: "guest" | "local" | "account" = effectiveSignedIn ? "account" : user.mode;
 
   useEffect(() => {
     const readProfile = () => {
       try {
         const raw = localStorage.getItem("neuroedge_profile_settings");
-        if (!raw) return;
+        if (!raw) {
+          setProfileAvatar("");
+          setProfileName(user.name || "Guest User");
+          return;
+        }
         const parsed = JSON.parse(raw);
         setProfileAvatar(String(parsed?.avatarUrl || ""));
-        if (parsed?.name) setProfileName(String(parsed.name));
+        setProfileName(String(parsed?.name || user.name || "Guest User"));
       } catch {
-        // ignore profile parse errors
+        setProfileAvatar("");
+        setProfileName(user.name || "Guest User");
       }
     };
     readProfile();
@@ -105,18 +126,24 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div>
             <div style={{ fontSize: "0.9rem" }}>{profileName || user.name}</div>
             <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
-              {user.mode === "guest" && "Guest mode"}
-              {user.mode === "local" && "Local session"}
-              {user.mode === "account" && "Signed in"}
+              {effectiveMode === "guest" && "Guest mode"}
+              {effectiveMode === "local" && "Local session"}
+              {effectiveMode === "account" && "Signed in"}
             </div>
           </div>
         )}
         {!collapsed && <span style={{ marginLeft: "auto", opacity: 0.8 }}>▾</span>}
         <div style={profileMenuStyle(showProfileActions)}>
           <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onOpenProfile?.(); setShowProfileActions(false); }}>Profile</button>
-          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("settings"); setShowProfileActions(false); }}>Settings</button>
-          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("dashboard"); setShowProfileActions(false); }}>Dashboard</button>
-          <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("my_chats"); setShowProfileActions(false); }}>My Chats</button>
+          {canView("settings") && (
+            <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("settings"); setShowProfileActions(false); }}>Settings</button>
+          )}
+          {canView("dashboard") && (
+            <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("dashboard"); setShowProfileActions(false); }}>Dashboard</button>
+          )}
+          {canView("my_chats") && (
+            <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); onNavigate("my_chats"); setShowProfileActions(false); }}>My Chats</button>
+          )}
           <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); toggleTheme(); setShowProfileActions(false); }}>Toggle Theme</button>
           <button style={profileMenuItemStyle} onClick={(e) => { e.stopPropagation(); logout(); onLogin?.(); setShowProfileActions(false); }}>Logout</button>
         </div>
@@ -124,13 +151,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ---------- Navigation ---------- */}
       <div style={{ flex: 1, position: "relative" }}>
-        <NavItem icon="💬" label="Chat" collapsed={collapsed} badge={unreadChats} onClick={() => onNavigate("chat")} />
-        <NavItem icon="🗂️" label="My Chats" collapsed={collapsed} onClick={() => onNavigate("my_chats")} />
-        <NavItem icon="📁" label="Projects" collapsed={collapsed} onClick={() => onNavigate("projects")} />
-        <NavItem icon="📊" label="Dashboard" collapsed={collapsed} onClick={() => onNavigate("dashboard")} />
-        <NavItem icon="⚙️" label="Settings" collapsed={collapsed} onClick={() => onNavigate("settings")} />
-        <NavItem icon="🕘" label="History" collapsed={collapsed} onClick={() => onNavigate("history")} />
-        <NavItem icon="🧩" label="Extensions" collapsed={collapsed} onClick={() => onNavigate("extensions")} />
+        {canView("chat") && <NavItem icon="💬" label="Chat" collapsed={collapsed} badge={unreadChats} onClick={() => onNavigate("chat")} />}
+        {canView("my_chats") && <NavItem icon="🗂️" label="My Chats" collapsed={collapsed} onClick={() => onNavigate("my_chats")} />}
+        {canView("projects") && <NavItem icon="📁" label="Projects" collapsed={collapsed} onClick={() => onNavigate("projects")} />}
+        {canView("dashboard") && <NavItem icon="📊" label="Dashboard" collapsed={collapsed} onClick={() => onNavigate("dashboard")} />}
+        {canView("settings") && <NavItem icon="⚙️" label="Settings" collapsed={collapsed} onClick={() => onNavigate("settings")} />}
+        {canView("history") && <NavItem icon="🕘" label="History" collapsed={collapsed} onClick={() => onNavigate("history")} />}
+        {canView("extensions") && <NavItem icon="🧩" label="Extensions" collapsed={collapsed} onClick={() => onNavigate("extensions")} />}
 
         {/* ---------- Notifications ---------- */}
         <div style={{ position: "relative" }}>
@@ -164,13 +191,15 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <NavItem icon="✅" label="Approvals" collapsed={collapsed} badge={pendingApprovals} onClick={() => onNavigate("history")} />
+        {canView("history") && <NavItem icon="✅" label="Approvals" collapsed={collapsed} badge={pendingApprovals} onClick={() => onNavigate("history")} />}
       </div>
 
       {/* ---------- Quick Actions ---------- */}
       <div style={quickActions}>
         <button style={primaryAction(collapsed)} onClick={onNewChat}>{collapsed ? "➕" : "➕ New Chat"}</button>
-        {!collapsed && <button style={secondaryAction} onClick={onLogin}>🔐 Login / Get Started</button>}
+        {!collapsed && (!currentUser || currentUser.guest) && (
+          <button style={secondaryAction} onClick={onLogin}>🔐 Log In / Get Started</button>
+        )}
       </div>
     </div>
   );
@@ -357,6 +386,17 @@ const primaryAction = (collapsed: boolean): React.CSSProperties => ({
 });
 
 const secondaryAction: React.CSSProperties = {
-  ...primaryAction,
-  background: "#2b2b3c",
+  width: "100%",
+  padding: "0.72rem 0.68rem",
+  border: "1px solid rgba(125, 211, 252, 0.35)",
+  borderRadius: 12,
+  color: "#f8fafc",
+  fontWeight: 700,
+  cursor: "pointer",
+  fontSize: "0.82rem",
+  letterSpacing: "0.01em",
+  background:
+    "linear-gradient(135deg, rgba(37,99,235,0.92) 0%, rgba(14,165,233,0.88) 52%, rgba(56,189,248,0.82) 100%)",
+  boxShadow: "0 10px 20px rgba(14, 116, 144, 0.35), inset 0 1px 0 rgba(255,255,255,0.2)",
+  transition: "transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease",
 };

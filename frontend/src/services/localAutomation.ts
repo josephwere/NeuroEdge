@@ -42,3 +42,82 @@ export function fillFormFieldsFromSpec(spec: string): { filled: number; missing:
   return { filled, missing };
 }
 
+export interface FormFieldDescriptor {
+  key: string;
+  label: string;
+  type: string;
+  placeholder: string;
+  required: boolean;
+}
+
+export function listVisibleFormFields(limit = 80): FormFieldDescriptor[] {
+  const controls = Array.from(
+    document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      "input[name], textarea[name], select[name], input[id], textarea[id], select[id]"
+    )
+  );
+  const out: FormFieldDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const el of controls) {
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    const key = String(el.getAttribute("name") || el.getAttribute("id") || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const labelByFor = key ? (document.querySelector(`label[for="${CSS.escape(key)}"]`) as HTMLLabelElement | null) : null;
+    const parentLabel = el.closest("label");
+    const placeholder = String((el as any).placeholder || "").trim();
+    const aria = String(el.getAttribute("aria-label") || "").trim();
+    const label = String(labelByFor?.innerText || parentLabel?.innerText || aria || key).trim();
+    out.push({
+      key,
+      label,
+      type: String((el as any).type || el.tagName.toLowerCase()),
+      placeholder,
+      required: Boolean((el as any).required),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function submitLikelyForm(): { submitted: boolean; method?: string; action?: string } {
+  const candidateButtons = Array.from(
+    document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+      'button[type="submit"], input[type="submit"], button:not([type])'
+    )
+  );
+  const submitCandidate = candidateButtons.find((b) => {
+    const txt = String((b as any).innerText || (b as any).value || "").toLowerCase();
+    return /(submit|send|continue|apply|save|next|confirm|register|login)/.test(txt);
+  }) || candidateButtons[0];
+
+  if (submitCandidate) {
+    const form =
+      (submitCandidate.closest("form") as HTMLFormElement | null) ||
+      (document.querySelector("form") as HTMLFormElement | null);
+    if (form) {
+      form.requestSubmit?.();
+      if (!form.requestSubmit) form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      return {
+        submitted: true,
+        method: String(form.method || "get").toLowerCase(),
+        action: String(form.action || location.href),
+      };
+    }
+    (submitCandidate as HTMLElement).click();
+    return { submitted: true };
+  }
+
+  const anyForm = document.querySelector("form") as HTMLFormElement | null;
+  if (anyForm) {
+    anyForm.requestSubmit?.();
+    if (!anyForm.requestSubmit) anyForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    return {
+      submitted: true,
+      method: String(anyForm.method || "get").toLowerCase(),
+      action: String(anyForm.action || location.href),
+    };
+  }
+  return { submitted: false };
+}

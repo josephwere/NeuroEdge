@@ -1,0 +1,58 @@
+name: mobile-native-release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-android-aab:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/neuroedge-native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: mobile/neuroedge-native/package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Bootstrap native folders
+        run: npm run bootstrap:native
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode keystore
+        run: |
+          echo "$NEUROEDGE_UPLOAD_KEYSTORE_BASE64" | base64 -d > /tmp/neuroedge-release.jks
+        env:
+          NEUROEDGE_UPLOAD_KEYSTORE_BASE64: ${{ secrets.NEUROEDGE_UPLOAD_KEYSTORE_BASE64 }}
+
+      - name: Configure signing
+        run: |
+          NEUROEDGE_UPLOAD_STORE_FILE=/tmp/neuroedge-release.jks \
+          NEUROEDGE_UPLOAD_STORE_PASSWORD="${{ secrets.NEUROEDGE_UPLOAD_STORE_PASSWORD }}" \
+          NEUROEDGE_UPLOAD_KEY_ALIAS="${{ secrets.NEUROEDGE_UPLOAD_KEY_ALIAS }}" \
+          NEUROEDGE_UPLOAD_KEY_PASSWORD="${{ secrets.NEUROEDGE_UPLOAD_KEY_PASSWORD }}" \
+          bash scripts/setup-release-signing.sh
+
+      - name: Build release bundle
+        run: bash scripts/build-release.sh
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuroedge-app-release-aab
+          path: mobile/neuroedge-native/android/app/build/outputs/bundle/release/app-release.aab

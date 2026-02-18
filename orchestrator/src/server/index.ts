@@ -307,6 +307,23 @@ function hasRole(req: Request, roles: string[]): boolean {
   return false;
 }
 
+function actorPlan(req: Request): string {
+  const raw = req.auth?.raw || {};
+  return String(
+    (raw.plan as string | undefined) ||
+      (raw.subscription_tier as string | undefined) ||
+      (raw.tier as string | undefined) ||
+      (req.header("x-user-plan") as string | undefined) ||
+      "free"
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function isInternalToolUser(req: Request): boolean {
+  return hasRole(req, ["founder", "admin", "developer"]);
+}
+
 function requireRole(roles: string[]) {
   return (req: Request, res: Response, next: any) => {
     if (hasRole(req, roles) || hasScope(req, "admin:*")) {
@@ -338,17 +355,8 @@ function requireAnyScope(needs: string[]) {
 }
 
 function isPaidUser(req: Request): boolean {
-  const raw = req.auth?.raw || {};
-  const plan = String(
-    (raw.plan as string | undefined) ||
-      (raw.subscription_tier as string | undefined) ||
-      (raw.tier as string | undefined) ||
-      (req.header("x-user-plan") as string | undefined) ||
-      ""
-  )
-    .trim()
-    .toLowerCase();
-  return ["pro", "enterprise", "paid", "business"].includes(plan);
+  const plan = actorPlan(req);
+  return ["plus", "pro", "enterprise", "paid", "business", "team", "premium"].includes(plan);
 }
 
 function generateApiKey(prefix = "ne_sk"): string {
@@ -6317,6 +6325,156 @@ export function startServer(
       service: "orchestrator",
       time: new Date().toISOString(),
     });
+  });
+
+  function buildPlatformVersionPayload(req: Request, platform: string) {
+    const internal = isInternalToolUser(req);
+    const latestVersion = String(
+      (internal ? process.env.MOBILE_LATEST_VERSION_INTERNAL : process.env.MOBILE_LATEST_VERSION_PUBLIC) ||
+        process.env.MOBILE_LATEST_VERSION ||
+        process.env.APP_LATEST_VERSION ||
+        "1.0.0"
+    );
+    const minimumSupportedVersion = String(
+      (internal
+        ? process.env.MOBILE_MIN_SUPPORTED_VERSION_INTERNAL
+        : process.env.MOBILE_MIN_SUPPORTED_VERSION_PUBLIC) ||
+        process.env.MOBILE_MIN_SUPPORTED_VERSION ||
+        process.env.APP_MIN_SUPPORTED_VERSION ||
+        "1.0.0"
+    );
+    const forceUpdate = String(
+      (internal ? process.env.MOBILE_FORCE_UPDATE_INTERNAL : process.env.MOBILE_FORCE_UPDATE_PUBLIC) ||
+        process.env.MOBILE_FORCE_UPDATE ||
+        process.env.APP_FORCE_UPDATE ||
+        "false"
+    ).toLowerCase() === "true";
+    return {
+      status: "ok",
+      platform,
+      releaseChannel: internal ? "internal" : "public",
+      latestVersion,
+      minimumSupportedVersion,
+      forceUpdate,
+      playStoreUrl: String(
+        process.env.MOBILE_PLAYSTORE_URL ||
+          "https://play.google.com/store/apps/details?id=com.neuroedge.app"
+      ),
+      releaseNotes: String(
+        process.env.MOBILE_RELEASE_NOTES || "Stability improvements and feature updates."
+      ),
+      publishedAt: new Date().toISOString(),
+    };
+  }
+
+  function buildShellConfig(req: Request, client: "mobile" | "web" | "desktop" | "ios" | "android") {
+    const role = String((req.auth?.raw as any)?.role || req.header("x-user-role") || "user").toLowerCase();
+    const isFounderAdmin = role === "founder" || role === "admin";
+    const isDeveloper = role === "developer";
+    const internal = isFounderAdmin || isDeveloper;
+    const plan = actorPlan(req);
+    const hasIdentity = Boolean(actorEmail(req) || actorName(req));
+    const hasBearer = Boolean(req.header("authorization") || req.header("Authorization"));
+    const isGuest = role === "guest" || (!hasIdentity && !hasBearer && !internal);
+    const showDashboard = internal || hasIdentity;
+    const isPaidPlan = isPaidUser(req);
+
+    const mobileSidebarPages = isGuest
+      ? ["main_chat"]
+      : [
+          "main_chat",
+          "my_chats",
+          "projects",
+          ...(showDashboard ? ["dashboard"] : []),
+          "settings",
+          "history",
+          ...(internal ? ["extensions"] : []),
+          "floating_chat",
+        ];
+    const webSidebarViews = isGuest
+      ? ["chat"]
+      : [
+          "chat",
+          "my_chats",
+          "projects",
+          ...(showDashboard ? ["dashboard"] : []),
+          "settings",
+          "history",
+          ...(internal ? ["extensions"] : []),
+        ];
+    const dashboardSections = isFounderAdmin
+      ? ["bootstrap", "access", "device_protection", "aegis", "metrics", "mesh", "agents", "twin", "neurotwin"]
+      : isDeveloper
+      ? ["bootstrap", "metrics", "mesh", "agents", "twin"]
+      : showDashboard
+      ? ["bootstrap"]
+      : [];
+
+    return {
+      status: "ok",
+      appVersion: String(process.env.MOBILE_LATEST_VERSION || process.env.APP_LATEST_VERSION || "1.0.0"),
+      access: {
+        plan,
+        isPaidPlan,
+        internalTools: internal,
+        isGuest,
+      },
+      shell: {
+        sidebarPages: mobileSidebarPages,
+        sidebarViews: webSidebarViews,
+        dashboardSections,
+        featureFlags: {
+          founderAdminParity: isFounderAdmin,
+          developerParity: isDeveloper,
+          internalToolsEnabled: internal,
+          meshEnabled: true,
+          twinEnabled: true,
+          neurotwinEnabled: true,
+          trustPanelEnabled: true,
+          unreleasedFeatures: internal,
+          plusFeatures: plan === "plus" || isPaidPlan,
+          proFeatures: ["pro", "enterprise", "business", "team", "premium"].includes(plan),
+          founderAssistantEnabled: internal,
+        },
+        client,
+      },
+      endpoints: {
+        dashboardBootstrap: "/admin/dashboard/bootstrap",
+        dashboardAccessBootstrap: "/admin/dashboard/access/bootstrap",
+        deviceProtectionBootstrap: "/admin/device-protection/bootstrap",
+        aegisStatus: "/admin/aegis/status",
+        metrics: "/admin/system/metrics",
+        version: "/admin/version",
+        meshNodes: "/mesh/nodes",
+        twinReport: "/twin/report",
+        neurotwinProfile: "/neurotwin/profile",
+      },
+    };
+  }
+
+  app.get("/app/version", (req: Request, res: Response) => {
+    const client = String(req.query.client || "web").toLowerCase();
+    const platform = ["android", "ios", "desktop", "web"].includes(client) ? client : "web";
+    res.json(buildPlatformVersionPayload(req, platform));
+  });
+
+  app.get("/app/config", (req: Request, res: Response) => {
+    const client = String(req.query.client || "web").toLowerCase();
+    const normalized = (["mobile", "web", "desktop", "ios", "android"].includes(client) ? client : "web") as
+      | "mobile"
+      | "web"
+      | "desktop"
+      | "ios"
+      | "android";
+    res.json(buildShellConfig(req, normalized));
+  });
+
+  app.get("/mobile/app/version", (req: Request, res: Response) => {
+    res.json(buildPlatformVersionPayload(req, "android"));
+  });
+
+  app.get("/mobile/app/config", (req: Request, res: Response) => {
+    res.json(buildShellConfig(req, "mobile"));
   });
 
   app.get("/system/status", async (_req: Request, res: Response) => {

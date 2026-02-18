@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${1:-desktop}" # desktop | web
+MODE="${1:-web}" # web | desktop
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="/tmp/neuroedge"
 PID_DIR="/tmp/neuroedge"
@@ -24,24 +24,23 @@ run_bg() {
   echo $! >"$pidfile"
 }
 
-echo "NeuroEdge dev launcher ($MODE)"
+echo "NeuroEdge launcher ($MODE)"
 
-# Kernel (Go)
-run_bg "kernel" bash -lc "cd \"$ROOT/kernel\" && set -a && source .env && set +a && go run ./cmd/api"
+# Kernel
+run_bg "kernel" bash -lc "cd \"$ROOT/kernel\" && [[ -f .env ]] && set -a && source .env && set +a || true && go run ./cmd/api"
 
-# ML (Python venv required)
-run_bg "ml" bash -lc "cd \"$ROOT/ml\" && source .venv/bin/activate && set -a && source .env && set +a && python server.py"
+# ML
+run_bg "ml" bash -lc "cd \"$ROOT/ml\" && [[ -f .venv/bin/activate ]] && source .venv/bin/activate || true && [[ -f .env ]] && set -a && source .env && set +a || true && python server.py"
 
-# Orchestrator (Node)
-run_bg "orchestrator" bash -lc "cd \"$ROOT/orchestrator\" && pnpm install && set -a && source .env && set +a && pnpm run dev"
+# Orchestrator
+run_bg "orchestrator" bash -lc "cd \"$ROOT/orchestrator\" && pnpm install && [[ -f .env ]] && set -a && source .env && set +a || true && pnpm run dev"
 
-if [[ "$MODE" == "web" ]]; then
-  # Frontend (web)
-  run_bg "frontend" bash -lc "cd \"$ROOT/frontend\" && pnpm install && pnpm run dev"
-else
-  # Desktop (Tauri) - this will start Vite automatically
+if [[ "$MODE" == "desktop" ]]; then
   run_bg "desktop" bash -lc "cd \"$ROOT/frontend\" && pnpm install && pnpm tauri:dev"
+else
+  run_bg "frontend" bash -lc "cd \"$ROOT/frontend\" && pnpm install && pnpm run dev"
 fi
 
 echo "Logs: $LOG_DIR"
-echo "Stop with: scripts/stop-all.sh"
+echo "Health check: scripts/smoke-all.sh"
+echo "Stop all: scripts/stop-all.sh"

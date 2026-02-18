@@ -15,7 +15,7 @@ export interface User {
   phone?: string;
   country?: string;
   role?: "user" | "moderator" | "admin" | "founder" | "developer" | "enterprise";
-  plan?: "free" | "pro" | "enterprise";
+  plan?: "free" | "plus" | "pro" | "enterprise" | "business" | "team" | "premium";
 }
 
 interface UIState {
@@ -45,6 +45,32 @@ interface UIState {
 
 const UIContext = createContext<UIState | null>(null);
 
+function normalizeUser(raw: any): User | null {
+  if (!raw || typeof raw !== "object") return null;
+  const role = String(raw.role || "").trim().toLowerCase();
+  const provider = String(raw.provider || "").trim().toLowerCase();
+  const email = String(raw.email || "").trim();
+  const token = String(raw.token || "").trim();
+  const explicitGuest = Boolean(raw.guest);
+  const inferredSignedIn =
+    (!!email && email.length > 0) ||
+    (!!token && token.length > 0) ||
+    (provider !== "" && provider !== "guest") ||
+    (role !== "" && role !== "guest");
+  const guest = inferredSignedIn ? false : explicitGuest;
+  return {
+    name: String(raw.name || ""),
+    email,
+    token,
+    guest,
+    provider: raw.provider,
+    phone: raw.phone,
+    country: raw.country,
+    role: raw.role,
+    plan: raw.plan,
+  } as User;
+}
+
 /* -------------------- */
 /* Provider */
 /* -------------------- */
@@ -57,15 +83,41 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [approvalsPending, setApprovalsPending] = useState(0);
 
   /* User */
-  const [user, setUserState] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(() => {
+    try {
+      const raw = localStorage.getItem("neuroedge_user");
+      if (!raw) return null;
+      return normalizeUser(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  });
   const setUser = (u: User) => {
-    setUserState(u);
-    localStorage.setItem("neuroedge_user", JSON.stringify(u));
+    const normalized = normalizeUser(u) || u;
+    setUserState(normalized);
+    localStorage.setItem("neuroedge_user", JSON.stringify(normalized));
   };
   const logout = () => {
     setUserState(null);
     localStorage.removeItem("neuroedge_user");
   };
+
+  useEffect(() => {
+    const syncUser = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_user");
+        if (!raw) {
+          setUserState(null);
+          return;
+        }
+        setUserState(normalizeUser(JSON.parse(raw)));
+      } catch {
+        setUserState(null);
+      }
+    };
+    window.addEventListener("storage", syncUser);
+    return () => window.removeEventListener("storage", syncUser);
+  }, []);
 
   /* Theme */
   const systemPrefersDark = () =>

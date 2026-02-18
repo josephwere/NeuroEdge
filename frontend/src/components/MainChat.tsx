@@ -28,7 +28,12 @@ import {
   createConversation,
 } from "@/services/conversationStore";
 import { confirmSafeAction } from "@/services/safetyPrompts";
-import { extractVisibleText, fillFormFieldsFromSpec } from "@/services/localAutomation";
+import {
+  extractVisibleText,
+  fillFormFieldsFromSpec,
+  listVisibleFormFields,
+  submitLikelyForm,
+} from "@/services/localAutomation";
 import {
   loadEffectiveChatBranding,
   userCustomizationUpdateEventName,
@@ -89,7 +94,6 @@ interface TrustMetadata {
 }
 
 const PAGE_SIZE = 30;
-const SHOW_AI_META = String(import.meta.env.VITE_SHOW_AI_META || "").toLowerCase() === "true";
 const ASSISTANTS_KEY = "neuroedge_user_assistants_v1";
 const CHAT_ASSISTANT_OVERRIDES_KEY = "neuroedge_chat_assistant_overrides_v1";
 const ASSISTANT_ANALYTICS_KEY = "neuroedge_assistant_analytics_v1";
@@ -328,6 +332,21 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
   }, []);
 
   useEffect(() => {
+    const onWelcome = (evt: Event) => {
+      const detail = (evt as CustomEvent<any>).detail || {};
+      const name = String(detail?.name || "there");
+      const role = String(detail?.role || "user");
+      const plan = String(detail?.plan || "free");
+      addMessage(
+        `Welcome ${name}. You are signed in (${role}, ${plan} plan). I am ready to help.`,
+        "info"
+      );
+    };
+    window.addEventListener("neuroedge:welcomeMessage", onWelcome as EventListener);
+    return () => window.removeEventListener("neuroedge:welcomeMessage", onWelcome as EventListener);
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (recognitionRef.current) {
         try {
@@ -523,7 +542,7 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
         cited: Array.isArray(trustMeta?.citations) && trustMeta.citations.length > 0,
       });
 
-      const founderDebugVisible = SHOW_AI_META || isFounderUser();
+      const founderDebugVisible = isFounderUser();
       if (founderDebugVisible && res.reasoning) addMessage(`🧠 Reasoning: ${res.reasoning}`, "ml");
       if (founderDebugVisible && res.intent) addMessage(`🎯 Intent: ${res.intent}`, "ml");
       if (founderDebugVisible && res.risk) addMessage(`⚠️ Risk Level: ${res.risk}`, "warn");
@@ -617,15 +636,103 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
       setIsSending(false);
       return;
     }
-    const outbound = brainstormMode && !lower.startsWith("/brainstorm")
-      ? `/brainstorm ${trimmed}`
-      : trimmed;
+    if (lower.startsWith("/answer-submit")) {
+      const instruction = trimmed.replace(/^\/answer-submit\s*/i, "").trim();
+      const fields = listVisibleFormFields();
+      if (fields.length === 0) {
+        addMessage("⚠️ I could not detect visible form fields on this page.", "warn");
+        setIsSending(false);
+        return;
+      }
+      const fieldsPrompt = fields
+        .map((f) => `${f.key} | label=${f.label} | type=${f.type} | required=${f.required ? "yes" : "no"} | placeholder=${f.placeholder || "-"}`)
+        .join("\n");
+      const answerPrompt = [
+        "You are filling a web form for the user.",
+        `User instruction: ${instruction || "Answer the form using best effort and concise realistic values."}`,
+        "Return ONLY key=value lines for fields that should be filled.",
+        "Do not include markdown, explanations, or extra text.",
+        "Use only keys from this field list:",
+        fieldsPrompt,
+      ].join("\n");
+      try {
+        const res = await orchestrator.execute({
+          command: answerPrompt,
+          context: [...messages, userMsg].slice(-20).map((m) => ({ role: m.role, content: m.text })),
+        });
+        const responseText = String(res?.response || res?.results?.[0]?.stdout || "").trim();
+        const allowed = new Set(fields.map((f) => f.key));
+        const spec = responseText
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const m = line.match(/^([A-Za-z0-9_.\-]+)\s*[:=]\s*(.+)$/);
+            if (!m) return null;
+            const key = m[1].trim();
+            const value = m[2].trim();
+            if (!allowed.has(key)) return null;
+            return `${key}=${value}`;
+          })
+          .filter((v): v is string => Boolean(v))
+          .join("; ");
+        if (!spec) {
+          addMessage("⚠️ I generated no valid form values. Try a more specific instruction.", "warn");
+          setIsSending(false);
+          return;
+        }
+        const fill = fillFormFieldsFromSpec(spec);
+        const submit = submitLikelyForm();
+        addMessage(
+          `✅ Answered and submitted form. Filled ${fill.filled} field(s)${
+            fill.missing.length ? `, missing: ${fill.missing.join(", ")}` : ""
+          }. Submit: ${submit.submitted ? "sent" : "not found"}.`,
+          submit.submitted ? "info" : "warn"
+        );
+      } catch (err: any) {
+        addMessage(`❌ Answer/submit failed: ${err?.message || err}`, "error");
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
+    const summarizePageRequested =
+      lower.startsWith("/summarize-page") ||
+      /\b(summarise|summarize|summary)\b.*\b(this page|current page|page content)\b/.test(lower);
+    let outbound = trimmed;
+    if (summarizePageRequested) {
+      const pageText = extractVisibleText();
+      if (!pageText) {
+        addMessage("⚠️ I could not read visible page content to summarize.", "warn");
+        setIsSending(false);
+        return;
+      }
+      const clipped = pageText.slice(0, 18000);
+      outbound = [
+        "Summarize the visible content of the current webpage.",
+        "Return:",
+        "1. TL;DR (2-3 lines)",
+        "2. Key points (5 bullets max)",
+        "3. Action items (if any)",
+        "4. Any unclear/missing info",
+        "",
+        "PAGE CONTENT:",
+        clipped,
+      ].join("\n");
+    } else if (brainstormMode && !lower.startsWith("/brainstorm")) {
+      outbound = `/brainstorm ${trimmed}`;
+    }
     if (brainstormMode) setBrainstormMode(false);
     await executeWithContext(outbound, [...messages, userMsg], runId);
   };
 
   const handleSend = async () => {
     await sendText(input);
+  };
+
+  const summarizeCurrentPage = async () => {
+    if (isSending) return;
+    await sendText("/summarize-page");
   };
 
   const startBrainstormChat = () => {
@@ -658,6 +765,20 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     return raw;
   };
 
+  const stripInternalMetaLines = (raw: string) =>
+    raw
+      .split("\n")
+      .filter((line) => {
+        const t = line.trim();
+        if (!t) return true;
+        if (t.startsWith("🧠 Reasoning:")) return false;
+        if (t.startsWith("🎯 Intent:")) return false;
+        if (t.startsWith("⚠️ Risk Level:")) return false;
+        return true;
+      })
+      .join("\n")
+      .trim();
+
   const addMessage = (
     text: string,
     type?: Message["type"],
@@ -667,7 +788,8 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
     assistantId?: string
   ) => {
     const id = Date.now().toString() + Math.random();
-    const safeText = normalizeAssistantText(text);
+    const safeText = stripInternalMetaLines(normalizeAssistantText(text));
+    if (!safeText) return;
     const msg: Message = {
       id,
       text: safeText,
@@ -1449,6 +1571,38 @@ const MainChat: React.FC<MainChatProps> = ({ orchestrator }) => {
             title="Upload files (or drag and drop)"
           >
             +
+          </button>
+          <button
+            onClick={summarizeCurrentPage}
+            style={{
+              padding: "0.46rem 0.62rem",
+              background: "rgba(15,23,42,0.78)",
+              color: "#e2e8f0",
+              border: "1px solid rgba(148,163,184,0.28)",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontSize: "0.73rem",
+              fontWeight: 700,
+            }}
+            title="Summarize this page"
+          >
+            Summarize
+          </button>
+          <button
+            onClick={() => void sendText("/answer-submit")}
+            style={{
+              padding: "0.46rem 0.62rem",
+              background: "rgba(15,23,42,0.78)",
+              color: "#e2e8f0",
+              border: "1px solid rgba(148,163,184,0.28)",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontSize: "0.73rem",
+              fontWeight: 700,
+            }}
+            title="Answer and submit page form"
+          >
+            Answer+Submit
           </button>
           {messages.length === 0 && (
             <button

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNotifications } from "@/services/notificationStore";
+import { loadBranding } from "@/services/branding";
 
 interface BootScreenProps {
   onDone: () => void;
@@ -45,6 +46,7 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
   const [logs, setLogs] = useState<BootLog[]>([]);
   const [hints, setHints] = useState<FloatingHint[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
+  const [branding, setBranding] = useState(() => loadBranding());
 
   const { addNotification } = useNotifications(); // ✅ Get notification hook
 
@@ -54,6 +56,16 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
       return () => clearInterval(id);
     }
   }, [progress, animatedProgress]);
+
+  useEffect(() => {
+    const refreshBranding = () => setBranding(loadBranding());
+    window.addEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+    window.addEventListener("storage", refreshBranding);
+    return () => {
+      window.removeEventListener("neuroedge:brandingUpdated", refreshBranding as EventListener);
+      window.removeEventListener("storage", refreshBranding);
+    };
+  }, []);
 
   useEffect(() => {
     let logId = 0;
@@ -128,7 +140,24 @@ const BootScreen: React.FC<BootScreenProps> = ({ onDone }) => {
   }, [onDone, addNotification]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#1e1e2f", color: "#fff", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", fontFamily: "monospace", zIndex: 9999, overflow: "hidden" }}>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background:
+          branding.bootBackgroundUrl && branding.bootBackgroundUrl.trim()
+            ? `linear-gradient(rgba(15,23,42,${branding.bootOverlayOpacity}), rgba(2,6,23,${branding.bootOverlayOpacity})), url(${branding.bootBackgroundUrl}) center/cover no-repeat`
+            : "#1e1e2f",
+        color: "#fff",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        alignItems: "center",
+        fontFamily: "monospace",
+        zIndex: 9999,
+        overflow: "hidden",
+      }}
+    >
       <div style={{ marginBottom: "1rem", fontSize: "1.3rem" }}>{animatedProgress < 100 ? "Booting NeuroEdge…" : "Finalizing…"}</div>
       <div style={{ width: "60%", height: "14px", background: "#333", borderRadius: "7px", overflow: "hidden" }}>
         <div style={{ width: `${animatedProgress}%`, height: "100%", background: "#3a3aff", transition: "width 0.05s linear" }} />

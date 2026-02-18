@@ -1079,8 +1079,8 @@ const Dashboard: React.FC = () => {
         setDashboardRole("enterprise");
         return;
       }
-      if (tier === "pro" || tier === "paid") {
-        setDashboardRole("developer");
+      if (tier === "plus" || tier === "pro" || tier === "paid" || tier === "business" || tier === "team") {
+        setDashboardRole("user");
         return;
       }
     } catch {
@@ -2716,10 +2716,29 @@ const Dashboard: React.FC = () => {
     const orchFiles = Array.isArray(backend?.orchestrator?.files) ? backend.orchestrator.files : [];
     const frontendFiles = Array.isArray(scan?.frontend?.files) ? scan.frontend.files : [];
 
-    const buildFromFiles = (domain: RuntimeDomain, files: string[], kind: RuntimeUnit["kind"]) => {
+    const inferRuntimeKind = (
+      domain: RuntimeDomain,
+      path: string,
+      fallback: RuntimeUnit["kind"]
+    ): RuntimeUnit["kind"] => {
+      const file = (path.split("/").pop() || path).toLowerCase();
+      if (domain === "frontend") return "module";
+      if (/(^|[_\-])agent(s)?(\.|$)|agent_/.test(file)) return "agent";
+      if (/(^|[_\-])engine(s)?(\.|$)|engine_/.test(file)) return "engine";
+      if (/(^|[_\-])module(s)?(\.|$)|module_/.test(file)) return "module";
+      if (/(^|[_\-])instance(s)?(\.|$)|instance_/.test(file)) return "instance";
+      return fallback;
+    };
+
+    const buildFromFiles = (
+      domain: RuntimeDomain,
+      files: string[],
+      fallbackKind: RuntimeUnit["kind"]
+    ) => {
       const onlineState = runtimeServiceState[domain];
       return extractRuntimeFiles(files, domain).map((path, idx) => {
         const base = path.split("/").pop() || path;
+        const kind = inferRuntimeKind(domain, path, fallbackKind);
         const hint = logHintFor(domain, base);
         const live = onlineState === "offline" ? false : hint ? false : true;
         return {
@@ -2818,16 +2837,57 @@ const Dashboard: React.FC = () => {
     };
   }, [runtimeUnits, runtimeDomain]);
 
+  const runtimeKindSummary = useMemo(() => {
+    const units = runtimeUnits[runtimeDomain] || [];
+    const countRegistered = (kind: RuntimeUnit["kind"]) =>
+      units.filter((u) => u.kind === kind && u.registered).length;
+    const countLive = (kind: RuntimeUnit["kind"]) =>
+      units.filter((u) => u.kind === kind && u.live).length;
+    const countOffline = (kind: RuntimeUnit["kind"]) =>
+      units.filter((u) => u.kind === kind && !u.live).length;
+    return {
+      agent: {
+        registered: countRegistered("agent"),
+        live: countLive("agent"),
+        offline: countOffline("agent"),
+      },
+      engine: {
+        registered: countRegistered("engine"),
+        live: countLive("engine"),
+        offline: countOffline("engine"),
+      },
+      module: {
+        registered: countRegistered("module"),
+        live: countLive("module"),
+        offline: countOffline("module"),
+      },
+      instance: {
+        registered: countRegistered("instance"),
+        live: countLive("instance"),
+        offline: countOffline("instance"),
+      },
+      file: {
+        registered: countRegistered("file"),
+        live: countLive("file"),
+        offline: countOffline("file"),
+      },
+    };
+  }, [runtimeUnits, runtimeDomain]);
+
   const loadRuntimeInventory = async () => {
     if (!canAccessAdminOps) return;
     setRuntimeScanLoading(true);
     try {
-      const [scanRes, agentsRes] = await Promise.all([
+      const [scanRes, analyzeRes, agentsRes] = await Promise.all([
         callAction("/twin/scan", {}),
+        callAction("/twin/analyze", {}).catch(() => null),
         getJson("/admin/agents").catch(() => null),
       ]);
       if (scanRes?.structure) {
         setRuntimeTwinScan(scanRes);
+      }
+      if (analyzeRes) {
+        addNotification({ type: "info", message: "Twin analyze completed and runtime diagnostics recorded." });
       }
       if (Array.isArray(agentsRes?.agents)) {
         setRuntimeAgentRegistry(agentsRes.agents);
@@ -5416,7 +5476,14 @@ const Dashboard: React.FC = () => {
     });
 
   const onBrandAssetUpload = async (
-    kind: "logoUrl" | "iconUrl" | "faviconUrl" | "mainChatBackgroundUrl" | "floatingChatBackgroundUrl" | "loginBackgroundUrl",
+    kind:
+      | "logoUrl"
+      | "iconUrl"
+      | "faviconUrl"
+      | "bootBackgroundUrl"
+      | "mainChatBackgroundUrl"
+      | "floatingChatBackgroundUrl"
+      | "loginBackgroundUrl",
     files: FileList | null
   ) => {
     const file = files?.[0];
@@ -5440,9 +5507,11 @@ const Dashboard: React.FC = () => {
       logoUrl: brandingDraft.logoUrl || defaultBranding.logoUrl,
       iconUrl: brandingDraft.iconUrl || defaultBranding.iconUrl,
       faviconUrl: brandingDraft.faviconUrl || brandingDraft.iconUrl || defaultBranding.faviconUrl,
+      bootBackgroundUrl: brandingDraft.bootBackgroundUrl || "",
       mainChatBackgroundUrl: brandingDraft.mainChatBackgroundUrl || "",
       floatingChatBackgroundUrl: brandingDraft.floatingChatBackgroundUrl || "",
       loginBackgroundUrl: brandingDraft.loginBackgroundUrl || "",
+      bootOverlayOpacity: Number(brandingDraft.bootOverlayOpacity || defaultBranding.bootOverlayOpacity),
       mainChatOverlayOpacity: Number(brandingDraft.mainChatOverlayOpacity || defaultBranding.mainChatOverlayOpacity),
       floatingOverlayOpacity: Number(brandingDraft.floatingOverlayOpacity || defaultBranding.floatingOverlayOpacity),
       loginOverlayOpacity: Number(brandingDraft.loginOverlayOpacity || defaultBranding.loginOverlayOpacity),
@@ -9044,6 +9113,13 @@ const Dashboard: React.FC = () => {
             </label>
           </div>
           <div style={row}>
+            <span>BootScreen Background</span>
+            <label style={chip}>
+              Upload
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onBrandAssetUpload("bootBackgroundUrl", e.target.files)} />
+            </label>
+          </div>
+          <div style={row}>
             <span>Floating Chat Background</span>
             <label style={chip}>
               Upload
@@ -9065,10 +9141,25 @@ const Dashboard: React.FC = () => {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 8 }}>
           <img src={brandingDraft.mainChatBackgroundUrl || defaultBranding.logoUrl} alt="main chat bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
-          <img src={brandingDraft.floatingChatBackgroundUrl || defaultBranding.logoUrl} alt="floating bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+          <img src={brandingDraft.bootBackgroundUrl || defaultBranding.logoUrl} alt="boot bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
           <img src={brandingDraft.loginBackgroundUrl || defaultBranding.logoUrl} alt="login bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(1, minmax(120px, 1fr))", gap: 8 }}>
+          <img src={brandingDraft.floatingChatBackgroundUrl || defaultBranding.logoUrl} alt="floating bg preview" style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 8, border: "1px solid rgba(148,163,184,0.35)" }} />
+        </div>
         <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ ...row, alignItems: "center" }}>
+            <span>Boot overlay opacity</span>
+            <input
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.02}
+              value={brandingDraft.bootOverlayOpacity}
+              onChange={(e) => setBrandingDraft((p) => ({ ...p, bootOverlayOpacity: Number(e.target.value) }))}
+              style={{ width: 180 }}
+            />
+          </div>
           <div style={{ ...row, alignItems: "center" }}>
             <span>Main chat overlay opacity</span>
             <input
@@ -9167,10 +9258,10 @@ const Dashboard: React.FC = () => {
       <Card title="Runtime Debug Matrix (Founder/Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {([
-            ["kernel", `Kernel (${runtimeCounts.kernel})`],
-            ["ml", `ML (${runtimeCounts.ml})`],
-            ["orchestrator", `Orchestrator (${runtimeCounts.orchestrator})`],
-            ["frontend", `Frontend modules (${runtimeCounts.frontend})`],
+            ["kernel", `Kernel: ${runtimeCounts.kernel}`],
+            ["ml", `ML: ${runtimeCounts.ml}`],
+            ["orchestrator", `Orchestrator: ${runtimeCounts.orchestrator}`],
+            ["frontend", `Frontend modules: ${runtimeCounts.frontend}`],
           ] as Array<[RuntimeDomain, string]>).map(([key, label]) => (
             <button
               key={key}
@@ -9199,11 +9290,25 @@ const Dashboard: React.FC = () => {
             Expand Code
           </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, marginTop: 8 }}>
           <Stat label="Registered" value={String(runtimeSummary.registered)} />
           <Stat label="Live" value={String(runtimeSummary.live)} />
           <Stat label="Offline" value={String(runtimeSummary.offline)} />
           <Stat label="Service State" value={runtimeServiceState[runtimeDomain]} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Agents Registered" value={String(runtimeKindSummary.agent.registered)} />
+          <Stat label="Engines Registered" value={String(runtimeKindSummary.engine.registered)} />
+          <Stat label="Modules Registered" value={String(runtimeKindSummary.module.registered)} />
+          <Stat label="Instances Registered" value={String(runtimeKindSummary.instance.registered)} />
+          <Stat label="Files Registered" value={String(runtimeKindSummary.file.registered)} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Agents Offline" value={String(runtimeKindSummary.agent.offline)} />
+          <Stat label="Engines Offline" value={String(runtimeKindSummary.engine.offline)} />
+          <Stat label="Modules Offline" value={String(runtimeKindSummary.module.offline)} />
+          <Stat label="Instances Offline" value={String(runtimeKindSummary.instance.offline)} />
+          <Stat label="Files Offline" value={String(runtimeKindSummary.file.offline)} />
         </div>
         <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
           Source: backend live status + twin code scan. Last runtime scan:{" "}
@@ -9844,10 +9949,10 @@ const Dashboard: React.FC = () => {
       <Card title="Runtime Debug Matrix (Admin)" wide>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {([
-            ["kernel", `Kernel (${runtimeCounts.kernel})`],
-            ["ml", `ML (${runtimeCounts.ml})`],
-            ["orchestrator", `Orchestrator (${runtimeCounts.orchestrator})`],
-            ["frontend", `Frontend modules (${runtimeCounts.frontend})`],
+            ["kernel", `Kernel: ${runtimeCounts.kernel}`],
+            ["ml", `ML: ${runtimeCounts.ml}`],
+            ["orchestrator", `Orchestrator: ${runtimeCounts.orchestrator}`],
+            ["frontend", `Frontend modules: ${runtimeCounts.frontend}`],
           ] as Array<[RuntimeDomain, string]>).map(([key, label]) => (
             <button key={key} style={{ ...(runtimeDomain === key ? primary : chip), minWidth: 170 }} onClick={() => setRuntimeDomain(key)}>
               {label}
@@ -9859,11 +9964,18 @@ const Dashboard: React.FC = () => {
           <button style={chip} onClick={() => runRuntimeDiagnostics(runtimeDomain)}>Diagnostics</button>
           <button style={chip} onClick={() => runRuntimeAutoFix(runtimeDomain)}>Auto Fix</button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, marginTop: 8 }}>
           <Stat label="Registered" value={String(runtimeSummary.registered)} />
           <Stat label="Live" value={String(runtimeSummary.live)} />
           <Stat label="Offline" value={String(runtimeSummary.offline)} />
           <Stat label="State" value={runtimeServiceState[runtimeDomain]} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, marginTop: 8 }}>
+          <Stat label="Agents Registered" value={String(runtimeKindSummary.agent.registered)} />
+          <Stat label="Engines Registered" value={String(runtimeKindSummary.engine.registered)} />
+          <Stat label="Modules Registered" value={String(runtimeKindSummary.module.registered)} />
+          <Stat label="Instances Registered" value={String(runtimeKindSummary.instance.registered)} />
+          <Stat label="Files Registered" value={String(runtimeKindSummary.file.registered)} />
         </div>
         <div style={{ marginTop: 8, maxHeight: 320, overflowY: "auto", overflowX: "hidden", display: "grid", gap: 6, paddingRight: 4 }}>
           {(runtimeUnits[runtimeDomain] || []).slice(0, 80).map((unit) => (
@@ -10720,9 +10832,9 @@ const Card: React.FC<{ title: string; children: React.ReactNode; wide?: boolean 
 };
 
 const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div style={row}>
-    <span style={muted}>{label}</span>
-    <strong>{value}</strong>
+  <div style={statBox}>
+    <span style={statLabel}>{label}</span>
+    <strong style={statValue}>{value}</strong>
   </div>
 );
 
@@ -10838,6 +10950,26 @@ const winBtn: React.CSSProperties = {
 };
 
 const row: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 };
+const statBox: React.CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.2)",
+  borderRadius: 8,
+  padding: "0.45rem 0.55rem",
+  background: "rgba(15,23,42,0.5)",
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+const statLabel: React.CSSProperties = {
+  color: "#94a3b8",
+  fontSize: "0.74rem",
+  lineHeight: 1.2,
+};
+const statValue: React.CSSProperties = {
+  fontSize: "1.02rem",
+  lineHeight: 1.1,
+  color: "#e2e8f0",
+  wordBreak: "break-word",
+};
 const log: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.2)",
   borderRadius: 8,

@@ -128,9 +128,8 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const headerEmail = String(req.header("x-user-email") || "").trim().toLowerCase();
   const headerName = String(req.header("x-user-name") || "").trim();
   const headerDeviceId = String(req.header("x-device-id") || "").trim();
-  const trustHeaderIdentity = process.env.AUTH_TRUST_HEADERS
-    ? isTruthy(process.env.AUTH_TRUST_HEADERS)
-    : process.env.NODE_ENV !== "production";
+  // Secure by default: header-based identity is disabled unless explicitly enabled.
+  const trustHeaderIdentity = isTruthy(process.env.AUTH_TRUST_HEADERS || "false");
   const hasHeaderIdentity = !!(headerRole || headerEmail || headerName);
   const allowHeaderFallback = trustHeaderIdentity && hasHeaderIdentity;
 

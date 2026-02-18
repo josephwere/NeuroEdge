@@ -1,0 +1,35 @@
+{
+  "name": "neuroedge-native",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "bootstrap:native": "bash ./scripts/bootstrap-native.sh",
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "typecheck": "tsc --noEmit",
+    "release:setup": "bash ./scripts/setup-release-signing.sh",
+    "release:bundle": "bash ./scripts/build-release.sh"
+  },
+  "dependencies": {
+    "@neuroedge/react-native-twin": "file:../react-native-neuroedge-twin",
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@react-native-voice/voice": "^3.2.4",
+    "react-native-document-picker": "^9.3.1",
+    "react": "18.2.0",
+    "react-native": "0.74.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "14.0.1",
+    "@react-native/babel-preset": "0.74.87",
+    "@react-native/metro-config": "0.74.87",
+    "@react-native/typescript-config": "0.74.87",
+    "@types/react": "^18.2.79",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

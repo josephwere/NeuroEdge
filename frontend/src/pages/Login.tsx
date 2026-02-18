@@ -16,7 +16,7 @@ interface TestAccount {
 
 interface LoginProps {
   embedded?: boolean;
-  onSuccess?: () => void;
+  onSuccess?: (payload?: { name: string; role: LoginRole; plan: LoginPlan; guest: boolean }) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
@@ -100,7 +100,10 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
   }, []);
 
   const completeLogin = (payload: { name: string; email: string; provider: AuthMethod; phone?: string; role?: LoginRole; plan?: LoginPlan }) => {
-    const token = `neuroedge-${payload.provider}-token`;
+    // Keep token empty for local/dev account mode unless a real JWT is supplied from env.
+    const token = String(import.meta.env.VITE_DEV_STATIC_JWT || "").trim();
+    const role = payload.role || "user";
+    const plan = payload.plan || "free";
     setUser({
       name: payload.name,
       email: payload.email,
@@ -109,10 +112,27 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
       provider: payload.provider,
       phone: payload.phone,
       country: "global",
-      role: payload.role || "user",
-      plan: payload.plan || "free",
+      role,
+      plan,
     });
-    onSuccess?.();
+    try {
+      const rawProfile = localStorage.getItem("neuroedge_profile_settings");
+      const prev = rawProfile ? JSON.parse(rawProfile) : {};
+      localStorage.setItem(
+        "neuroedge_profile_settings",
+        JSON.stringify({
+          ...prev,
+          name: payload.name,
+          email: payload.email,
+          mode: "account",
+          authMethod: payload.provider,
+        })
+      );
+      window.dispatchEvent(new CustomEvent("neuroedge:profileUpdated"));
+    } catch {
+      // ignore storage parse/write issues
+    }
+    onSuccess?.({ name: payload.name, role, plan, guest: false });
   };
 
   const handleAuth = () => {
@@ -173,7 +193,24 @@ const Login: React.FC<LoginProps> = ({ embedded = false, onSuccess }) => {
       provider: "guest",
       country: "global",
     });
-    onSuccess?.();
+    try {
+      const rawProfile = localStorage.getItem("neuroedge_profile_settings");
+      const prev = rawProfile ? JSON.parse(rawProfile) : {};
+      localStorage.setItem(
+        "neuroedge_profile_settings",
+        JSON.stringify({
+          ...prev,
+          name: "Guest User",
+          email: "",
+          mode: "guest",
+          authMethod: "guest",
+        })
+      );
+      window.dispatchEvent(new CustomEvent("neuroedge:profileUpdated"));
+    } catch {
+      // ignore storage parse/write issues
+    }
+    onSuccess?.({ name: "Guest User", role: "user", plan: "free", guest: true });
   };
 
   return (

@@ -3,9 +3,11 @@ export interface BrandingConfig {
   logoUrl: string;
   iconUrl: string;
   faviconUrl: string;
+  bootBackgroundUrl: string;
   mainChatBackgroundUrl: string;
   floatingChatBackgroundUrl: string;
   loginBackgroundUrl: string;
+  bootOverlayOpacity: number;
   mainChatOverlayOpacity: number;
   floatingOverlayOpacity: number;
   loginOverlayOpacity: number;
@@ -20,9 +22,11 @@ export const defaultBranding: BrandingConfig = {
   logoUrl: "/logo.png",
   iconUrl: "/icon.png",
   faviconUrl: "/favicon.ico",
+  bootBackgroundUrl: "",
   mainChatBackgroundUrl: "",
   floatingChatBackgroundUrl: "",
   loginBackgroundUrl: "",
+  bootOverlayOpacity: 0.62,
   mainChatOverlayOpacity: 0.62,
   floatingOverlayOpacity: 0.92,
   loginOverlayOpacity: 0.6,
@@ -42,9 +46,11 @@ export function loadBranding(): BrandingConfig {
       logoUrl: parsed.logoUrl?.trim() || defaultBranding.logoUrl,
       iconUrl: parsed.iconUrl?.trim() || defaultBranding.iconUrl,
       faviconUrl: parsed.faviconUrl?.trim() || parsed.iconUrl?.trim() || defaultBranding.faviconUrl,
+      bootBackgroundUrl: parsed.bootBackgroundUrl?.trim() || defaultBranding.bootBackgroundUrl,
       mainChatBackgroundUrl: parsed.mainChatBackgroundUrl?.trim() || defaultBranding.mainChatBackgroundUrl,
       floatingChatBackgroundUrl: parsed.floatingChatBackgroundUrl?.trim() || defaultBranding.floatingChatBackgroundUrl,
       loginBackgroundUrl: parsed.loginBackgroundUrl?.trim() || defaultBranding.loginBackgroundUrl,
+      bootOverlayOpacity: clamp(Number(parsed.bootOverlayOpacity ?? defaultBranding.bootOverlayOpacity), 0.1, 1),
       mainChatOverlayOpacity: clamp(Number(parsed.mainChatOverlayOpacity ?? defaultBranding.mainChatOverlayOpacity), 0.1, 1),
       floatingOverlayOpacity: clamp(Number(parsed.floatingOverlayOpacity ?? defaultBranding.floatingOverlayOpacity), 0.2, 1),
       loginOverlayOpacity: clamp(Number(parsed.loginOverlayOpacity ?? defaultBranding.loginOverlayOpacity), 0.1, 1),

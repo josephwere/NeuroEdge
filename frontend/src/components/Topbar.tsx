@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useUI } from "@/services/uiStore";
 import { loadBranding } from "@/services/branding";
+import { isFounderUser } from "@/services/founderAccess";
 
 interface TopbarProps {
   onSearch?: (query: string) => void;
@@ -19,12 +20,14 @@ const Topbar: React.FC<TopbarProps> = ({
   onNavigate,
   onNewChat,
 }) => {
-  const { theme, toggleTheme, themePreference, setThemePreference } = useUI();
+  const { theme, toggleTheme, themePreference, setThemePreference, user } = useUI();
   const [search, setSearch] = useState("");
   const [showCommands, setShowCommands] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [branding, setBranding] = useState(() => loadBranding());
+  const [profileName, setProfileName] = useState<string>("");
+  const [profileAvatar, setProfileAvatar] = useState<string>("");
 
   /* -------------------- */
   /* Network status */
@@ -52,10 +55,56 @@ const Topbar: React.FC<TopbarProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const readProfile = () => {
+      try {
+        const raw = localStorage.getItem("neuroedge_profile_settings");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setProfileName(String(parsed?.name || ""));
+          setProfileAvatar(String(parsed?.avatarUrl || ""));
+          return;
+        }
+      } catch {
+        // ignore parse errors
+      }
+      setProfileName("");
+      setProfileAvatar("");
+    };
+    readProfile();
+    window.addEventListener("neuroedge:profileUpdated", readProfile as EventListener);
+    window.addEventListener("storage", readProfile);
+    return () => {
+      window.removeEventListener("neuroedge:profileUpdated", readProfile as EventListener);
+      window.removeEventListener("storage", readProfile);
+    };
+  }, []);
+
   const runCommand = (cmd: string) => {
     onCommand(cmd);
     setShowCommands(false);
   };
+
+  const planLabel = (() => {
+    const plan = String(user?.plan || "free").toLowerCase();
+    if (!user || user.guest) return "Guest";
+    if (!plan) return "Free";
+    return plan.charAt(0).toUpperCase() + plan.slice(1);
+  })();
+  const accessLabel = (() => {
+    const role = String(user?.role || "").toLowerCase();
+    if (isFounderUser()) return "Internal";
+    if (!user || user.guest || role === "guest") return "Guest";
+    if (["founder", "admin", "developer"].includes(role)) return "Internal";
+    if (role === "enterprise" || String(user?.plan || "").toLowerCase() === "enterprise") return "Enterprise";
+    return "User";
+  })();
+  const accessTheme = (() => {
+    if (accessLabel === "Guest") return { border: "rgba(148,163,184,0.55)", bg: "rgba(100,116,139,0.16)", fg: "#e2e8f0" };
+    if (accessLabel === "Enterprise") return { border: "rgba(167,139,250,0.55)", bg: "rgba(139,92,246,0.16)", fg: "#ede9fe" };
+    if (accessLabel === "Internal") return { border: "rgba(251,191,36,0.62)", bg: "rgba(245,158,11,0.15)", fg: "#fef3c7" };
+    return { border: "rgba(59,130,246,0.55)", bg: "rgba(37,99,235,0.16)", fg: "#dbeafe" };
+  })();
 
   return (
     <div
@@ -93,6 +142,9 @@ const Topbar: React.FC<TopbarProps> = ({
           <img src={branding.iconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 18, height: 18, borderRadius: 4 }} />
           {branding.productName || "NeuroEdge"}
       </button>
+
+      <span style={planBadgeStyle}>Plan: {planLabel}</span>
+      <span style={accessChipStyle(accessTheme)}>Access: {accessLabel}</span>
 
       {/* Offline indicator */}
       {isOffline && (
@@ -160,7 +212,13 @@ const Topbar: React.FC<TopbarProps> = ({
 
       {/* User Menu */}
       <button title="User menu" style={iconButton} onClick={() => setShowUserMenu((v) => !v)}>
-        👤
+        {profileAvatar ? (
+          <img src={profileAvatar} alt="profile" style={{ width: 24, height: 24, borderRadius: "50%", objectFit: "cover" }} />
+        ) : (
+          <span style={{ fontWeight: 800, fontSize: "0.82rem" }}>
+            {(profileName || user?.name || "G").split(" ")[0][0]?.toUpperCase() || "G"}
+          </span>
+        )}
       </button>
 
       {showUserMenu && (
@@ -289,6 +347,28 @@ const iconButton: React.CSSProperties = {
   fontSize: "1.1rem",
   color: "#e2e8f0",
 };
+
+const planBadgeStyle: React.CSSProperties = {
+  padding: "0.22rem 0.55rem",
+  borderRadius: 999,
+  border: "1px solid rgba(56,189,248,0.5)",
+  background: "rgba(14,165,233,0.15)",
+  color: "#e0f2fe",
+  fontSize: "0.72rem",
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+};
+
+const accessChipStyle = (theme: { border: string; bg: string; fg: string }): React.CSSProperties => ({
+  padding: "0.22rem 0.55rem",
+  borderRadius: 999,
+  border: `1px solid ${theme.border}`,
+  background: theme.bg,
+  color: theme.fg,
+  fontSize: "0.72rem",
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+});
 
 const userMenuStyle: React.CSSProperties = {
   position: "absolute",

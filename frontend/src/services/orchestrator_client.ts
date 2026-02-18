@@ -446,7 +446,8 @@ export class OrchestratorClient {
       // Ignore malformed local storage values.
     }
 
-    const token = envToken || userToken || sessionToken;
+    const looksLikeJwt = (v: string) => String(v || "").trim().split(".").length === 3;
+    const token = envToken || (looksLikeJwt(userToken) ? userToken : "") || (looksLikeJwt(sessionToken) ? sessionToken : "");
     return {
       token,
       apiKey: envApiKey,

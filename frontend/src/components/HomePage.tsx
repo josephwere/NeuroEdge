@@ -19,6 +19,7 @@ import ProfileSettings from "@/components/ProfileSettings";
 
 import { OrchestratorClient } from "@/services/orchestrator_client";
 import { useChatHistory } from "@/services/chatHistoryStore";
+import { useNotifications } from "@/services/notificationStore";
 import { exportChatJSON, exportChatTXT } from "@/services/chatExport";
 import { useUI } from "@/services/uiStore";
 import { confirmSafeAction } from "@/services/safetyPrompts";
@@ -158,19 +159,90 @@ interface Props {
 
 const HomePage: React.FC<Props> = ({ orchestrator }) => {
   const { allMessages, resetHistory } = useChatHistory();
+  const { addNotification } = useNotifications();
   const { toggleTheme, user } = useUI();
+  const orchestratorUrl = (import.meta.env.VITE_ORCHESTRATOR_URL as string) || "http://localhost:7070";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeView, setActiveView] = useState<
     "chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions"
   >("chat");
+  const [allowedViews, setAllowedViews] = useState<
+    Array<"chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions">
+  >(["chat"]);
+  const [internalToolsEnabled, setInternalToolsEnabled] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLoginPage, setShowLoginPage] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+
+  const fallbackViewsForUser = React.useCallback(() => {
+    const role = String(user?.role || "").toLowerCase();
+    const signedIn = Boolean(
+      user &&
+        (!user.guest || !!user.email || !!user.token || ["founder", "admin", "developer", "enterprise", "user"].includes(role))
+    );
+    if (!signedIn) {
+      return ["chat"] as Array<"chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions">;
+    }
+    const base: Array<"chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions"> = [
+      "chat",
+      "my_chats",
+      "projects",
+      "dashboard",
+      "settings",
+      "history",
+    ];
+    if (["founder", "admin", "developer"].includes(role)) base.push("extensions");
+    return base;
+  }, [user]);
 
   useEffect(() => {
     const seen = localStorage.getItem("neuroedge_tutorial_seen") === "1";
     if (!seen) setShowTutorial(true);
   }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      const fallbackViews = fallbackViewsForUser();
+      setAllowedViews(fallbackViews);
+      setInternalToolsEnabled(["founder", "admin", "developer"].includes(String(user?.role || "").toLowerCase()));
+      const envApiKey = String(import.meta.env.VITE_NEUROEDGE_API_KEY || "").trim();
+      const looksLikeJwt = (token?: string) => {
+        const t = String(token || "").trim();
+        return t.split(".").length === 3;
+      };
+      const headers: Record<string, string> = {
+        "x-user-role": String(user?.role || "guest"),
+        "x-user-plan": String(user?.plan || "free"),
+      };
+      if (envApiKey) {
+        headers["x-api-key"] = envApiKey;
+        headers.Authorization = `Bearer ${envApiKey}`;
+      }
+      if (user?.email) headers["x-user-email"] = user.email;
+      if (user?.name) headers["x-user-name"] = user.name;
+      if (!envApiKey && looksLikeJwt(user?.token)) headers.Authorization = `Bearer ${user?.token}`;
+      try {
+        const res = await fetch(`${orchestratorUrl.replace(/\/$/, "")}/app/config?client=web`, { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        const rawViews = Array.isArray(data?.shell?.sidebarViews) ? data.shell.sidebarViews : [];
+        const normalized = rawViews
+          .map((v: string) => String(v))
+          .filter((v: string) =>
+            ["chat", "my_chats", "projects", "dashboard", "settings", "history", "extensions"].includes(v)
+          ) as Array<"chat" | "my_chats" | "projects" | "dashboard" | "settings" | "history" | "extensions">;
+        if (normalized.length > 0) setAllowedViews(normalized);
+        setInternalToolsEnabled(Boolean(data?.shell?.featureFlags?.internalToolsEnabled));
+      } catch {
+        // keep local signed-in fallback defaults
+      }
+    };
+    void run();
+  }, [orchestratorUrl, user?.email, user?.name, user?.plan, user?.role, user?.token, fallbackViewsForUser]);
+
+  useEffect(() => {
+    if (!allowedViews.includes(activeView)) setActiveView("chat");
+  }, [allowedViews, activeView]);
 
   /* ---------------- Extensions Loader ---------------- */
   useEffect(() => {
@@ -228,7 +300,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       return;
     }
     if (normalized === "neuroedge diagnostics") {
-      setActiveView("dashboard");
+      if (allowedViews.includes("dashboard")) setActiveView("dashboard");
       return;
     }
     if (normalized === "export chat") {
@@ -268,6 +340,11 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onNavigate={setActiveView}
+          allowedViews={allowedViews}
+          user={{
+            name: user?.name || "Guest User",
+            mode: !user || user.guest ? "guest" : "account",
+          }}
           onNewChat={startNewChat}
           onLogin={() => setShowLoginPage(v => !v)}
           onOpenNotifications={() => setActiveView("history")}
@@ -293,7 +370,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
           />
 
           {/* Founder Assistant (voice + alerts) */}
-          <FounderAssistant orchestrator={orchestrator} />
+          {internalToolsEnabled && <FounderAssistant orchestrator={orchestrator} />}
 
           {/* Main Content */}
           <div
@@ -317,7 +394,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
                 <ProjectsPanel />
               </WindowShell>
             )}
-            {activeView === "dashboard" && (
+            {activeView === "dashboard" && allowedViews.includes("dashboard") && (
               <WindowShell title="Dashboard" onClose={() => setActiveView("chat")}>
                 <PanelErrorBoundary title="Dashboard">
                   <Dashboard />
@@ -329,7 +406,7 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
                 <SettingsPanel />
               </WindowShell>
             )}
-            {activeView === "extensions" && (
+            {activeView === "extensions" && allowedViews.includes("extensions") && (
               <WindowShell title="Extensions" onClose={() => setActiveView("chat")}>
                 <ExtensionsPanel />
               </WindowShell>
@@ -345,7 +422,28 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       {showLoginPage && (
         <div style={overlayStyle}>
           <WindowShell title="Login / Access" modal onClose={() => setShowLoginPage(false)}>
-            <Login embedded onSuccess={() => setShowLoginPage(false)} />
+            <Login
+              embedded
+              onSuccess={(payload) => {
+                setShowLoginPage(false);
+                if (payload?.guest) return;
+                const name = payload?.name || "there";
+                addNotification({
+                  type: "success",
+                  message: `Welcome ${name}. Login successful.`,
+                });
+                window.dispatchEvent(
+                  new CustomEvent("neuroedge:welcomeMessage", {
+                    detail: {
+                      name,
+                      role: payload?.role || "user",
+                      plan: payload?.plan || "free",
+                    },
+                  })
+                );
+                setShowTutorial(true);
+              }}
+            />
           </WindowShell>
         </div>
       )}
