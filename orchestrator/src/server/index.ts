@@ -61,7 +61,12 @@ import {
   saveBenchmarkBaselines,
 } from "@quality/benchmarkTracker";
 import { buildConsistencySnapshot } from "@quality/consistency";
-import { createInflightGuard, getInflightSnapshot } from "@quality/sreGuard";
+import {
+  createInflightGuard,
+  getInflightLimitOverrides,
+  getInflightSnapshot,
+  setInflightLimitOverride,
+} from "@quality/sreGuard";
 import {
   getMarketReadinessConfig,
   updateMarketReadinessConfig,
@@ -104,6 +109,7 @@ import fs from "fs";
 import * as crypto from "crypto";
 
 type RestartUrgency = "emergency" | "high" | "normal" | "low";
+let processResilienceHooksBound = false;
 
 function actorRole(req: Request): string {
   const raw = req.auth?.raw || {};
@@ -1113,6 +1119,8 @@ function readDashboardSummary() {
       userOverrides: [],
       updatedAt: Date.now(),
     },
+    dashboardResourceAssistant: defaultDashboardResourceAssistant(),
+    dashboardOpsAssistants: normalizeDashboardOpsAssistants({}),
     neuroExpansionNotifications: [],
     meshExpansion: {
       assistants: [
@@ -1200,6 +1208,12 @@ function readDashboardSummary() {
     idverse: idversePublicView(readIdverseConfigFromState()),
   };
   const dashboard = { ...defaults, ...((state.summary?.dashboard || {}) as Record<string, any>) };
+  dashboard.dashboardResourceAssistant = normalizeDashboardResourceAssistant(
+    dashboard.dashboardResourceAssistant || defaults.dashboardResourceAssistant
+  );
+  dashboard.dashboardOpsAssistants = normalizeDashboardOpsAssistants(
+    dashboard.dashboardOpsAssistants || defaults.dashboardOpsAssistants
+  );
   return { state, dashboard };
 }
 
@@ -1299,6 +1313,14 @@ function findP2PRoute(adj: Map<string, string[]>, from: string, to: string, maxH
 }
 
 type AccessAction = "allow" | "suspend" | "revoke";
+type DashboardAudienceRole =
+  | "founder"
+  | "admin"
+  | "developer"
+  | "enterprise"
+  | "user"
+  | "guest";
+
 const DASHBOARD_PERMISSION_CATALOG = [
   { id: "dashboard.bootstrap", group: "dashboard", label: "View Dashboard Data", scope: "admin:read", roles: ["founder", "admin"] },
   { id: "users.role", group: "users", label: "Change User Roles", scope: "admin:write", roles: ["founder"] },
@@ -1314,7 +1336,7 @@ const DASHBOARD_PERMISSION_CATALOG = [
   { id: "extensions.manage", group: "platform", label: "Manage Extensions", scope: "admin:write", roles: ["founder", "admin", "developer"] },
   { id: "enterprise.manage", group: "enterprise", label: "Manage Enterprise Settings", scope: "admin:write", roles: ["founder", "admin"] },
   { id: "idverse.manage", group: "identity", label: "Configure IDVerse", scope: "admin:write", roles: ["founder", "admin"] },
-  { id: "training.manage", group: "training", label: "Run Training Studio Jobs", scope: "training:write", roles: ["founder", "admin"] },
+  { id: "training.manage", group: "training", label: "Run Training Studio Jobs", scope: "training:write", roles: ["founder", "admin", "developer"] },
   { id: "compute.owner.manage", group: "compute", label: "Manage Own Compute Donation Devices", scope: "chat:write", roles: ["founder", "admin", "developer", "enterprise", "user"] },
   { id: "compute.payout.manage", group: "compute", label: "Approve/Send Compute Payouts", scope: "admin:write", roles: ["founder", "admin"] },
   { id: "loanops.manage", group: "device_security", label: "Manage LoanOps Device Security", scope: "admin:write", roles: ["founder", "admin", "enterprise"] },
@@ -1323,6 +1345,309 @@ const DASHBOARD_PERMISSION_CATALOG = [
   { id: "neuroexpansion.manage", group: "platform", label: "NeuroExpansion Build + Merge", scope: "admin:write", roles: ["founder", "admin", "developer"] },
   { id: "mesh_expansion.manage", group: "mesh", label: "Mesh Expansion Engine + Tasks", scope: "admin:write", roles: ["founder", "admin"] },
 ];
+
+const DASHBOARD_BLOCK_CATALOG = [
+  { id: "shared.voice_ops", title: "NeuroEdge Voice Ops Copilot", views: ["founder", "admin", "developer", "user", "enterprise"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "shared.creator_engine", title: "Create Media (VisionForge)", views: ["founder", "admin", "developer", "user", "enterprise"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "shared.cortex_core", title: "CortexCore Intelligence Engine", views: ["founder", "admin", "developer", "user", "enterprise"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "founder.training_studio", title: "NeuroEdge Training Studio (Founder/Admin)", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.domain_registry", title: "Domain & Link Registry (Founder/Admin)", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.access_control", title: "Task & Permission Control Matrix", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.device_protection", title: "Device Protection & Workforce Security", views: ["founder", "admin", "enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "founder.aegis", title: "AegisCore Shield (Security + Resilience)", views: ["founder", "admin", "enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "founder.artifacts", title: "Artifacts Workspace (Build • Edit • Share)", views: ["founder", "admin"], roles: ["founder", "admin", "developer"] },
+  { id: "founder.neuroexpansion", title: "NeuroExpansion & Building", views: ["founder", "admin", "developer"], roles: ["founder", "admin", "developer"] },
+  { id: "founder.mesh_expansion", title: "Mesh Expansion Engine (Founder/Admin)", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.compute_budget", title: "Compute Payout Budget & Approvals", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.loanops", title: "LoanOps Shield Center (Founder/Admin/Enterprise)", views: ["founder", "admin", "enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "founder.reliability", title: "Reliability Ops (SLO • Canary • Incidents)", views: ["founder", "admin", "developer"], roles: ["founder", "admin", "developer"] },
+  { id: "founder.platform_analytics", title: "Platform Analytics", views: ["founder"], roles: ["founder"] },
+  { id: "founder.subscription", title: "Subscription & Plan Control", views: ["founder"], roles: ["founder"] },
+  { id: "founder.payments", title: "Payment Profile (Dashboard-Managed)", views: ["founder"], roles: ["founder"] },
+  { id: "founder.integrations_api", title: "Integrations & API Platform (Founder Premium)", views: ["founder"], roles: ["founder"] },
+  { id: "founder.branding", title: "Branding Studio (Founder/System Admin)", views: ["founder"], roles: ["founder"] },
+  { id: "founder.system_health", title: "System Health & Security", views: ["founder"], roles: ["founder"] },
+  { id: "founder.runtime_debug", title: "Runtime Debug Matrix (Founder/Admin)", views: ["founder", "admin"], roles: ["founder", "admin"] },
+  { id: "founder.twin_systems", title: "Twin Systems", views: ["founder"], roles: ["founder", "admin"] },
+  { id: "founder.ops_assistants", title: "Ops Assistants Mesh (Founder/Admin/Developer)", views: ["founder", "admin", "developer"], roles: ["founder", "admin", "developer"] },
+  { id: "admin.runtime_debug", title: "Runtime Debug Matrix (Admin)", views: ["admin"], roles: ["founder", "admin"] },
+  { id: "admin.market_readiness", title: "Market Readiness (Admin)", views: ["admin"], roles: ["founder", "admin"] },
+  { id: "admin.user_moderation", title: "User Moderation", views: ["admin"], roles: ["founder", "admin"] },
+  { id: "admin.offer_management", title: "Offer Management", views: ["admin"], roles: ["founder", "admin"] },
+  { id: "admin.support_tickets", title: "Support Tickets", views: ["admin"], roles: ["founder", "admin"] },
+  { id: "developer.api_keys", title: "API Keys", views: ["developer"], roles: ["founder", "admin", "developer", "enterprise"] },
+  { id: "developer.webhooks", title: "Webhook Setup", views: ["developer"], roles: ["founder", "admin", "developer", "enterprise"] },
+  { id: "developer.model_env", title: "Model & Env", views: ["developer"], roles: ["founder", "admin", "developer"] },
+  { id: "developer.debug_tools", title: "Debug Tools", views: ["developer"], roles: ["founder", "admin", "developer"] },
+  { id: "agents.studio", title: "Agent Studio", views: ["agents"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "agents.knowledge", title: "Knowledge Base & Prompting", views: ["agents"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "agents.permissions", title: "Integrations & Permissions", views: ["agents"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "user.workspace", title: "Chat & Prompt Workspace", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user", "guest"] },
+  { id: "user.compute_owner", title: "My Compute Devices & Earnings", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "user.payout", title: "My Payout Details & Requests (Verified)", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "user.protection", title: "My Device Protection Plan", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "user.assistant_builder", title: "My Assistant Builder (User Freedom)", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user"] },
+  { id: "user.saved_prompts", title: "Saved Prompts", views: ["user"], roles: ["founder", "admin", "developer", "enterprise", "user", "guest"] },
+  { id: "enterprise.team_roles", title: "Team Roles & Department Controls", views: ["enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "enterprise.usage", title: "Usage by Department", views: ["enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "enterprise.compliance", title: "Billing, Audit, Compliance", views: ["enterprise"], roles: ["founder", "admin", "enterprise"] },
+  { id: "enterprise.sso", title: "SSO & Governance", views: ["enterprise"], roles: ["founder", "admin", "enterprise"] },
+] as const;
+
+function normalizeDashboardRole(input: string): DashboardAudienceRole {
+  const r = String(input || "").trim().toLowerCase();
+  if (r === "founder" || r === "admin" || r === "developer" || r === "enterprise" || r === "user" || r === "guest") {
+    return r;
+  }
+  if (r === "moderator") return "admin";
+  return "user";
+}
+
+function normalizeResourceRolePolicy(input: any): { enabled: string[]; disabled: string[]; updatedAt: number } {
+  const clean = (arr: any[]) =>
+    Array.from(new Set((Array.isArray(arr) ? arr : []).map((x) => String(x || "").trim()).filter(Boolean)));
+  return {
+    enabled: clean(input?.enabled || []),
+    disabled: clean(input?.disabled || []),
+    updatedAt: Number(input?.updatedAt || Date.now()),
+  };
+}
+
+function normalizeDashboardResourceAssistant(raw: any): any {
+  const rolePoliciesRaw = (raw?.rolePolicies || {}) as Record<string, any>;
+  const roles: DashboardAudienceRole[] = ["founder", "admin", "developer", "enterprise", "user", "guest"];
+  const rolePolicies = roles.reduce((acc: Record<string, any>, role) => {
+    acc[role] = normalizeResourceRolePolicy(rolePoliciesRaw[role]);
+    return acc;
+  }, {});
+  const userPolicies = Array.isArray(raw?.userPolicies)
+    ? raw.userPolicies.map((p: any) => ({
+        userId: String(p?.userId || "").trim().toLowerCase(),
+        ...normalizeResourceRolePolicy(p),
+      }))
+    : [];
+  return {
+    rolePolicies,
+    userPolicies,
+    requests: Array.isArray(raw?.requests) ? raw.requests : [],
+    optimizer: {
+      enabled: raw?.optimizer?.enabled !== false,
+      maxBlocksPerRole: Math.max(5, Number(raw?.optimizer?.maxBlocksPerRole || 18)),
+      hideAfterDaysUnused: Math.max(3, Number(raw?.optimizer?.hideAfterDaysUnused || 14)),
+      updatedAt: Number(raw?.optimizer?.updatedAt || Date.now()),
+    },
+    usage:
+      typeof raw?.usage === "object" && raw?.usage
+        ? {
+            byUser:
+              typeof raw.usage?.byUser === "object" && raw.usage.byUser ? raw.usage.byUser : {},
+            byRole:
+              typeof raw.usage?.byRole === "object" && raw.usage.byRole ? raw.usage.byRole : {},
+          }
+        : { byUser: {}, byRole: {} },
+    updatedAt: Number(raw?.updatedAt || Date.now()),
+  };
+}
+
+function defaultDashboardResourceAssistant() {
+  return normalizeDashboardResourceAssistant({});
+}
+
+function normalizeDashboardOpsAssistants(raw: any): any {
+  const assistants = Array.isArray(raw?.assistants)
+    ? raw.assistants
+    : [
+        {
+          id: "ops-expansion-architect",
+          name: "Expansion Architect",
+          mission: "Find feature gaps and propose guarded codebase expansion through Twin + NeuroExpansion.",
+          enabled: true,
+          status: "idle",
+          connectedSystems: ["twin", "neuroexpansion", "mesh", "agents", "engines"],
+          lastRunAt: 0,
+          lastResult: null,
+        },
+        {
+          id: "ops-self-healing-guardian",
+          name: "Self-Healing Guardian",
+          mission: "Detect runtime failures and trigger safe restart/rollback guidance.",
+          enabled: true,
+          status: "idle",
+          connectedSystems: ["aegis", "reliability", "runtime_debug", "kernel", "ml", "orchestrator"],
+          lastRunAt: 0,
+          lastResult: null,
+        },
+        {
+          id: "ops-training-orchestrator",
+          name: "Training Orchestrator",
+          mission: "Plan training ingestion/reindex/eval cycles and highlight stale datasets.",
+          enabled: true,
+          status: "idle",
+          connectedSystems: ["training", "rag", "evals", "model_quality", "twin"],
+          lastRunAt: 0,
+          lastResult: null,
+        },
+        {
+          id: "ops-failure-investigator",
+          name: "Failure Investigator",
+          mission: "Correlate errors/warnings/events and produce root-cause hypotheses + fixes.",
+          enabled: true,
+          status: "idle",
+          connectedSystems: ["events", "runtime_debug", "reliability", "mesh_expansion"],
+          lastRunAt: 0,
+          lastResult: null,
+        },
+        {
+          id: "ops-security-deception-analyst",
+          name: "Security Deception Analyst",
+          mission: "Manage defensive honeypot/decoy telemetry to study attacker behavior and close gaps.",
+          enabled: true,
+          status: "idle",
+          connectedSystems: ["device_protection", "aegis", "doctrine", "security_alerts", "twin"],
+          lastRunAt: 0,
+          lastResult: null,
+        },
+      ];
+  return {
+    assistants: assistants.map((a: any) => ({
+      id: String(a?.id || ""),
+      name: String(a?.name || "Ops Assistant"),
+      mission: String(a?.mission || ""),
+      enabled: a?.enabled !== false,
+      status: String(a?.status || "idle"),
+      connectedSystems: Array.isArray(a?.connectedSystems)
+        ? a.connectedSystems.map((x: any) => String(x || "")).filter(Boolean)
+        : [],
+      lastRunAt: Number(a?.lastRunAt || 0),
+      lastResult: a?.lastResult || null,
+    })),
+    policy: {
+      requireFounderApprovalForCodeChanges: raw?.policy?.requireFounderApprovalForCodeChanges !== false,
+      allowDefensiveDeception: raw?.policy?.allowDefensiveDeception !== false,
+      autoRunEnabled: raw?.policy?.autoRunEnabled === true,
+      autoRunIntervalMin: Math.max(5, Number(raw?.policy?.autoRunIntervalMin || 60)),
+      updatedAt: Number(raw?.policy?.updatedAt || Date.now()),
+    },
+    runLogs: Array.isArray(raw?.runLogs) ? raw.runLogs.slice(0, 2000) : [],
+    updatedAt: Number(raw?.updatedAt || Date.now()),
+  };
+}
+
+function allowedBlockIdsForRole(role: DashboardAudienceRole): string[] {
+  return DASHBOARD_BLOCK_CATALOG.filter((b) => (b.roles as readonly string[]).includes(role)).map((b) => b.id);
+}
+
+function effectiveBlockIdsForRole(
+  assistant: any,
+  role: DashboardAudienceRole,
+  userId = ""
+): string[] {
+  const defaultIds = new Set(allowedBlockIdsForRole(role));
+  const rolePolicy = normalizeResourceRolePolicy(assistant?.rolePolicies?.[role] || {});
+  const userPolicy = normalizeResourceRolePolicy(
+    (assistant?.userPolicies || []).find((p: any) => String(p?.userId || "") === String(userId || "").toLowerCase()) || {}
+  );
+  const applyPolicy = (set: Set<string>, policy: { enabled: string[]; disabled: string[] }) => {
+    for (const id of policy.disabled) set.delete(id);
+    for (const id of policy.enabled) {
+      const block = DASHBOARD_BLOCK_CATALOG.find((b) => b.id === id);
+      if (block && (block.roles as readonly string[]).includes(role)) set.add(id);
+    }
+  };
+  applyPolicy(defaultIds, rolePolicy);
+  applyPolicy(defaultIds, userPolicy);
+  return Array.from(defaultIds);
+}
+
+function upsertResourceUserPolicy(assistant: any, userId: string, patch: Partial<{ enabled: string[]; disabled: string[] }>) {
+  const uid = String(userId || "").trim().toLowerCase();
+  if (!uid) return assistant;
+  const policies = Array.isArray(assistant.userPolicies) ? [...assistant.userPolicies] : [];
+  const idx = policies.findIndex((p: any) => String(p.userId) === uid);
+  const current = idx >= 0 ? normalizeResourceRolePolicy(policies[idx]) : normalizeResourceRolePolicy({});
+  const next = normalizeResourceRolePolicy({
+    ...current,
+    ...(patch || {}),
+    updatedAt: Date.now(),
+  });
+  const payload = { userId: uid, ...next };
+  if (idx >= 0) policies[idx] = payload;
+  else policies.push(payload);
+  return { ...assistant, userPolicies: policies, updatedAt: Date.now() };
+}
+
+function mergeBlockUsageMetrics(
+  current: Record<string, any>,
+  update: Partial<{
+    opens: number;
+    clicks: number;
+    openMs: number;
+    lastSeenAt: number;
+    lastClickedAt: number;
+  }>
+): Record<string, any> {
+  const opens = Math.max(0, Number(current?.opens || 0)) + Math.max(0, Number(update.opens || 0));
+  const clicks = Math.max(0, Number(current?.clicks || 0)) + Math.max(0, Number(update.clicks || 0));
+  const openMs = Math.max(0, Number(current?.openMs || 0)) + Math.max(0, Number(update.openMs || 0));
+  return {
+    opens,
+    clicks,
+    openMs,
+    lastSeenAt: Math.max(Number(current?.lastSeenAt || 0), Number(update.lastSeenAt || 0)),
+    lastClickedAt: Math.max(Number(current?.lastClickedAt || 0), Number(update.lastClickedAt || 0)),
+    updatedAt: Date.now(),
+  };
+}
+
+function telemetryRankBlocks(
+  assistant: any,
+  role: DashboardAudienceRole,
+  userId: string,
+  allowed: string[]
+): string[] {
+  const byRole = (assistant?.usage?.byRole || {}) as Record<string, any>;
+  const byUser = (assistant?.usage?.byUser || {}) as Record<string, any>;
+  const roleUsage = (byRole[role] || {}) as Record<string, any>;
+  const userUsage = (byUser[String(userId || "").toLowerCase()] || {}) as Record<string, any>;
+  const scored = allowed.map((id) => {
+    const u = userUsage[id] || {};
+    const r = roleUsage[id] || {};
+    const opens = Number(u.opens || 0) * 2 + Number(r.opens || 0);
+    const clicks = Number(u.clicks || 0) * 2 + Number(r.clicks || 0);
+    const openMs = Number(u.openMs || 0) * 2 + Number(r.openMs || 0);
+    const score = opens * 3 + clicks * 5 + openMs / 10000;
+    return { id, score };
+  });
+  return scored.sort((a, b) => b.score - a.score).map((x) => x.id);
+}
+
+function blockUsageForRole(assistant: any, role: DashboardAudienceRole, blockId: string): Record<string, any> {
+  const usage = (assistant?.usage?.byRole || {}) as Record<string, any>;
+  return (usage?.[role] || {})[blockId] || {};
+}
+
+function blockUsageSummary(assistant: any, role: DashboardAudienceRole) {
+  const allowed = allowedBlockIdsForRole(role);
+  const scored = allowed.map((id) => {
+    const m = blockUsageForRole(assistant, role, id);
+    const opens = Number(m.opens || 0);
+    const clicks = Number(m.clicks || 0);
+    const openMs = Number(m.openMs || 0);
+    const score = opens * 3 + clicks * 5 + openMs / 10000;
+    return {
+      id,
+      title: (DASHBOARD_BLOCK_CATALOG.find((b) => b.id === id)?.title as string) || id,
+      score: Number(score.toFixed(3)),
+      opens,
+      clicks,
+      openMs,
+      lastSeenAt: Number(m.lastSeenAt || 0),
+    };
+  });
+  const topUsed = [...scored].sort((a, b) => b.score - a.score).slice(0, 8);
+  const lowUsed = [...scored].sort((a, b) => a.score - b.score).slice(0, 8);
+  return { topUsed, lowUsed };
+}
 
 function auditDashboardAction(req: Request, domain: string, action: string, payload: Record<string, any> = {}) {
   appendEvent({
@@ -1345,8 +1670,85 @@ export function startServer(
   eventBus: EventBus,
   logger: Logger
 ) {
+  if (!processResilienceHooksBound) {
+    processResilienceHooksBound = true;
+    process.on("uncaughtException", (err: any) => {
+      appendEvent({
+        type: "server.uncaught_exception",
+        timestamp: Date.now(),
+        payload: { message: err?.message || String(err), stack: err?.stack || "" },
+      });
+      logger.error("SERVER", `Uncaught exception captured: ${err?.message || String(err)}`);
+    });
+    process.on("unhandledRejection", (reason: any) => {
+      appendEvent({
+        type: "server.unhandled_rejection",
+        timestamp: Date.now(),
+        payload: { reason: String(reason || "") },
+      });
+      logger.error("SERVER", `Unhandled rejection captured: ${String(reason || "")}`);
+    });
+  }
+
   const WS_PORT = restPort + 1; // predictable, low-collision
   const maxJsonBody = process.env.MAX_JSON_BODY || "30mb";
+  const overloadEventLoopLagMs = Math.max(100, Number(process.env.OVERLOAD_EVENT_LOOP_LAG_MS || 900));
+  const overloadHeapRatio = Math.min(
+    0.98,
+    Math.max(0.5, Number(process.env.OVERLOAD_HEAP_RATIO || 0.92))
+  );
+  const overloadMinConsecutive = Math.max(1, Number(process.env.OVERLOAD_MIN_CONSECUTIVE || 3));
+  let eventLoopLagMs = 0;
+  let overloadLastLoggedAt = 0;
+  let overloadSignalCount = 0;
+  let lagExpected = Date.now() + 1000;
+  const lagTimer = setInterval(() => {
+    const now = Date.now();
+    eventLoopLagMs = Math.max(0, now - lagExpected);
+    lagExpected = now + 1000;
+  }, 1000);
+  lagTimer.unref?.();
+  const healthTimeoutMs = Math.max(1500, Number(process.env.SERVICE_HEALTH_TIMEOUT_MS || 6000));
+  const healthFailureThreshold = Math.max(2, Number(process.env.SERVICE_HEALTH_FAILURE_THRESHOLD || 3));
+  const serviceHealthState = new Map<
+    string,
+    { consecutiveFailures: number; lastOkAt: number; lastError: string; lastStatus: "online" | "degraded" | "offline" }
+  >();
+  const assessServiceHealth = async (
+    name: string,
+    url: string
+  ): Promise<{ name: string; status: "online" | "degraded" | "offline"; detail: string }> => {
+    const prev = serviceHealthState.get(name) || {
+      consecutiveFailures: 0,
+      lastOkAt: 0,
+      lastError: "",
+      lastStatus: "offline" as const,
+    };
+    try {
+      await axios.get(url, { timeout: healthTimeoutMs });
+      serviceHealthState.set(name, {
+        consecutiveFailures: 0,
+        lastOkAt: Date.now(),
+        lastError: "",
+        lastStatus: "online",
+      });
+      return { name, status: "online", detail: "reachable" };
+    } catch (err: any) {
+      const failures = prev.consecutiveFailures + 1;
+      const status: "degraded" | "offline" = failures >= healthFailureThreshold ? "offline" : "degraded";
+      const detail =
+        status === "degraded"
+          ? `Transient health timeout (${failures}/${healthFailureThreshold})`
+          : (err?.message || "not reachable");
+      serviceHealthState.set(name, {
+        consecutiveFailures: failures,
+        lastOkAt: prev.lastOkAt,
+        lastError: err?.message || "not reachable",
+        lastStatus: status,
+      });
+      return { name, status, detail };
+    }
+  };
 
   /* ---------------- REST API ---------------- */
   const app = express();
@@ -1364,6 +1766,52 @@ export function startServer(
   });
   app.use(express.json({ limit: maxJsonBody }));
   app.use(express.urlencoded({ extended: true, limit: maxJsonBody }));
+  app.use((req: Request, res: Response, next) => {
+    const mem = process.memoryUsage();
+    const heapRatio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
+    const overloadedSignal = eventLoopLagMs >= overloadEventLoopLagMs || heapRatio >= overloadHeapRatio;
+    overloadSignalCount = overloadedSignal
+      ? Math.min(100, overloadSignalCount + 1)
+      : Math.max(0, overloadSignalCount - 1);
+    const overloadActive = overloadSignalCount >= overloadMinConsecutive;
+
+    const methodIsWrite = req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS";
+    const exemptPath =
+      req.path.startsWith("/health") ||
+      req.path.startsWith("/readyz") ||
+      req.path.startsWith("/status") ||
+      req.path.startsWith("/metrics") ||
+      req.path.startsWith("/system/status") ||
+      req.path.startsWith("/auth/whoami") ||
+      req.path.startsWith("/admin/reliability");
+
+    if (overloadActive && methodIsWrite && !exemptPath) {
+      const now = Date.now();
+      if (now - overloadLastLoggedAt > 15_000) {
+        overloadLastLoggedAt = now;
+        appendEvent({
+          type: "server.overload.shed",
+          timestamp: now,
+          payload: {
+            eventLoopLagMs,
+            heapRatio,
+            heapUsed: mem.heapUsed,
+            heapTotal: mem.heapTotal,
+          },
+        });
+      }
+      res.setHeader("Retry-After", "2");
+      return res.status(503).json({
+        error: "Service overloaded",
+        detail: "Adaptive overload protection is active. Retry shortly.",
+        overloadSignalCount,
+        overloadMinConsecutive,
+        eventLoopLagMs,
+        heapRatio: Number(heapRatio.toFixed(3)),
+      });
+    }
+    next();
+  });
   app.use(metricsMiddleware);
   app.use(authMiddleware);
   app.use(doctrineShieldMiddleware);
@@ -1482,19 +1930,10 @@ export function startServer(
       const kernelBase = process.env.KERNEL_URL || "http://localhost:8080";
       const mlBase = process.env.ML_URL || "http://localhost:8090";
 
-      const check = async (name: string, url: string) => {
-        try {
-          await axios.get(url, { timeout: 4000 });
-          return { name, status: "online" as const, detail: "reachable" };
-        } catch (err: any) {
-          return { name, status: "offline" as const, detail: err?.message || "not reachable" };
-        }
-      };
-
       const services = await Promise.all([
         Promise.resolve({ name: "orchestrator", status: "online" as const, detail: "serving api" }),
-        check("kernel", `${kernelBase.replace(/\/$/, "")}/health`),
-        check("ml", `${mlBase.replace(/\/$/, "")}/ready`),
+        assessServiceHealth("kernel", `${kernelBase.replace(/\/$/, "")}/health`),
+        assessServiceHealth("ml", `${mlBase.replace(/\/$/, "")}/ready`),
       ]);
 
       const canDeepTwin = role === "founder" || role === "admin" || role === "developer";
@@ -1853,6 +2292,642 @@ export function startServer(
     auditDashboardAction(req, "access_control", "user_action", { userId, permissionId, action });
     res.json({ success: true, accessControl: next, permissionCatalog: DASHBOARD_PERMISSION_CATALOG });
   });
+
+  app.get(
+    "/dashboard/resource-assistant/effective",
+    requireWorkspace,
+    requireScope("chat:read"),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      const role = normalizeDashboardRole(actorRole(req));
+      const identity = actorDashboardIdentity(req);
+      const effectiveBlocks = effectiveBlockIdsForRole(assistant, role, identity.userId);
+      res.json({
+        success: true,
+        role,
+        userId: identity.userId,
+        effectiveBlocks,
+        updatedAt: assistant.updatedAt,
+      });
+    }
+  );
+
+  app.get(
+    "/admin/dashboard/resource-assistant/bootstrap",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      const role = normalizeDashboardRole(actorRole(req));
+      const identity = actorDashboardIdentity(req);
+      res.json({
+        success: true,
+        assistant,
+        blockCatalog: DASHBOARD_BLOCK_CATALOG,
+        role,
+        userId: identity.userId,
+        effectiveBlocks: effectiveBlockIdsForRole(assistant, role, identity.userId),
+        usageSummary: blockUsageSummary(assistant, role),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/resource-assistant/toggle-block",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const actor = normalizeDashboardRole(actorRole(req));
+      const targetRole = normalizeDashboardRole(String(req.body?.targetRole || "user"));
+      const targetUserId = String(req.body?.targetUserId || "").trim().toLowerCase();
+      const blockId = String(req.body?.blockId || "").trim();
+      const enabled = Boolean(req.body?.enabled);
+      const block = DASHBOARD_BLOCK_CATALOG.find((b) => b.id === blockId);
+      if (!block) return res.status(400).json({ error: "Unknown blockId" });
+      if (actor === "admin" && targetRole === "founder") {
+        return res.status(403).json({ error: "Forbidden", details: "Admin cannot change founder dashboard blocks." });
+      }
+      if (actor === "admin" && !(block.roles as readonly string[]).includes("admin")) {
+        return res.status(403).json({ error: "Forbidden", details: "Admin cannot change founder-only blocks." });
+      }
+      if (!(block.roles as readonly string[]).includes(targetRole) && enabled) {
+        return res.status(400).json({ error: "Block not assignable to target role" });
+      }
+
+      const { dashboard } = readDashboardSummary();
+      let assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      if (targetUserId) {
+        const current = normalizeResourceRolePolicy(
+          (assistant.userPolicies || []).find((p: any) => String(p.userId) === targetUserId) || {}
+        );
+        const nextSet = enabled
+          ? {
+              enabled: Array.from(new Set([...current.enabled.filter((x) => x !== blockId), blockId])),
+              disabled: current.disabled.filter((x) => x !== blockId),
+            }
+          : {
+              enabled: current.enabled.filter((x) => x !== blockId),
+              disabled: Array.from(new Set([...current.disabled.filter((x) => x !== blockId), blockId])),
+            };
+        assistant = upsertResourceUserPolicy(assistant, targetUserId, nextSet);
+      } else {
+        const rolePolicy = normalizeResourceRolePolicy(assistant.rolePolicies?.[targetRole] || {});
+        const nextRolePolicy = enabled
+          ? {
+              enabled: Array.from(new Set([...rolePolicy.enabled.filter((x) => x !== blockId), blockId])),
+              disabled: rolePolicy.disabled.filter((x) => x !== blockId),
+            }
+          : {
+              enabled: rolePolicy.enabled.filter((x) => x !== blockId),
+              disabled: Array.from(new Set([...rolePolicy.disabled.filter((x) => x !== blockId), blockId])),
+            };
+        assistant = {
+          ...assistant,
+          rolePolicies: {
+            ...assistant.rolePolicies,
+            [targetRole]: normalizeResourceRolePolicy(nextRolePolicy),
+          },
+          updatedAt: Date.now(),
+        };
+      }
+      mergeDashboardSection("dashboardResourceAssistant", assistant);
+      auditDashboardAction(req, "dashboard_resource_assistant", "toggle_block", {
+        targetRole,
+        targetUserId,
+        blockId,
+        enabled,
+      });
+      res.json({
+        success: true,
+        assistant,
+        blockCatalog: DASHBOARD_BLOCK_CATALOG,
+        effectiveBlocks: effectiveBlockIdsForRole(assistant, targetRole, targetUserId),
+        usageSummary: blockUsageSummary(assistant, targetRole),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/resource-assistant/optimize",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const actor = normalizeDashboardRole(actorRole(req));
+      const targetRole = normalizeDashboardRole(String(req.body?.targetRole || "user"));
+      const targetUserId = String(req.body?.targetUserId || "").trim().toLowerCase();
+      const focusBlocks: string[] = Array.isArray(req.body?.focusBlocks)
+        ? req.body.focusBlocks.map((x: any) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const maxBlocks = Math.max(3, Number(req.body?.maxBlocks || 12));
+      if (actor === "admin" && targetRole === "founder") {
+        return res.status(403).json({ error: "Forbidden", details: "Admin cannot optimize founder dashboard." });
+      }
+      const allowed = allowedBlockIdsForRole(targetRole);
+      const { dashboard } = readDashboardSummary();
+      const currentAssistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      const focusAllowed = focusBlocks.filter((id) => allowed.includes(id));
+      const ranked = telemetryRankBlocks(currentAssistant, targetRole, targetUserId, allowed);
+      const selected =
+        focusAllowed.length > 0
+          ? focusAllowed.slice(0, maxBlocks)
+          : ranked.slice(0, maxBlocks);
+      const disabled = allowed.filter((id) => !selected.includes(id));
+      let assistant = currentAssistant;
+      if (targetUserId) {
+        assistant = upsertResourceUserPolicy(assistant, targetUserId, { enabled: selected, disabled });
+      } else {
+        assistant = {
+          ...assistant,
+          rolePolicies: {
+            ...assistant.rolePolicies,
+            [targetRole]: normalizeResourceRolePolicy({ enabled: selected, disabled, updatedAt: Date.now() }),
+          },
+          updatedAt: Date.now(),
+        };
+      }
+      mergeDashboardSection("dashboardResourceAssistant", assistant);
+      auditDashboardAction(req, "dashboard_resource_assistant", "optimize", {
+        targetRole,
+        targetUserId,
+        selectedCount: selected.length,
+        hiddenCount: disabled.length,
+      });
+      res.json({
+        success: true,
+        twinLinked: true,
+        recommendation: `Optimized ${targetRole} blocks: ${selected.length} kept, ${disabled.length} hidden.`,
+        selected,
+        hidden: disabled,
+        telemetryDriven: focusAllowed.length === 0,
+        assistant,
+        blockCatalog: DASHBOARD_BLOCK_CATALOG,
+        effectiveBlocks: effectiveBlockIdsForRole(assistant, targetRole, targetUserId),
+        usageSummary: blockUsageSummary(assistant, targetRole),
+      });
+    }
+  );
+
+  app.post(
+    "/dashboard/resource-assistant/usage/ingest",
+    requireWorkspace,
+    requireScope("chat:write"),
+    (req: Request, res: Response) => {
+      const role = normalizeDashboardRole(actorRole(req));
+      const identity = actorDashboardIdentity(req);
+      const events = Array.isArray(req.body?.events) ? req.body.events : [];
+      if (events.length === 0) {
+        return res.status(400).json({ error: "Missing telemetry events" });
+      }
+      const { dashboard } = readDashboardSummary();
+      const assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      const usage = {
+        byUser: { ...(assistant.usage?.byUser || {}) },
+        byRole: { ...(assistant.usage?.byRole || {}) },
+      } as Record<string, any>;
+      if (!usage.byUser[identity.userId]) usage.byUser[identity.userId] = {};
+      if (!usage.byRole[role]) usage.byRole[role] = {};
+
+      let accepted = 0;
+      for (const evt of events.slice(0, 300)) {
+        const blockId = String(evt?.blockId || "").trim();
+        if (!blockId) continue;
+        const block = DASHBOARD_BLOCK_CATALOG.find((b) => b.id === blockId);
+        if (!block) continue;
+        const opens = Math.max(0, Math.min(100, Number(evt?.opens || 0)));
+        const clicks = Math.max(0, Math.min(500, Number(evt?.clicks || 0)));
+        const openMs = Math.max(0, Math.min(1000 * 60 * 30, Number(evt?.openMs || 0)));
+        const lastSeenAt = Number(evt?.lastSeenAt || Date.now());
+        const lastClickedAt = Number(evt?.lastClickedAt || 0);
+        usage.byUser[identity.userId][blockId] = mergeBlockUsageMetrics(
+          usage.byUser[identity.userId][blockId] || {},
+          { opens, clicks, openMs, lastSeenAt, lastClickedAt }
+        );
+        usage.byRole[role][blockId] = mergeBlockUsageMetrics(usage.byRole[role][blockId] || {}, {
+          opens,
+          clicks,
+          openMs,
+          lastSeenAt,
+          lastClickedAt,
+        });
+        accepted += 1;
+      }
+
+      const next = {
+        ...assistant,
+        usage,
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("dashboardResourceAssistant", next);
+      appendEvent({
+        type: "dashboard.resource.usage.ingest",
+        timestamp: Date.now(),
+        payload: {
+          userId: identity.userId,
+          role,
+          accepted,
+        },
+      });
+      res.json({ success: true, accepted, updatedAt: next.updatedAt });
+    }
+  );
+
+  app.post(
+    "/dashboard/resource-assistant/request-block",
+    requireWorkspace,
+    requireScope("chat:write"),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      const identity = actorDashboardIdentity(req);
+      const actorUserRole = normalizeDashboardRole(actorRole(req));
+      const targetRole = normalizeDashboardRole(String(req.body?.targetRole || actorUserRole));
+      const blockId = String(req.body?.blockId || "").trim();
+      const details = String(req.body?.details || "").trim();
+      const reqId = `blkreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const block = DASHBOARD_BLOCK_CATALOG.find((b) => b.id === blockId);
+      let next = assistant;
+      let status = "pending_review";
+      if (block && (block.roles as readonly string[]).includes(targetRole)) {
+        next = upsertResourceUserPolicy(next, identity.userId, {
+          enabled: Array.from(
+            new Set([
+              ...normalizeResourceRolePolicy(
+                (next.userPolicies || []).find((p: any) => String(p.userId) === identity.userId) || {}
+              ).enabled,
+              blockId,
+            ])
+          ),
+          disabled: normalizeResourceRolePolicy(
+            (next.userPolicies || []).find((p: any) => String(p.userId) === identity.userId) || {}
+          ).disabled.filter((x) => x !== blockId),
+        });
+        status = "approved_auto";
+      } else if (!block) {
+        status = "pending_build_approval";
+      }
+      const requestRecord = {
+        id: reqId,
+        userId: identity.userId,
+        userName: identity.userName,
+        role: targetRole,
+        blockId,
+        details,
+        status,
+        requestedAt: Date.now(),
+        reviewedAt: 0,
+        reviewedBy: "",
+      };
+      next = {
+        ...next,
+        requests: [requestRecord, ...(next.requests || [])].slice(0, 2000),
+        updatedAt: Date.now(),
+      };
+      mergeDashboardSection("dashboardResourceAssistant", next);
+      appendEvent({
+        type: "dashboard.resource.request",
+        timestamp: Date.now(),
+        payload: requestRecord,
+      });
+      res.json({
+        success: true,
+        request: requestRecord,
+        autoAssigned: status === "approved_auto",
+        effectiveBlocks: effectiveBlockIdsForRole(next, targetRole, identity.userId),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/resource-assistant/request/review",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const actor = normalizeDashboardRole(actorRole(req));
+      const requestId = String(req.body?.requestId || "").trim();
+      const decision = String(req.body?.decision || "").trim().toLowerCase();
+      if (!requestId || !["approve", "reject"].includes(decision)) {
+        return res.status(400).json({ error: "Missing requestId or invalid decision" });
+      }
+      const { dashboard } = readDashboardSummary();
+      let assistant = normalizeDashboardResourceAssistant(dashboard.dashboardResourceAssistant || {});
+      let target: any = null;
+      const requests = (assistant.requests || []).map((r: any) => {
+        if (String(r.id) !== requestId) return r;
+        target = r;
+        return {
+          ...r,
+          status: decision === "approve" ? "approved" : "rejected",
+          reviewedAt: Date.now(),
+          reviewedBy: String(req.auth?.sub || "unknown"),
+        };
+      });
+      if (!target) return res.status(404).json({ error: "Request not found" });
+      if (actor === "admin" && normalizeDashboardRole(String(target.role || "user")) === "founder") {
+        return res.status(403).json({ error: "Forbidden", details: "Admin cannot review founder requests." });
+      }
+      assistant = { ...assistant, requests, updatedAt: Date.now() };
+      if (decision === "approve") {
+        const bid = String(target.blockId || "").trim();
+        const role = normalizeDashboardRole(String(target.role || "user"));
+        if (bid && DASHBOARD_BLOCK_CATALOG.some((b) => b.id === bid && (b.roles as readonly string[]).includes(role))) {
+          assistant = upsertResourceUserPolicy(assistant, String(target.userId || ""), {
+            enabled: Array.from(
+              new Set([
+                ...normalizeResourceRolePolicy(
+                  (assistant.userPolicies || []).find((p: any) => String(p.userId) === String(target.userId || "")) || {}
+                ).enabled,
+                bid,
+              ])
+            ),
+          });
+        }
+      }
+      mergeDashboardSection("dashboardResourceAssistant", assistant);
+      auditDashboardAction(req, "dashboard_resource_assistant", "review_request", { requestId, decision });
+      res.json({ success: true, assistant, blockCatalog: DASHBOARD_BLOCK_CATALOG });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/resource-assistant/build/propose",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin"]),
+    (req: Request, res: Response) => {
+      const title = String(req.body?.title || "").trim();
+      const featureText = String(req.body?.featureText || "").trim();
+      const targetRole = normalizeDashboardRole(String(req.body?.targetRole || "user"));
+      if (!title || featureText.length < 8) {
+        return res.status(400).json({ error: "Missing title or featureText" });
+      }
+      const proposal = submitNeuroExpansion({
+        title: `Dashboard Block: ${title}`,
+        featureText: `${featureText}\nTarget role: ${targetRole}\nGenerated by Dashboard Resource Assistant.`,
+        codeText: "",
+        actor: String(req.auth?.sub || "unknown"),
+        role: actorRole(req),
+        orgId: String(req.auth?.orgId || "personal"),
+        workspaceId: String(req.auth?.workspaceId || "default"),
+      });
+      auditDashboardAction(req, "dashboard_resource_assistant", "build_propose", {
+        title,
+        targetRole,
+        neuroExpansionOk: proposal.ok,
+      });
+      res.json({
+        success: true,
+        pendingFounderApproval: true,
+        neuroExpansion: proposal.ok ? proposal.submission : null,
+        message: "Proposal submitted. Founder/Admin approval required before implementation.",
+      });
+    }
+  );
+
+  app.get(
+    "/admin/dashboard/ops-assistants/bootstrap",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin", "developer"]),
+    (_req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const ops = normalizeDashboardOpsAssistants(dashboard.dashboardOpsAssistants || {});
+      res.json({ success: true, opsAssistants: ops });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/ops-assistants/toggle",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const assistantId = String(req.body?.assistantId || "").trim();
+      const enabled = Boolean(req.body?.enabled);
+      if (!assistantId) return res.status(400).json({ error: "Missing assistantId" });
+      const { dashboard } = readDashboardSummary();
+      const ops = normalizeDashboardOpsAssistants(dashboard.dashboardOpsAssistants || {});
+      const assistants = ops.assistants.map((a: any) =>
+        a.id === assistantId ? { ...a, enabled, updatedAt: Date.now() } : a
+      );
+      const next = { ...ops, assistants, updatedAt: Date.now() };
+      mergeDashboardSection("dashboardOpsAssistants", next);
+      auditDashboardAction(req, "ops_assistants", "toggle", { assistantId, enabled });
+      res.json({ success: true, opsAssistants: next });
+    }
+  );
+
+  app.post(
+    "/admin/dashboard/ops-assistants/policy/save",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const { dashboard } = readDashboardSummary();
+      const ops = normalizeDashboardOpsAssistants(dashboard.dashboardOpsAssistants || {});
+      const nextPolicy = {
+        ...ops.policy,
+        requireFounderApprovalForCodeChanges:
+          typeof req.body?.policy?.requireFounderApprovalForCodeChanges === "boolean"
+            ? req.body.policy.requireFounderApprovalForCodeChanges
+            : ops.policy.requireFounderApprovalForCodeChanges,
+        allowDefensiveDeception:
+          typeof req.body?.policy?.allowDefensiveDeception === "boolean"
+            ? req.body.policy.allowDefensiveDeception
+            : ops.policy.allowDefensiveDeception,
+        autoRunEnabled:
+          typeof req.body?.policy?.autoRunEnabled === "boolean"
+            ? req.body.policy.autoRunEnabled
+            : ops.policy.autoRunEnabled,
+        autoRunIntervalMin: Math.max(
+          5,
+          Number(req.body?.policy?.autoRunIntervalMin || ops.policy.autoRunIntervalMin || 60)
+        ),
+        updatedAt: Date.now(),
+      };
+      const next = { ...ops, policy: nextPolicy, updatedAt: Date.now() };
+      mergeDashboardSection("dashboardOpsAssistants", next);
+      auditDashboardAction(req, "ops_assistants", "policy_save", nextPolicy);
+      res.json({ success: true, opsAssistants: next });
+    }
+  );
+
+  const runOpsAssistantInternal = async (
+    assistantId: string,
+    actor: string,
+    byRole: string
+  ): Promise<{ ok: boolean; statusCode: number; error?: string; next?: any; logEntry?: any }> => {
+    const { dashboard } = readDashboardSummary();
+    const ops = normalizeDashboardOpsAssistants(dashboard.dashboardOpsAssistants || {});
+    const target = ops.assistants.find((a: any) => a.id === assistantId);
+    if (!target) return { ok: false, statusCode: 404, error: "Assistant not found" };
+    if (!target.enabled) return { ok: false, statusCode: 403, error: "Assistant is disabled" };
+
+    const now = Date.now();
+    const recent = listEvents().slice(-1200);
+    const result: Record<string, any> = {
+      assistantId,
+      generatedAt: now,
+      checks: [],
+      recommendations: [],
+    };
+
+    if (assistantId === "ops-expansion-architect") {
+      const gaps = scanPlaceholderGaps();
+      result.checks.push({ key: "placeholder_gaps", value: gaps?.findings?.length || 0 });
+      result.recommendations.push("Use NeuroExpansion guarded patch flow for approved improvements.");
+      result.recommendations.push("Run Twin Analyze before merge for architecture impact.");
+    } else if (assistantId === "ops-self-healing-guardian") {
+      const reliability = buildReliabilitySnapshot(24);
+      const inflight = getInflightSnapshot();
+      result.checks.push({ key: "error_rate_24h", value: reliability?.errorRate || 0 });
+      result.checks.push({
+        key: "inflight",
+        value: Array.isArray(inflight)
+          ? inflight.reduce((acc, x) => acc + Number(x?.inflight || 0), 0)
+          : 0,
+      });
+      result.recommendations.push("If error rate breaches SLO, trigger canary rollback.");
+      result.recommendations.push("Keep safe mode available for severe integrity incidents.");
+    } else if (assistantId === "ops-training-orchestrator") {
+      const freshness = buildRetrievalFreshnessSummary(24);
+      const evalCoverage = getEvalCoverageCatalog();
+      result.checks.push({
+        key: "stale_domains",
+        value: Array.isArray(freshness?.topStaleDomains) ? freshness.topStaleDomains.length : 0,
+      });
+      result.checks.push({ key: "stale_citation_rate", value: Number(freshness?.staleCitationRate || 0) });
+      result.checks.push({ key: "eval_domains", value: Array.isArray(evalCoverage) ? evalCoverage.length : 0 });
+      result.recommendations.push("Run bootstrap pack refresh then RAG reindex for stale domains.");
+      result.recommendations.push("Schedule nightly eval batch before training promotion.");
+    } else if (assistantId === "ops-failure-investigator") {
+      const errors = recent.filter((e) => String(e.type || "").toLowerCase().includes("error"));
+      const warnings = recent.filter((e) => String(e.type || "").toLowerCase().includes("warn"));
+      result.checks.push({ key: "recent_errors", value: errors.length });
+      result.checks.push({ key: "recent_warnings", value: warnings.length });
+      result.recommendations.push("Inspect Runtime Debug Matrix for top failing units and apply auto-fix.");
+      result.recommendations.push("Add regression tests for recurrent failure signatures.");
+    } else if (assistantId === "ops-security-deception-analyst") {
+      if (!Boolean(ops.policy?.allowDefensiveDeception)) {
+        return { ok: false, statusCode: 403, error: "Defensive deception disabled by policy" };
+      }
+      const section = (dashboard.deviceProtection || {}) as Record<string, any>;
+      const alerts = Array.isArray(section.securityAlerts) ? section.securityAlerts : [];
+      const highAlerts = alerts.filter((a: any) => ["high", "critical"].includes(String(a?.severity || "")));
+      result.checks.push({ key: "security_alerts", value: alerts.length });
+      result.checks.push({ key: "high_critical_alerts", value: highAlerts.length });
+      result.recommendations.push(
+        "Use defensive deception only: deploy legal honeypot telemetry/decoy artifacts to detect attacker techniques."
+      );
+      result.recommendations.push("Never expose real user data in decoys; isolate decoy namespace and rotate frequently.");
+    }
+
+    const logEntry = {
+      id: `opsrun-${now}-${Math.random().toString(36).slice(2, 7)}`,
+      assistantId,
+      assistantName: target.name,
+      by: actor,
+      byRole,
+      at: now,
+      result,
+    };
+    const assistants = ops.assistants.map((a: any) =>
+      a.id === assistantId
+        ? {
+            ...a,
+            status: "completed",
+            lastRunAt: now,
+            lastResult: result,
+          }
+        : a
+    );
+    const next = {
+      ...ops,
+      assistants,
+      runLogs: [logEntry, ...(ops.runLogs || [])].slice(0, 2000),
+      updatedAt: now,
+    };
+    mergeDashboardSection("dashboardOpsAssistants", next);
+    appendEvent({
+      type: "ops.assistant.run",
+      timestamp: now,
+      payload: {
+        assistantId,
+        by: actor,
+        byRole,
+        checks: result.checks,
+      },
+    });
+    return { ok: true, statusCode: 200, next, logEntry };
+  };
+
+  app.post(
+    "/admin/dashboard/ops-assistants/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    async (req: Request, res: Response) => {
+      const assistantId = String(req.body?.assistantId || "").trim();
+      if (!assistantId) return res.status(400).json({ error: "Missing assistantId" });
+      const run = await runOpsAssistantInternal(
+        assistantId,
+        String(req.auth?.sub || "unknown"),
+        actorRole(req)
+      );
+      if (!run.ok) return res.status(run.statusCode).json({ error: run.error || "Run failed" });
+      auditDashboardAction(req, "ops_assistants", "run", { assistantId });
+      res.json({ success: true, run: run.logEntry, opsAssistants: run.next });
+    }
+  );
+
+  app.get(
+    "/admin/dashboard/capabilities/status",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin", "developer"]),
+    (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        capabilities: {
+          modelTrainingInfrastructure: {
+            available: true,
+            endpoints: ["/admin/training/jobs/run", "/admin/training/overview", "/rag/ingest", "/rag/reindex"],
+            roles: ["founder", "admin", "developer"],
+          },
+          datasetPipelines: {
+            available: true,
+            endpoints: [
+              "/admin/training/ingest/text",
+              "/admin/training/ingest/files",
+              "/admin/training/ingest/urls",
+              "/admin/training/ingest/research",
+            ],
+            roles: ["founder", "admin", "developer"],
+          },
+          evaluationSystems: {
+            available: true,
+            endpoints: ["/admin/evals/run", "/admin/evals/latest", "/admin/evals/coverage", "/admin/evals/run-batch"],
+            roles: ["founder", "admin", "developer"],
+          },
+          safetyTestingTools: {
+            available: true,
+            endpoints: ["/admin/redteam/run", "/admin/redteam/latest", "/admin/quality/hardening/run"],
+            roles: ["founder", "admin", "developer"],
+          },
+          debuggingDashboards: {
+            available: true,
+            endpoints: ["/admin/dashboard/bootstrap", "/admin/system/metrics", "/admin/version"],
+            roles: ["founder", "admin", "developer"],
+          },
+        },
+      });
+    }
+  );
 
   app.get("/admin/device-protection/bootstrap", requireWorkspace, requireScope("admin:read"), requireRole(["founder", "admin", "enterprise"]), (req: Request, res: Response) => {
     const { dashboard } = readDashboardSummary();
@@ -6312,18 +7387,58 @@ export function startServer(
   });
 
   app.get("/status", (_req: Request, res: Response) => {
+    const mem = process.memoryUsage();
+    const heapRatio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
     res.json({
       status: "ok",
       service: "orchestrator",
       time: new Date().toISOString(),
+      uptimeSec: Math.floor(process.uptime()),
+      pressure: {
+        eventLoopLagMs,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        heapRatio: Number(heapRatio.toFixed(3)),
+      },
     });
   });
 
   app.get("/health", (_req: Request, res: Response) => {
+    const mem = process.memoryUsage();
+    const heapRatio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
+    const degraded = eventLoopLagMs >= overloadEventLoopLagMs || heapRatio >= overloadHeapRatio;
     res.json({
-      status: "ok",
+      status: degraded ? "degraded" : "ok",
       service: "orchestrator",
       time: new Date().toISOString(),
+      pressure: {
+        eventLoopLagMs,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        heapRatio: Number(heapRatio.toFixed(3)),
+      },
+    });
+  });
+
+  app.get("/readyz", async (_req: Request, res: Response) => {
+    const requireDeps = String(process.env.READYZ_REQUIRE_DEPENDENCIES || "false").toLowerCase() === "true";
+    const kernelBase = process.env.KERNEL_URL || "http://localhost:8080";
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    const [kernel, ml] = await Promise.all([
+      assessServiceHealth("kernel", `${kernelBase.replace(/\/$/, "")}/health`),
+      assessServiceHealth("ml", `${mlBase.replace(/\/$/, "")}/ready`),
+    ]);
+    if (requireDeps && (kernel.status === "offline" || ml.status === "offline")) {
+      return res.status(503).json({
+        status: "not_ready",
+        service: "orchestrator",
+        dependencies: { kernel, ml },
+      });
+    }
+    return res.json({
+      status: "ready",
+      service: "orchestrator",
+      dependencies: { kernel, ml },
     });
   });
 
@@ -6481,27 +7596,20 @@ export function startServer(
     const kernelBase = process.env.KERNEL_URL || "http://localhost:8080";
     const mlBase = process.env.ML_URL || "http://localhost:8090";
 
-    const results = await Promise.allSettled([
-      axios.get(`${kernelBase.replace(/\/$/, "")}/health`),
-      axios.get(`${mlBase.replace(/\/$/, "")}/ready`),
+    const [kernelSvc, mlSvc] = await Promise.all([
+      assessServiceHealth("kernel", `${kernelBase.replace(/\/$/, "")}/health`),
+      assessServiceHealth("ml", `${mlBase.replace(/\/$/, "")}/ready`),
     ]);
-
     const services = [
       {
         name: "Kernel",
-        status: results[0].status === "fulfilled" ? "online" : "offline",
-        detail:
-          results[0].status === "fulfilled"
-            ? "Kernel responding"
-            : "Not reachable",
+        status: kernelSvc.status,
+        detail: kernelSvc.status === "online" ? "Kernel responding" : kernelSvc.detail,
       },
       {
         name: "ML",
-        status: results[1].status === "fulfilled" ? "online" : "offline",
-        detail:
-          results[1].status === "fulfilled"
-            ? "Model loaded: yes"
-            : "Not reachable",
+        status: mlSvc.status,
+        detail: mlSvc.status === "online" ? "Model loaded: yes" : mlSvc.detail,
       },
     ];
 
@@ -6803,7 +7911,12 @@ export function startServer(
     }
   });
 
-  app.post("/creator/image", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  const creatorInflightGuard = createInflightGuard(
+    "creator",
+    Math.max(4, Number(process.env.CREATOR_MAX_INFLIGHT || 40))
+  );
+
+  app.post("/creator/image", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/image`, req.body || {}, { timeout: 90000 });
@@ -6813,7 +7926,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/image/edit", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/image/edit", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/image/edit`, req.body || {}, { timeout: 90000 });
@@ -6823,7 +7936,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/video", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/video", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/video`, req.body || {}, { timeout: 120000 });
@@ -6833,7 +7946,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/script-video", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/script-video", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/script-video`, req.body || {}, { timeout: 120000 });
@@ -6843,7 +7956,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/thumbnail", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/thumbnail", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/thumbnail`, req.body || {}, { timeout: 90000 });
@@ -6853,7 +7966,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/subtitles", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/subtitles", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/subtitles`, req.body || {}, { timeout: 90000 });
@@ -6863,7 +7976,7 @@ export function startServer(
     }
   });
 
-  app.post("/creator/background-remove", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/background-remove", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/background-remove`, req.body || {}, { timeout: 90000 });
@@ -6873,7 +7986,17 @@ export function startServer(
     }
   });
 
-  app.get("/creator/job-status/:id", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.post("/creator/music", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
+    const mlBase = process.env.ML_URL || "http://localhost:8090";
+    try {
+      const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/creator/music`, req.body || {}, { timeout: 120000 });
+      res.json(resp.data);
+    } catch (err: any) {
+      res.status(502).json({ error: "Creator music failed", detail: err?.message || String(err) });
+    }
+  });
+
+  app.get("/creator/job-status/:id", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.get(`${mlBase.replace(/\/$/, "")}/creator/job-status/${encodeURIComponent(String(req.params.id || ""))}`, { timeout: 45000 });
@@ -6883,7 +8006,7 @@ export function startServer(
     }
   });
 
-  app.get("/creator/history", requireWorkspace, requireScope("chat:write"), async (req: Request, res: Response) => {
+  app.get("/creator/history", requireWorkspace, requireScope("chat:write"), creatorInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 100)));
     try {
@@ -7104,7 +8227,12 @@ export function startServer(
     }
   });
 
-  app.post("/rag/ingest", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (req: Request, res: Response) => {
+  const ragTrainingInflightGuard = createInflightGuard(
+    "rag_training",
+    Math.max(2, Number(process.env.RAG_TRAINING_MAX_INFLIGHT || 12))
+  );
+
+  app.post("/rag/ingest", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin", "developer"]), ragTrainingInflightGuard, async (req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/ingest`, req.body || {}, { timeout: 180000 });
@@ -7125,7 +8253,7 @@ export function startServer(
     }
   });
 
-  app.post("/rag/reindex", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (_req: Request, res: Response) => {
+  app.post("/rag/reindex", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin", "developer"]), ragTrainingInflightGuard, async (_req: Request, res: Response) => {
     const mlBase = process.env.ML_URL || "http://localhost:8090";
     try {
       const resp = await axios.post(`${mlBase.replace(/\/$/, "")}/rag/reindex`, {}, { timeout: 180000 });
@@ -7188,7 +8316,7 @@ export function startServer(
     }
   });
 
-  app.post("/admin/training/rag/bootstrap", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin"]), async (req: Request, res: Response) => {
+  app.post("/admin/training/rag/bootstrap", requireWorkspace, requireScope("training:write"), requireRole(["founder", "admin", "developer"]), ragTrainingInflightGuard, async (req: Request, res: Response) => {
     const limit = Math.max(100, Math.min(10000, Number(req.body?.limit) || 2500));
     const domain = String(req.body?.domain || "general").trim().toLowerCase();
     const samples = listTrainingSamples(limit) as Array<Record<string, any>>;
@@ -7251,6 +8379,23 @@ export function startServer(
     "execute",
     Math.max(4, Number(process.env.EXECUTE_MAX_INFLIGHT || 60))
   );
+  const trainingInflightGuard = createInflightGuard(
+    "training_admin",
+    Math.max(2, Number(process.env.TRAINING_ADMIN_MAX_INFLIGHT || 16))
+  );
+  const evalInflightGuard = createInflightGuard(
+    "eval_admin",
+    Math.max(1, Number(process.env.EVAL_ADMIN_MAX_INFLIGHT || 8))
+  );
+  const reliabilityInflightKeys = [
+    "chat",
+    "ai",
+    "execute",
+    "creator",
+    "rag_training",
+    "training_admin",
+    "eval_admin",
+  ];
 
   app.post("/mesh/register", requireScope("mesh:write"), (req: Request, res: Response) => {
     const { id, baseUrl, kind, capabilities, policy } = req.body || {};
@@ -7488,7 +8633,7 @@ export function startServer(
     "/admin/training/overview",
     requireWorkspace,
     requireScope("training:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const limit = Math.max(50, Math.min(5000, Number(req.query.limit) || 1000));
       const samples = listTrainingSamples(limit) as Array<Record<string, any>>;
@@ -7626,7 +8771,7 @@ export function startServer(
     "/admin/training/bootstrap-pack/list",
     requireWorkspace,
     requireScope("training:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (_req: Request, res: Response) => {
       res.json({ success: true, packs: TRUSTED_BOOTSTRAP_PACKS });
     }
@@ -7636,7 +8781,7 @@ export function startServer(
     "/admin/training/bootstrap-pack/auto-refresh/status",
     requireWorkspace,
     requireScope("training:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     async (_req: Request, res: Response) => {
       const summary = readBootstrapSummary();
       const domains: TrustedDomain[] = ["medicine", "agriculture", "market"];
@@ -7657,7 +8802,7 @@ export function startServer(
     "/admin/training/bootstrap-pack/auto-refresh/config",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const currentSummary = readBootstrapSummary();
       const currentCfg = getAutoRefreshConfig();
@@ -7703,7 +8848,8 @@ export function startServer(
     "/admin/training/bootstrap-pack/auto-refresh/run",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     async (req: Request, res: Response) => {
       const domainRaw = String(req.body?.domain || "").trim().toLowerCase();
       const includeSecondary = Boolean(req.body?.includeSecondary);
@@ -7731,7 +8877,8 @@ export function startServer(
     "/admin/training/bootstrap-pack/run",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     trainingLimiter,
     async (req: Request, res: Response) => {
       const domainRaw = String(req.body?.domain || "medicine").trim().toLowerCase();
@@ -7762,7 +8909,8 @@ export function startServer(
     "/admin/training/ingest/text",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     trainingLimiter,
     (req: Request, res: Response) => {
       const title = sanitizeText(String(req.body?.title || "manual_text"));
@@ -7801,7 +8949,8 @@ export function startServer(
     "/admin/training/ingest/files",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     trainingLimiter,
     (req: Request, res: Response) => {
       const files = Array.isArray(req.body?.files) ? req.body.files : [];
@@ -7897,7 +9046,8 @@ export function startServer(
     "/admin/training/ingest/urls",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     trainingLimiter,
     async (req: Request, res: Response) => {
       const urls = Array.isArray(req.body?.urls) ? req.body.urls.map((u: any) => String(u || "").trim()).filter(Boolean) : [];
@@ -7965,7 +9115,8 @@ export function startServer(
     "/admin/training/ingest/research",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     trainingLimiter,
     async (req: Request, res: Response) => {
       const query = String(req.body?.query || "").trim();
@@ -8006,7 +9157,8 @@ export function startServer(
     "/admin/training/jobs/run",
     requireWorkspace,
     requireScope("training:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    trainingInflightGuard,
     async (req: Request, res: Response) => {
       const body = req.body || {};
       const mode = String(body.mode || "incremental");
@@ -8128,7 +9280,7 @@ export function startServer(
     "/admin/reliability/overview",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const windowHours = Math.max(1, Math.min(24 * 30, Number(req.query.windowHours) || 24));
       const snapshot = buildReliabilitySnapshot(windowHours);
@@ -8145,7 +9297,8 @@ export function startServer(
     "/admin/evals/run",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    evalInflightGuard,
     async (req: Request, res: Response) => {
       const suite = String(req.body?.suite || "core").toLowerCase() as EvalSuiteName;
       const allowedSuites: EvalSuiteName[] = ["core", "reasoning", "coding", "research"];
@@ -8183,7 +9336,7 @@ export function startServer(
     "/admin/evals/latest",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
       const reports = listEvents(6000)
@@ -8201,7 +9354,8 @@ export function startServer(
     "/admin/redteam/run",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    evalInflightGuard,
     async (req: Request, res: Response) => {
       const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
       const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
@@ -8233,7 +9387,7 @@ export function startServer(
     "/admin/redteam/latest",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
       const reports = listEvents(6000)
@@ -8251,7 +9405,7 @@ export function startServer(
     "/admin/evals/coverage",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (_req: Request, res: Response) => {
       res.json({
         success: true,
@@ -8264,7 +9418,8 @@ export function startServer(
     "/admin/evals/run-batch",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    evalInflightGuard,
     async (req: Request, res: Response) => {
       const suitesRaw = Array.isArray(req.body?.suites) ? req.body.suites : ["core", "reasoning", "coding", "research"];
       const suites = suitesRaw
@@ -8439,7 +9594,8 @@ export function startServer(
     "/admin/quality/hardening/run",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
+    evalInflightGuard,
     async (req: Request, res: Response) => {
       const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
       const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
@@ -8478,12 +9634,226 @@ export function startServer(
     "/admin/sre/concurrency",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (_req: Request, res: Response) => {
       res.json({
         success: true,
         inflight: getInflightSnapshot(),
+        overrides: getInflightLimitOverrides(),
       });
+    }
+  );
+
+  app.get(
+    "/admin/reliability/autotune/status",
+    requireWorkspace,
+    requireScope("admin:read"),
+    requireRole(["founder", "admin", "developer"]),
+    (_req: Request, res: Response) => {
+      const state = readState() as any;
+      const program = state.reliabilityProgram || {};
+      res.json({
+        success: true,
+        overrides: getInflightLimitOverrides(),
+        loadTestHistory: Array.isArray(program?.loadTesting?.history) ? program.loadTesting.history : [],
+        lastRecommendation: program?.autoTune?.lastRecommendation || null,
+        updatedAt: Number(program?.autoTune?.updatedAt || 0),
+      });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/loadtest/run",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    evalInflightGuard,
+    async (req: Request, res: Response) => {
+      const durationSec = Math.max(3, Math.min(120, Number(req.body?.durationSec || 12)));
+      const concurrency = Math.max(1, Math.min(400, Number(req.body?.concurrency || 24)));
+      const timeoutMs = Math.max(500, Math.min(10_000, Number(req.body?.timeoutMs || 3000)));
+      const target = String(req.body?.target || "status").trim().toLowerCase();
+      const targetPath =
+        target === "metrics"
+          ? "/metrics"
+          : target === "concurrency"
+          ? "/admin/sre/concurrency"
+          : "/status";
+      const startedAt = Date.now();
+      const endsAt = startedAt + durationSec * 1000;
+      const restBase = String(process.env.ORCHESTRATOR_URL || `http://localhost:${restPort}`).replace(/\/$/, "");
+      const apiKey = String(process.env.NEUROEDGE_API_KEY || process.env.KERNEL_API_KEY || req.header("x-api-key") || "").trim();
+      const headers: Record<string, string> = {
+        "x-api-key": apiKey,
+        "x-org-id": req.auth?.orgId || "personal",
+        "x-workspace-id": req.auth?.workspaceId || "default",
+        "x-user-role": actorRole(req) || "developer",
+      };
+      let total = 0;
+      let success = 0;
+      let failed = 0;
+      const latencies: number[] = [];
+      const worker = async () => {
+        while (Date.now() < endsAt) {
+          const t0 = Date.now();
+          total += 1;
+          try {
+            const response = await axios.get(`${restBase}${targetPath}`, {
+              headers,
+              timeout: timeoutMs,
+              validateStatus: () => true,
+            });
+            const dt = Date.now() - t0;
+            latencies.push(dt);
+            if (response.status >= 200 && response.status < 400) success += 1;
+            else failed += 1;
+          } catch {
+            failed += 1;
+            latencies.push(Date.now() - t0);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      latencies.sort((a, b) => a - b);
+      const p95 = latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))] : 0;
+      const avg = latencies.length ? Number((latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(2)) : 0;
+      const elapsedSec = Math.max(1, (Date.now() - startedAt) / 1000);
+      const result = {
+        id: `loadtest-${startedAt}`,
+        target,
+        targetPath,
+        durationSec,
+        concurrency,
+        timeoutMs,
+        total,
+        success,
+        failed,
+        successRate: total > 0 ? Number((success / total).toFixed(4)) : 0,
+        throughputRps: Number((total / elapsedSec).toFixed(2)),
+        avgLatencyMs: avg,
+        p95LatencyMs: p95,
+        startedAt,
+        completedAt: Date.now(),
+      };
+      const prev = (readState() as any).reliabilityProgram || {};
+      const history = Array.isArray(prev?.loadTesting?.history) ? prev.loadTesting.history : [];
+      const next = {
+        ...prev,
+        loadTesting: {
+          enabled: true,
+          lastRun: result,
+          history: [result, ...history].slice(0, 100),
+          updatedAt: Date.now(),
+        },
+      };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.loadtest.run",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), result },
+      });
+      res.json({ success: true, result });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/autotune/recommend",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const lookbackHours = Math.max(1, Math.min(168, Number(req.body?.lookbackHours || 24)));
+      const events = listEvents(10000).filter((e) => e.timestamp >= Date.now() - lookbackHours * 3600 * 1000);
+      const loadShedByKey: Record<string, number> = {};
+      for (const evt of events) {
+        if (evt.type === "sre.load_shed") {
+          const key = String((evt.payload || {}).key || "unknown");
+          loadShedByKey[key] = (loadShedByKey[key] || 0) + 1;
+        }
+      }
+      const inflight = getInflightSnapshot();
+      const overrides = getInflightLimitOverrides();
+      const overrideMap = new Map(overrides.map((x) => [String(x.key), Number(x.limit)]));
+      const recommendation: Record<string, number> = {};
+      for (const key of reliabilityInflightKeys) {
+        const currentOverride = Number(overrideMap.get(key) || 0);
+        const observed = inflight.find((x) => x.key === key);
+        const base = Math.max(1, currentOverride || Number((observed as any)?.peakInflight || 1));
+        const sheds = Number(loadShedByKey[key] || 0);
+        let next = base;
+        if (sheds >= 20) next = Math.ceil(base * 1.5);
+        else if (sheds >= 5) next = Math.ceil(base * 1.25);
+        else if (sheds === 0 && Number((observed as any)?.peakInflight || 0) < Math.max(1, Math.floor(base * 0.45))) {
+          next = Math.max(1, Math.floor(base * 0.9));
+        }
+        recommendation[key] = next;
+      }
+      const payload = {
+        id: `autotune-${Date.now()}`,
+        lookbackHours,
+        basedOn: {
+          inflight,
+          loadShedByKey,
+          overrides,
+        },
+        recommendation,
+        createdAt: Date.now(),
+      };
+      const prev = (readState() as any).reliabilityProgram || {};
+      const next = {
+        ...prev,
+        autoTune: {
+          enabled: true,
+          lastRecommendation: payload,
+          updatedAt: Date.now(),
+        },
+      };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.autotune.recommend",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), recommendation: payload },
+      });
+      res.json({ success: true, recommendation: payload });
+    }
+  );
+
+  app.post(
+    "/admin/reliability/autotune/apply",
+    requireWorkspace,
+    requireScope("admin:write"),
+    requireRole(["founder", "admin", "developer"]),
+    (req: Request, res: Response) => {
+      const limits = (req.body?.limits || {}) as Record<string, any>;
+      const applied: Record<string, number> = {};
+      for (const key of reliabilityInflightKeys) {
+        if (limits[key] === undefined) continue;
+        const value = Math.max(1, Math.floor(Number(limits[key] || 1)));
+        setInflightLimitOverride(key, value);
+        applied[key] = value;
+      }
+      const prev = (readState() as any).reliabilityProgram || {};
+      const next = {
+        ...prev,
+        autoTune: {
+          ...(prev.autoTune || {}),
+          enabled: true,
+          lastApplied: {
+            id: `autotune-apply-${Date.now()}`,
+            applied,
+            appliedAt: Date.now(),
+            actor: req.auth?.sub || "unknown",
+          },
+          updatedAt: Date.now(),
+        },
+      };
+      writeState({ reliabilityProgram: next });
+      appendEvent({
+        type: "reliability.autotune.apply",
+        timestamp: Date.now(),
+        payload: { actor: req.auth?.sub || "unknown", role: actorRole(req), applied },
+      });
+      res.json({ success: true, applied, overrides: getInflightLimitOverrides() });
     }
   );
 
@@ -8491,7 +9861,7 @@ export function startServer(
     "/admin/reliability/program",
     requireWorkspace,
     requireScope("admin:read"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (_req: Request, res: Response) => {
       const state = readState() as any;
       const program = state.reliabilityProgram || {
@@ -8515,6 +9885,18 @@ export function startServer(
           updatedAt: 0,
         },
         incidents: [],
+        loadTesting: {
+          enabled: true,
+          lastRun: null,
+          history: [],
+          updatedAt: 0,
+        },
+        autoTune: {
+          enabled: true,
+          lastRecommendation: null,
+          lastApplied: null,
+          updatedAt: 0,
+        },
       };
       res.json({ success: true, program });
     }
@@ -8524,7 +9906,7 @@ export function startServer(
     "/admin/reliability/slo",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const prev = (readState() as any).reliabilityProgram || {};
       const incoming = req.body?.slo || {};
@@ -8551,7 +9933,7 @@ export function startServer(
     "/admin/reliability/canary/run",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const prev = (readState() as any).reliabilityProgram || {};
       const baseline = buildReliabilitySnapshot(24);
@@ -8594,7 +9976,7 @@ export function startServer(
     "/admin/reliability/status-page",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const prev = (readState() as any).reliabilityProgram || {};
       const modeRaw = String(req.body?.mode || prev?.statusPage?.mode || "operational");
@@ -8621,7 +10003,7 @@ export function startServer(
     "/admin/reliability/incident",
     requireWorkspace,
     requireScope("admin:write"),
-    requireRole(["founder", "admin"]),
+    requireRole(["founder", "admin", "developer"]),
     (req: Request, res: Response) => {
       const prev = (readState() as any).reliabilityProgram || {};
       const incidents = Array.isArray(prev?.incidents) ? prev.incidents : [];
@@ -8893,6 +10275,8 @@ export function startServer(
   let autoEvalLastTickAt = 0;
   let payoutSchedulerRunning = false;
   let payoutSchedulerLastTickAt = 0;
+  let opsAssistantsSchedulerRunning = false;
+  let opsAssistantsLastTickAt = 0;
 
   const runNightlyAutoRefresh = async () => {
     const cfg = getAutoRefreshConfig();
@@ -9161,6 +10545,45 @@ export function startServer(
     }
   };
 
+  const runOpsAssistantsScheduler = async () => {
+    if (opsAssistantsSchedulerRunning) return;
+    const tickMs = Math.max(30_000, Number(process.env.OPS_ASSISTANTS_TICK_MS || 60_000));
+    const nowMs = Date.now();
+    if (nowMs - opsAssistantsLastTickAt < tickMs) return;
+    opsAssistantsLastTickAt = nowMs;
+    opsAssistantsSchedulerRunning = true;
+    try {
+      const { dashboard } = readDashboardSummary();
+      const ops = normalizeDashboardOpsAssistants(dashboard.dashboardOpsAssistants || {});
+      if (!Boolean(ops.policy?.autoRunEnabled)) return;
+      const intervalMs = Math.max(5, Number(ops.policy?.autoRunIntervalMin || 60)) * 60 * 1000;
+      const now = Date.now();
+      for (const assistant of ops.assistants || []) {
+        if (!assistant?.enabled) continue;
+        const assistantId = String(assistant.id || "");
+        if (!assistantId) continue;
+        const lastRunAt = Number(assistant.lastRunAt || 0);
+        if (now - lastRunAt < intervalMs) continue;
+        const run = await runOpsAssistantInternal(assistantId, "system:auto_ops", "system");
+        if (!run.ok) {
+          appendEvent({
+            type: "ops.assistant.auto_run.error",
+            timestamp: Date.now(),
+            payload: { assistantId, error: run.error || "unknown" },
+          });
+        }
+      }
+    } catch (err: any) {
+      appendEvent({
+        type: "ops.assistant.auto_run.fatal",
+        timestamp: Date.now(),
+        payload: { error: err?.message || String(err) },
+      });
+    } finally {
+      opsAssistantsSchedulerRunning = false;
+    }
+  };
+
   setInterval(() => {
     void runNightlyAutoRefresh();
   }, 30_000);
@@ -9171,6 +10594,10 @@ export function startServer(
 
   setInterval(() => {
     void runAutoPayoutScheduler();
+  }, 30_000);
+
+  setInterval(() => {
+    void runOpsAssistantsScheduler();
   }, 30_000);
 
   setInterval(() => {
@@ -9185,12 +10612,16 @@ export function startServer(
     }
   }, 15 * 60 * 1000);
 
-  app.listen(restPort, () => {
+  const server = app.listen(restPort, () => {
     logger.info(
       "SERVER",
       `REST API running on http://localhost:${restPort}`
     );
   });
+  server.requestTimeout = Math.max(30_000, Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 120_000));
+  server.headersTimeout = Math.max(35_000, Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 125_000));
+  server.keepAliveTimeout = Math.max(5_000, Number(process.env.HTTP_KEEPALIVE_TIMEOUT_MS || 15_000));
+  server.maxRequestsPerSocket = Math.max(100, Number(process.env.HTTP_MAX_REQUESTS_PER_SOCKET || 1500));
 
   /* ---------------- WebSocket ---------------- */
   const wss = new WebSocketServer({ port: WS_PORT });

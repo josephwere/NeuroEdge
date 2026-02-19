@@ -1,4 +1,4 @@
-//kernel/cmd/api/main.go
+// kernel/cmd/api/main.go
 package main
 
 import (
@@ -29,20 +29,24 @@ func main() {
 	addr := ":" + port
 
 	readTimeout := readSecondsEnv("HTTP_READ_TIMEOUT_SEC", 10)
+	readHeaderTimeout := readSecondsEnv("HTTP_READ_HEADER_TIMEOUT_SEC", 5)
 	writeTimeout := readSecondsEnv("HTTP_WRITE_TIMEOUT_SEC", 10)
 	idleTimeout := readSecondsEnv("HTTP_IDLE_TIMEOUT_SEC", 60)
 	shutdownTimeout := readSecondsEnv("HTTP_SHUTDOWN_TIMEOUT_SEC", 5)
+	maxHeaderBytes := readIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20)
 
 	fmt.Printf("Starting NeuroEdge API on %s\n", addr)
 
 	router := handlers.NewRouter()
 
 	server := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		Addr:              addr,
+		Handler:           router,
+		ReadTimeout:       readTimeout,
+		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -65,6 +69,18 @@ func main() {
 	}
 
 	fmt.Println("API stopped")
+}
+
+func readIntEnv(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func readSecondsEnv(key string, fallback int) time.Duration {

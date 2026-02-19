@@ -6,6 +6,58 @@ import { confirmSafeAction, recoveryGuidance } from "@/services/safetyPrompts";
 import { isFounderUser } from "@/services/founderAccess";
 import { applyBrandingToDocument, defaultBranding, loadBranding, saveBranding, type BrandingConfig } from "@/services/branding";
 
+const DashboardBlockVisibilityContext = React.createContext<(title: string) => boolean>(() => true);
+const DashboardBlockUsageContext = React.createContext<(title: string, usage: { opens?: number; clicks?: number; openMs?: number; lastSeenAt?: number; lastClickedAt?: number }) => void>(() => undefined);
+
+const DASHBOARD_CARD_TITLE_BLOCK_ID: Record<string, string> = {
+  "NeuroEdge Voice Ops Copilot": "shared.voice_ops",
+  "Create Media (VisionForge)": "shared.creator_engine",
+  "CortexCore Intelligence Engine": "shared.cortex_core",
+  "NeuroEdge Training Studio (Founder/Admin)": "founder.training_studio",
+  "Domain & Link Registry (Founder/Admin)": "founder.domain_registry",
+  "Task & Permission Control Matrix": "founder.access_control",
+  "Device Protection & Workforce Security": "founder.device_protection",
+  "AegisCore Shield (Security + Resilience)": "founder.aegis",
+  "Artifacts Workspace (Build • Edit • Share)": "founder.artifacts",
+  "NeuroExpansion & Building": "founder.neuroexpansion",
+  "Mesh Expansion Engine (Founder/Admin)": "founder.mesh_expansion",
+  "Compute Payout Budget & Approvals": "founder.compute_budget",
+  "LoanOps Shield Center (Founder/Admin/Enterprise)": "founder.loanops",
+  "Reliability Ops (SLO • Canary • Incidents)": "founder.reliability",
+  "Platform Analytics": "founder.platform_analytics",
+  "Subscription & Plan Control": "founder.subscription",
+  "Payment Profile (Dashboard-Managed)": "founder.payments",
+  "Integrations & API Platform (Founder Premium)": "founder.integrations_api",
+  "Branding Studio (Founder/System Admin)": "founder.branding",
+  "System Health & Security": "founder.system_health",
+  "Runtime Debug Matrix (Founder/Admin)": "founder.runtime_debug",
+  "Twin Systems": "founder.twin_systems",
+  "Ops Assistants Mesh (Founder/Admin)": "founder.ops_assistants",
+  "Ops Assistants Mesh (Founder/Admin/Developer)": "founder.ops_assistants",
+  "Runtime Debug Matrix (Admin)": "admin.runtime_debug",
+  "Market Readiness (Admin)": "admin.market_readiness",
+  "User Moderation": "admin.user_moderation",
+  "Offer Management": "admin.offer_management",
+  "Support Tickets": "admin.support_tickets",
+  "API Keys": "developer.api_keys",
+  "Webhook Setup": "developer.webhooks",
+  "Model & Env": "developer.model_env",
+  "Debug Tools": "developer.debug_tools",
+  "Agent Studio": "agents.studio",
+  "Knowledge Base & Prompting": "agents.knowledge",
+  "Integrations & Permissions": "agents.permissions",
+  "Chat & Prompt Workspace": "user.workspace",
+  "My Compute Devices & Earnings": "user.compute_owner",
+  "My Payout Details & Requests (Verified)": "user.payout",
+  "My Device Protection Plan": "user.protection",
+  "My Assistant Builder (User Freedom)": "user.assistant_builder",
+  "Saved Prompts": "user.saved_prompts",
+  "Team Roles & Department Controls": "enterprise.team_roles",
+  "Usage by Department": "enterprise.usage",
+  "Billing, Audit, Compliance": "enterprise.compliance",
+  "SSO & Governance": "enterprise.sso",
+};
+
 type View = "founder" | "admin" | "developer" | "agents" | "user" | "enterprise";
 
 interface ServiceStatus {
@@ -322,6 +374,64 @@ interface PermissionCatalogItem {
 interface AccessControlState {
   rolePermissions: Record<string, { defaultAction?: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
   userOverrides: Array<{ userId: string; allow?: string[]; suspend?: string[]; revoke?: string[] }>;
+  updatedAt?: number;
+}
+
+interface DashboardBlockCatalogItem {
+  id: string;
+  title: string;
+  views: string[];
+  roles: string[];
+}
+
+interface DashboardResourceRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  role: string;
+  blockId: string;
+  details?: string;
+  status: string;
+  requestedAt: number;
+  reviewedAt?: number;
+  reviewedBy?: string;
+}
+
+interface DashboardResourceAssistantState {
+  rolePolicies?: Record<string, { enabled?: string[]; disabled?: string[]; updatedAt?: number }>;
+  userPolicies?: Array<{ userId: string; enabled?: string[]; disabled?: string[]; updatedAt?: number }>;
+  requests?: DashboardResourceRequest[];
+  optimizer?: {
+    enabled?: boolean;
+    maxBlocksPerRole?: number;
+    hideAfterDaysUnused?: number;
+    updatedAt?: number;
+  };
+  usage?: Record<string, any>;
+  updatedAt?: number;
+}
+
+interface DashboardOpsAssistantUnit {
+  id: string;
+  name: string;
+  mission: string;
+  enabled: boolean;
+  status: string;
+  connectedSystems: string[];
+  lastRunAt?: number;
+  lastResult?: any;
+}
+
+interface DashboardOpsAssistantsState {
+  assistants: DashboardOpsAssistantUnit[];
+  policy: {
+    requireFounderApprovalForCodeChanges: boolean;
+    allowDefensiveDeception: boolean;
+    autoRunEnabled: boolean;
+    autoRunIntervalMin: number;
+    updatedAt?: number;
+  };
+  runLogs: any[];
   updatedAt?: number;
 }
 
@@ -723,6 +833,18 @@ interface ReliabilityProgramState {
     owner?: string;
     createdAt?: number;
   }>;
+  loadTesting?: {
+    enabled?: boolean;
+    lastRun?: any;
+    history?: any[];
+    updatedAt?: number;
+  };
+  autoTune?: {
+    enabled?: boolean;
+    lastRecommendation?: any;
+    lastApplied?: any;
+    updatedAt?: number;
+  };
 }
 
 interface ArtifactWorkspaceItem {
@@ -860,6 +982,12 @@ const Dashboard: React.FC = () => {
   const [incidentTitle, setIncidentTitle] = useState("");
   const [incidentSeverity, setIncidentSeverity] = useState<"sev1" | "sev2" | "sev3" | "sev4">("sev3");
   const [incidentSummary, setIncidentSummary] = useState("");
+  const [loadTestDurationSec, setLoadTestDurationSec] = useState("12");
+  const [loadTestConcurrency, setLoadTestConcurrency] = useState("24");
+  const [loadTestTarget, setLoadTestTarget] = useState<"status" | "concurrency" | "metrics">("status");
+  const [loadTestTimeoutMs, setLoadTestTimeoutMs] = useState("3000");
+  const [autotuneLookbackHours, setAutotuneLookbackHours] = useState("24");
+  const [autotuneRecommendation, setAutotuneRecommendation] = useState<any>(null);
   const [neuroExpansion, setNeuroExpansion] = useState<NeuroExpansionState | null>(null);
   const [neuroExpansionNotifications, setNeuroExpansionNotifications] = useState<any[]>([]);
   const [neuroExpansionTitle, setNeuroExpansionTitle] = useState("");
@@ -1024,6 +1152,25 @@ const Dashboard: React.FC = () => {
   const opsStreamTimerRef = useRef<any>(null);
   const [dashboardRole, setDashboardRole] = useState<DashboardRole>("user");
   const [dashboardAssistantQuery, setDashboardAssistantQuery] = useState("");
+  const [dashboardResourceAssistant, setDashboardResourceAssistant] = useState<DashboardResourceAssistantState | null>(null);
+  const [dashboardBlockCatalog, setDashboardBlockCatalog] = useState<DashboardBlockCatalogItem[]>([]);
+  const [dashboardEffectiveBlocks, setDashboardEffectiveBlocks] = useState<string[]>([]);
+  const [resourceTargetRole, setResourceTargetRole] = useState<DashboardRole>("user");
+  const [resourceTargetUserId, setResourceTargetUserId] = useState("");
+  const [resourceFocusCsv, setResourceFocusCsv] = useState("");
+  const [resourceMaxBlocks, setResourceMaxBlocks] = useState("12");
+  const [resourceToggleBlockId, setResourceToggleBlockId] = useState("");
+  const [resourceRequestDetails, setResourceRequestDetails] = useState("");
+  const [resourceBuildTitle, setResourceBuildTitle] = useState("");
+  const [resourceBuildFeatureText, setResourceBuildFeatureText] = useState("");
+  const [opsAssistantsState, setOpsAssistantsState] = useState<DashboardOpsAssistantsState | null>(null);
+  const [capabilityStatus, setCapabilityStatus] = useState<Record<string, any> | null>(null);
+  const [dashboardUsageSummary, setDashboardUsageSummary] = useState<{ topUsed: any[]; lowUsed: any[] }>({
+    topUsed: [],
+    lowUsed: [],
+  });
+  const blockUsageQueueRef = useRef<Array<{ blockId: string; opens: number; clicks: number; openMs: number; lastSeenAt: number; lastClickedAt: number }>>([]);
+  const blockUsageFlushTimerRef = useRef<number | null>(null);
 
   const twinUploadTier = useMemo<UploadTier>(() => {
     if (isFounderUser()) return "founder";
@@ -1089,6 +1236,10 @@ const Dashboard: React.FC = () => {
     setDashboardRole("user");
   }, []);
 
+  useEffect(() => {
+    if (!resourceTargetRole) setResourceTargetRole(dashboardRole);
+  }, [dashboardRole, resourceTargetRole]);
+
   const allowedViews = useMemo<View[]>(() => {
     switch (dashboardRole) {
       case "founder":
@@ -1110,6 +1261,20 @@ const Dashboard: React.FC = () => {
   const canAccessLoanOps = useMemo(
     () => dashboardRole === "founder" || dashboardRole === "admin" || dashboardRole === "enterprise",
     [dashboardRole]
+  );
+  const canAccessFounderAdminDevOps = useMemo(
+    () => dashboardRole === "founder" || dashboardRole === "admin" || dashboardRole === "developer",
+    [dashboardRole]
+  );
+  const dashboardVisibleBlockSet = useMemo(() => new Set(dashboardEffectiveBlocks || []), [dashboardEffectiveBlocks]);
+  const isDashboardCardVisible = useMemo(
+    () => (title: string) => {
+      const id = DASHBOARD_CARD_TITLE_BLOCK_ID[title];
+      if (!id) return true;
+      if (dashboardVisibleBlockSet.size === 0) return true;
+      return dashboardVisibleBlockSet.has(id);
+    },
+    [dashboardVisibleBlockSet]
   );
 
   const dashboardGuideCatalog = useMemo<DashboardGuideItem[]>(
@@ -1742,6 +1907,9 @@ const Dashboard: React.FC = () => {
   const [creatorJob, setCreatorJob] = useState<CreatorJobState | null>(null);
   const [creatorHistory, setCreatorHistory] = useState<any[]>([]);
   const [creatorBusy, setCreatorBusy] = useState(false);
+  const [powerToolPrompt, setPowerToolPrompt] = useState("Improve reliability and fix top regressions.");
+  const [powerToolBusy, setPowerToolBusy] = useState(false);
+  const [powerToolOutput, setPowerToolOutput] = useState<any>(null);
   const [intelligenceQuestion, setIntelligenceQuestion] = useState("");
   const [intelligenceMode, setIntelligenceMode] = useState("step_by_step");
   const [intelligenceOutput, setIntelligenceOutput] = useState<any>(null);
@@ -2194,6 +2362,9 @@ const Dashboard: React.FC = () => {
     if (Array.isArray(remote.domainLinks)) setDomainLinks(remote.domainLinks);
     if (remote.accessControl && typeof remote.accessControl === "object") setAccessControl(remote.accessControl);
     if (Array.isArray(remote.permissionCatalog)) setPermissionCatalog(remote.permissionCatalog);
+    if (remote.dashboardResourceAssistant && typeof remote.dashboardResourceAssistant === "object") {
+      setDashboardResourceAssistant(remote.dashboardResourceAssistant);
+    }
     if (remote.deviceProtection && typeof remote.deviceProtection === "object") setDeviceProtection(remote.deviceProtection);
     if (remote.computeDonation && typeof remote.computeDonation === "object") {
       const cd = remote.computeDonation as any;
@@ -2237,6 +2408,9 @@ const Dashboard: React.FC = () => {
     if (remote.ssoConfig && typeof remote.ssoConfig === "object") setSsoConfig(remote.ssoConfig);
     if (remote.neuroExpansion && typeof remote.neuroExpansion === "object") setNeuroExpansion(remote.neuroExpansion);
     if (remote.meshExpansion && typeof remote.meshExpansion === "object") setMeshExpansion(remote.meshExpansion);
+    if (remote.dashboardOpsAssistants && typeof remote.dashboardOpsAssistants === "object") {
+      setOpsAssistantsState(remote.dashboardOpsAssistants);
+    }
   };
 
   const callAction = async (path: string, body: any) => {
@@ -2325,6 +2499,15 @@ const Dashboard: React.FC = () => {
       }
       if (data.accessControl && typeof data.accessControl === "object") setAccessControl(data.accessControl);
       if (Array.isArray(data.permissionCatalog)) setPermissionCatalog(data.permissionCatalog);
+      if (data?.assistant && typeof data.assistant === "object") setDashboardResourceAssistant(data.assistant);
+      if (Array.isArray(data?.blockCatalog)) setDashboardBlockCatalog(data.blockCatalog);
+      if (Array.isArray(data?.effectiveBlocks)) setDashboardEffectiveBlocks(data.effectiveBlocks);
+      if (data?.usageSummary && typeof data.usageSummary === "object") {
+        setDashboardUsageSummary({
+          topUsed: Array.isArray(data.usageSummary.topUsed) ? data.usageSummary.topUsed : [],
+          lowUsed: Array.isArray(data.usageSummary.lowUsed) ? data.usageSummary.lowUsed : [],
+        });
+      }
       if (data.deviceProtection && typeof data.deviceProtection === "object") setDeviceProtection(data.deviceProtection);
       if (typeof data.apiKey === "string" && data.apiKey) setLatestGeneratedApiKey(data.apiKey);
       if (Array.isArray(data?.devices)) setOwnerComputeDevices(data.devices);
@@ -2376,6 +2559,9 @@ const Dashboard: React.FC = () => {
       if (data?.meshExpansion && typeof data.meshExpansion === "object") {
         setMeshExpansion(data.meshExpansion);
       }
+      if (data?.opsAssistants && typeof data.opsAssistants === "object") {
+        setOpsAssistantsState(data.opsAssistants);
+      }
       if (Array.isArray(data?.meshNodes)) {
         setMeshExpansionNodes(data.meshNodes);
       }
@@ -2424,6 +2610,38 @@ const Dashboard: React.FC = () => {
         if (access?.accessControl && typeof access.accessControl === "object") setAccessControl(access.accessControl);
       } catch {
         // ignore when not authorized
+      }
+      try {
+        const eff = await getJson("/dashboard/resource-assistant/effective");
+        if (Array.isArray(eff?.effectiveBlocks)) setDashboardEffectiveBlocks(eff.effectiveBlocks);
+      } catch {
+        // optional for all roles
+      }
+      try {
+        const ra = await getJson("/admin/dashboard/resource-assistant/bootstrap");
+        if (ra?.assistant && typeof ra.assistant === "object") setDashboardResourceAssistant(ra.assistant);
+        if (Array.isArray(ra?.blockCatalog)) setDashboardBlockCatalog(ra.blockCatalog);
+        if (Array.isArray(ra?.effectiveBlocks)) setDashboardEffectiveBlocks(ra.effectiveBlocks);
+        if (ra?.usageSummary && typeof ra.usageSummary === "object") {
+          setDashboardUsageSummary({
+            topUsed: Array.isArray(ra.usageSummary.topUsed) ? ra.usageSummary.topUsed : [],
+            lowUsed: Array.isArray(ra.usageSummary.lowUsed) ? ra.usageSummary.lowUsed : [],
+          });
+        }
+      } catch {
+        // founder/admin only
+      }
+      try {
+        const oa = await getJson("/admin/dashboard/ops-assistants/bootstrap");
+        if (oa?.opsAssistants && typeof oa.opsAssistants === "object") setOpsAssistantsState(oa.opsAssistants);
+      } catch {
+        // founder/admin only
+      }
+      try {
+        const caps = await getJson("/admin/dashboard/capabilities/status");
+        if (caps?.capabilities && typeof caps.capabilities === "object") setCapabilityStatus(caps.capabilities);
+      } catch {
+        // founder/admin/developer only
       }
       try {
         const security = await getJson("/admin/device-protection/bootstrap");
@@ -2502,6 +2720,17 @@ const Dashboard: React.FC = () => {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const eff = await getJson("/dashboard/resource-assistant/effective");
+        if (Array.isArray(eff?.effectiveBlocks)) setDashboardEffectiveBlocks(eff.effectiveBlocks);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [dashboardRole]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -4691,8 +4920,11 @@ const Dashboard: React.FC = () => {
   };
 
   const refreshReliabilityProgram = async () => {
-    if (!canAccessAdminOps) return;
-    const data = await callAction("GET:/admin/reliability/program", {});
+    if (!canAccessFounderAdminDevOps) return;
+    const [data, tune] = await Promise.all([
+      callAction("GET:/admin/reliability/program", {}),
+      callAction("GET:/admin/reliability/autotune/status", {}),
+    ]);
     if (data?.program) {
       setReliabilityProgram(data.program);
       if (data.program?.slo) {
@@ -4712,6 +4944,47 @@ const Dashboard: React.FC = () => {
         setStatusPageMode(data.program.statusPage.mode || "operational");
         setStatusPageMessage(String(data.program.statusPage.message || "All systems operational."));
       }
+    }
+    if (tune?.lastRecommendation) setAutotuneRecommendation(tune.lastRecommendation);
+  };
+
+  const runReliabilityLoadTest = async () => {
+    const data = await callAction("/admin/reliability/loadtest/run", {
+      durationSec: Number(loadTestDurationSec || 12),
+      concurrency: Number(loadTestConcurrency || 24),
+      target: loadTestTarget,
+      timeoutMs: Number(loadTestTimeoutMs || 3000),
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Load test completed." });
+      setBackendOutput(data);
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const recommendAutoTune = async () => {
+    const data = await callAction("/admin/reliability/autotune/recommend", {
+      lookbackHours: Number(autotuneLookbackHours || 24),
+    });
+    if (data?.recommendation) {
+      setAutotuneRecommendation(data.recommendation);
+      addNotification({ type: "success", message: "Auto-tune recommendation generated." });
+      setBackendOutput(data);
+      await refreshReliabilityProgram();
+    }
+  };
+
+  const applyAutoTuneRecommendation = async () => {
+    const limits = autotuneRecommendation?.recommendation;
+    if (!limits || typeof limits !== "object") {
+      addNotification({ type: "warn", message: "No recommendation to apply." });
+      return;
+    }
+    const data = await callAction("/admin/reliability/autotune/apply", { limits });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Auto-tune limits applied." });
+      setBackendOutput(data);
+      await refreshReliabilityProgram();
     }
   };
 
@@ -6296,6 +6569,253 @@ const Dashboard: React.FC = () => {
     return "inherit";
   };
 
+  const refreshDashboardResourceAssistant = async () => {
+    try {
+      const eff = await getJson("/dashboard/resource-assistant/effective");
+      if (Array.isArray(eff?.effectiveBlocks)) setDashboardEffectiveBlocks(eff.effectiveBlocks);
+    } catch {
+      // ignore
+    }
+    if (!canAccessAdminOps) return;
+    const data = await callAction("GET:/admin/dashboard/resource-assistant/bootstrap", {});
+    if (data?.assistant && typeof data.assistant === "object") setDashboardResourceAssistant(data.assistant);
+    if (Array.isArray(data?.blockCatalog)) setDashboardBlockCatalog(data.blockCatalog);
+    if (Array.isArray(data?.effectiveBlocks)) setDashboardEffectiveBlocks(data.effectiveBlocks);
+  };
+
+  const optimizeDashboardBlocks = async () => {
+    const focusBlocks = resourceFocusCsv
+      .split(/[\n,]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const data = await callAction("/admin/dashboard/resource-assistant/optimize", {
+      targetRole: resourceTargetRole,
+      targetUserId: resourceTargetUserId.trim(),
+      focusBlocks,
+      maxBlocks: Number(resourceMaxBlocks) || 12,
+    });
+    if (data?.success) {
+      addNotification({
+        type: "success",
+        message: data?.recommendation || `Optimized blocks for ${resourceTargetRole}.`,
+      });
+    }
+  };
+
+  const toggleResourceBlock = async (enabled: boolean) => {
+    const blockId = resourceToggleBlockId.trim();
+    if (!blockId) {
+      addNotification({ type: "warn", message: "Enter a block id first." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/resource-assistant/toggle-block", {
+      targetRole: resourceTargetRole,
+      targetUserId: resourceTargetUserId.trim(),
+      blockId,
+      enabled,
+    });
+    if (data?.success) {
+      addNotification({
+        type: "success",
+        message: `${enabled ? "Enabled" : "Disabled"} ${blockId} for ${resourceTargetUserId.trim() || resourceTargetRole}.`,
+      });
+    }
+  };
+
+  const requestDashboardBlock = async () => {
+    if (!resourceToggleBlockId.trim() && !resourceRequestDetails.trim()) {
+      addNotification({ type: "warn", message: "Add block id or request details." });
+      return;
+    }
+    const data = await callAction("/dashboard/resource-assistant/request-block", {
+      targetRole: resourceTargetRole,
+      blockId: resourceToggleBlockId.trim(),
+      details: resourceRequestDetails.trim(),
+    });
+    if (data?.success) {
+      addNotification({
+        type: "success",
+        message: data?.autoAssigned
+          ? "Block assigned automatically."
+          : "Request submitted for founder/admin review.",
+      });
+      setResourceRequestDetails("");
+    }
+  };
+
+  const flushDashboardBlockUsage = React.useCallback(async () => {
+    if (blockUsageQueueRef.current.length === 0) return;
+    const merged = new Map<string, { opens: number; clicks: number; openMs: number; lastSeenAt: number; lastClickedAt: number }>();
+    for (const item of blockUsageQueueRef.current.splice(0, blockUsageQueueRef.current.length)) {
+      const prev = merged.get(item.blockId) || { opens: 0, clicks: 0, openMs: 0, lastSeenAt: 0, lastClickedAt: 0 };
+      merged.set(item.blockId, {
+        opens: prev.opens + (item.opens || 0),
+        clicks: prev.clicks + (item.clicks || 0),
+        openMs: prev.openMs + (item.openMs || 0),
+        lastSeenAt: Math.max(prev.lastSeenAt || 0, item.lastSeenAt || 0),
+        lastClickedAt: Math.max(prev.lastClickedAt || 0, item.lastClickedAt || 0),
+      });
+    }
+    const events = Array.from(merged.entries()).map(([blockId, v]) => ({ blockId, ...v }));
+    await callAction("/dashboard/resource-assistant/usage/ingest", { events });
+  }, []);
+
+  const reportDashboardBlockUsage = React.useCallback((title: string, usage: { opens?: number; clicks?: number; openMs?: number; lastSeenAt?: number; lastClickedAt?: number }) => {
+    const blockId = DASHBOARD_CARD_TITLE_BLOCK_ID[title];
+    if (!blockId) return;
+    blockUsageQueueRef.current.push({
+      blockId,
+      opens: Number(usage.opens || 0),
+      clicks: Number(usage.clicks || 0),
+      openMs: Number(usage.openMs || 0),
+      lastSeenAt: Number(usage.lastSeenAt || Date.now()),
+      lastClickedAt: Number(usage.lastClickedAt || 0),
+    });
+    if (blockUsageFlushTimerRef.current) window.clearTimeout(blockUsageFlushTimerRef.current);
+    blockUsageFlushTimerRef.current = window.setTimeout(() => {
+      flushDashboardBlockUsage().catch(() => undefined);
+    }, 1500);
+  }, [flushDashboardBlockUsage]);
+
+  useEffect(() => {
+    const onUnload = () => {
+      flushDashboardBlockUsage().catch(() => undefined);
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      if (blockUsageFlushTimerRef.current) {
+        window.clearTimeout(blockUsageFlushTimerRef.current);
+        blockUsageFlushTimerRef.current = null;
+      }
+    };
+  }, [flushDashboardBlockUsage]);
+
+  const reviewDashboardBlockRequest = async (requestId: string, decision: "approve" | "reject") => {
+    const data = await callAction("/admin/dashboard/resource-assistant/request/review", {
+      requestId,
+      decision,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Request ${decision}d.` });
+    }
+  };
+
+  const proposeDashboardBlockBuild = async () => {
+    if (!resourceBuildTitle.trim() || !resourceBuildFeatureText.trim()) {
+      addNotification({ type: "warn", message: "Enter block title and feature details first." });
+      return;
+    }
+    const data = await callAction("/admin/dashboard/resource-assistant/build/propose", {
+      title: resourceBuildTitle.trim(),
+      featureText: resourceBuildFeatureText.trim(),
+      targetRole: resourceTargetRole,
+    });
+    if (data?.success) {
+      addNotification({ type: "success", message: "Build proposal submitted for approval." });
+      setResourceBuildTitle("");
+      setResourceBuildFeatureText("");
+    }
+  };
+
+  const refreshOpsAssistants = async () => {
+    const data = await callAction("GET:/admin/dashboard/ops-assistants/bootstrap", {});
+    if (data?.opsAssistants) {
+      setOpsAssistantsState(data.opsAssistants);
+      addNotification({ type: "success", message: "Ops assistants refreshed." });
+    }
+  };
+
+  const refreshCapabilityStatus = async () => {
+    const data = await callAction("GET:/admin/dashboard/capabilities/status", {});
+    if (data?.capabilities) {
+      setCapabilityStatus(data.capabilities);
+      addNotification({ type: "success", message: "Capability status refreshed." });
+    }
+  };
+
+  const toggleOpsAssistant = async (assistantId: string, enabled: boolean) => {
+    const data = await callAction("/admin/dashboard/ops-assistants/toggle", { assistantId, enabled });
+    if (data?.success) addNotification({ type: "success", message: `Assistant ${enabled ? "enabled" : "disabled"}.` });
+  };
+
+  const saveOpsAssistantPolicy = async () => {
+    if (!opsAssistantsState?.policy) return;
+    const data = await callAction("/admin/dashboard/ops-assistants/policy/save", {
+      policy: opsAssistantsState.policy,
+    });
+    if (data?.success) addNotification({ type: "success", message: "Ops assistant policy saved." });
+  };
+
+  const runOpsAssistant = async (assistantId: string) => {
+    const data = await callAction("/admin/dashboard/ops-assistants/run", { assistantId });
+    if (data?.success) {
+      addNotification({ type: "success", message: `Ran ${assistantId}.` });
+      if (data?.run?.result) setBackendOutput(data.run.result);
+    }
+  };
+
+  const runPowerTool = async (tool: string) => {
+    try {
+      setPowerToolBusy(true);
+      let data: any = null;
+      if (tool === "bug_scan") {
+        data = await callAction("/admin/dashboard/neuroexpansion/scan-placeholders", {});
+      } else if (tool === "self_heal") {
+        data = await callAction("/admin/quality/hardening/run", {});
+      } else if (tool === "training_heavy") {
+        data = await callAction("/admin/training/jobs/run", {
+          mode: "incremental",
+          evalSuite: "core",
+          targetModel: modelControl.model || "neuroedge-13b-instruct",
+          options: { source: "power_tools_hub", prompt: powerToolPrompt },
+        });
+      } else if (tool === "eval_batch") {
+        data = await callAction("/admin/evals/run-batch", {
+          suites: ["core", "reasoning", "coding", "research"],
+        });
+      } else if (tool === "red_team") {
+        data = await callAction("/admin/redteam/run", {});
+      } else if (tool === "ship_pr") {
+        const candidateId = String(neuroExpansion?.submissions?.[0]?.id || "").trim();
+        if (!candidateId) {
+          addNotification({ type: "warn", message: "No NeuroExpansion submission available for PR generation." });
+          return;
+        }
+        data = await callAction("/admin/dashboard/neuroexpansion/pr/generate", { id: candidateId });
+      } else if (tool === "gen_image") {
+        data = await callAction("/creator/image", {
+          prompt: powerToolPrompt,
+          style: "cinematic",
+          resolution: "1024x1024",
+          aspect_ratio: "1:1",
+          batch: 1,
+        });
+      } else if (tool === "gen_video") {
+        data = await callAction("/creator/video", {
+          prompt: powerToolPrompt,
+          duration: 8,
+          resolution: "1080p",
+          aspect_ratio: "16:9",
+        });
+      } else if (tool === "gen_music") {
+        data = await callAction("/creator/music", {
+          prompt: powerToolPrompt,
+          style: "cinematic",
+          duration: 20,
+          bpm: 120,
+          mood: "uplifting",
+        });
+      }
+      if (data) {
+        setPowerToolOutput(data);
+        setBackendOutput(data);
+      }
+    } finally {
+      setPowerToolBusy(false);
+    }
+  };
+
   const saveDeviceProtectionPolicy = async () => {
     const data = await callAction("/admin/device-protection/policy/save", { policy: deviceProtection.policy });
     if (data?.success) addNotification({ type: "success", message: "Device protection policy saved." });
@@ -6572,6 +7092,323 @@ const Dashboard: React.FC = () => {
       </div>
     </Card>
   );
+
+  const dashboardResourceAssistantCard = canAccessAdminOps ? (
+    <Card title="Dashboard Resource Assistant (Founder/Admin)">
+      <div style={{ ...muted, marginBottom: 6 }}>
+        Auto-optimizes per-user/per-role dashboard blocks, hides unused resources, handles block requests, and submits new block build proposals with approval workflow.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={resourceTargetRole} onChange={(e) => setResourceTargetRole(e.target.value as DashboardRole)} style={input}>
+          <option value="founder">founder</option>
+          <option value="admin">admin</option>
+          <option value="developer">developer</option>
+          <option value="enterprise">enterprise</option>
+          <option value="user">user</option>
+        </select>
+        <input
+          value={resourceTargetUserId}
+          onChange={(e) => setResourceTargetUserId(e.target.value)}
+          placeholder="Target user id (optional)"
+          style={input}
+        />
+        <button style={chip} onClick={refreshDashboardResourceAssistant}>Refresh</button>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        <textarea
+          value={resourceFocusCsv}
+          onChange={(e) => setResourceFocusCsv(e.target.value)}
+          placeholder="Focus block IDs (comma/newline). Example: user.workspace, user.assistant_builder"
+          style={{ ...input, minHeight: 70 }}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={resourceMaxBlocks}
+            onChange={(e) => setResourceMaxBlocks(e.target.value)}
+            placeholder="Max blocks"
+            style={{ ...input, maxWidth: 130 }}
+          />
+          <button style={primary} onClick={optimizeDashboardBlocks}>Optimize</button>
+        </div>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={resourceToggleBlockId}
+            onChange={(e) => setResourceToggleBlockId(e.target.value)}
+            placeholder="Block ID to toggle"
+            style={input}
+          />
+          <button style={chip} onClick={() => toggleResourceBlock(true)}>Enable</button>
+          <button style={chip} onClick={() => toggleResourceBlock(false)}>Disable</button>
+        </div>
+        <textarea
+          value={resourceRequestDetails}
+          onChange={(e) => setResourceRequestDetails(e.target.value)}
+          placeholder="Request details (what user wants if block doesn't exist)"
+          style={{ ...input, minHeight: 60 }}
+        />
+        <button style={chip} onClick={requestDashboardBlock}>Submit Block Request</button>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        <input
+          value={resourceBuildTitle}
+          onChange={(e) => setResourceBuildTitle(e.target.value)}
+          placeholder="New block title to build"
+          style={input}
+        />
+        <textarea
+          value={resourceBuildFeatureText}
+          onChange={(e) => setResourceBuildFeatureText(e.target.value)}
+          placeholder="Feature spec for assistant to build (Twin + NeuroExpansion approval flow)"
+          style={{ ...input, minHeight: 70 }}
+        />
+        <button style={chip} onClick={proposeDashboardBlockBuild}>Propose Build</button>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        <div style={muted}>
+          Effective blocks for current session: {(dashboardEffectiveBlocks || []).length}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+          <div style={log}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Top used blocks</div>
+            {(dashboardUsageSummary.topUsed || []).slice(0, 6).map((b) => (
+              <div key={`top-${b.id}`} style={{ marginBottom: 4, fontSize: "0.78rem" }}>
+                {b.title} • score {Number(b.score || 0).toFixed(2)} • opens {b.opens || 0} • clicks {b.clicks || 0}
+              </div>
+            ))}
+            {(dashboardUsageSummary.topUsed || []).length === 0 ? (
+              <div style={muted}>No usage telemetry yet.</div>
+            ) : null}
+          </div>
+          <div style={log}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Low used blocks</div>
+            {(dashboardUsageSummary.lowUsed || []).slice(0, 6).map((b) => (
+              <div key={`low-${b.id}`} style={{ marginBottom: 4, fontSize: "0.78rem" }}>
+                {b.title} • score {Number(b.score || 0).toFixed(2)} • opens {b.opens || 0} • clicks {b.clicks || 0}
+              </div>
+            ))}
+            {(dashboardUsageSummary.lowUsed || []).length === 0 ? (
+              <div style={muted}>No usage telemetry yet.</div>
+            ) : null}
+          </div>
+        </div>
+        {(dashboardResourceAssistant?.requests || []).slice(0, 12).map((r) => (
+          <div key={r.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <div>
+                <strong>{r.id}</strong> • {r.userName} ({r.role}) • {r.blockId || "new block"}
+                <div style={muted}>{r.details || "-"}</div>
+                <div style={muted}>Status: {r.status}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button style={chip} onClick={() => reviewDashboardBlockRequest(r.id, "approve")}>Approve</button>
+                <button style={chip} onClick={() => reviewDashboardBlockRequest(r.id, "reject")}>Reject</button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {(dashboardResourceAssistant?.requests || []).length === 0 ? (
+          <div style={muted}>No pending block requests.</div>
+        ) : null}
+      </div>
+      <div style={{ ...log, marginTop: 8, maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap" }}>
+        {JSON.stringify(
+          {
+            assistantUpdatedAt: dashboardResourceAssistant?.updatedAt || 0,
+            catalogSize: dashboardBlockCatalog.length,
+            currentEffectiveBlocks: dashboardEffectiveBlocks,
+          },
+          null,
+          2
+        )}
+      </div>
+    </Card>
+  ) : null;
+
+  const capabilityStatusCard = canAccessFounderAdminDevOps ? (
+    <Card title="Capability Status (Founder/Admin/Developer)">
+      <div style={muted}>Confirmed systems with server-side endpoints and role-gated access.</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshCapabilityStatus}>Refresh</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, marginTop: 8 }}>
+        {[
+          ["modelTrainingInfrastructure", "Model training infrastructure"],
+          ["datasetPipelines", "Dataset pipelines"],
+          ["evaluationSystems", "Evaluation systems"],
+          ["safetyTestingTools", "Safety testing tools"],
+          ["debuggingDashboards", "Debugging dashboards"],
+        ].map(([key, label]) => {
+          const item = (capabilityStatus || {})[key] || {};
+          const endpoints = Array.isArray(item?.endpoints) ? item.endpoints : [];
+          const roles = Array.isArray(item?.roles) ? item.roles : [];
+          return (
+            <div key={key} style={log}>
+              <div style={{ fontWeight: 700 }}>{label}</div>
+              <div style={muted}>Available: {item?.available ? "yes" : "no"}</div>
+              <div style={{ ...muted, marginTop: 4 }}>Roles: {roles.join(", ") || "founder, admin, developer"}</div>
+              <div style={{ marginTop: 6, fontSize: "0.76rem", display: "grid", gap: 3 }}>
+                {endpoints.length ? endpoints.map((ep: string) => <div key={ep}>{ep}</div>) : <div>Loading…</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  ) : null;
+
+  const opsAssistantsCard = canAccessFounderAdminDevOps ? (
+    <Card title="Ops Assistants Mesh (Founder/Admin/Developer)">
+      <div style={muted}>
+        5 autonomous ops assistants connected to Twin, NeuroExpansion, training, reliability, security, and runtime systems.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} onClick={refreshOpsAssistants}>Refresh</button>
+        <button style={primary} onClick={saveOpsAssistantPolicy}>Save Policy</button>
+      </div>
+      {opsAssistantsState?.policy ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button
+            style={chip}
+            onClick={() =>
+              setOpsAssistantsState((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      policy: {
+                        ...prev.policy,
+                        requireFounderApprovalForCodeChanges: !prev.policy.requireFounderApprovalForCodeChanges,
+                      },
+                    }
+                  : prev
+              )
+            }
+          >
+            Founder approve code changes: {opsAssistantsState.policy.requireFounderApprovalForCodeChanges ? "on" : "off"}
+          </button>
+          <button
+            style={chip}
+            onClick={() =>
+              setOpsAssistantsState((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      policy: {
+                        ...prev.policy,
+                        allowDefensiveDeception: !prev.policy.allowDefensiveDeception,
+                      },
+                    }
+                  : prev
+              )
+            }
+          >
+            Defensive deception/honeypot: {opsAssistantsState.policy.allowDefensiveDeception ? "on" : "off"}
+          </button>
+          <button
+            style={chip}
+            onClick={() =>
+              setOpsAssistantsState((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      policy: {
+                        ...prev.policy,
+                        autoRunEnabled: !prev.policy.autoRunEnabled,
+                      },
+                    }
+                  : prev
+              )
+            }
+          >
+            Auto run: {opsAssistantsState.policy.autoRunEnabled ? "on" : "off"}
+          </button>
+          <input
+            value={String(opsAssistantsState.policy.autoRunIntervalMin || 60)}
+            onChange={(e) =>
+              setOpsAssistantsState((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      policy: {
+                        ...prev.policy,
+                        autoRunIntervalMin: Math.max(5, Number(e.target.value) || 60),
+                      },
+                    }
+                  : prev
+              )
+            }
+            placeholder="Auto-run min"
+            style={{ ...input, maxWidth: 140 }}
+          />
+        </div>
+      ) : null}
+
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        {(opsAssistantsState?.assistants || []).map((a) => (
+          <div key={a.id} style={log}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <strong>{a.name}</strong>
+              <span>{a.status} • {a.enabled ? "enabled" : "disabled"}</span>
+            </div>
+            <div style={muted}>{a.mission}</div>
+            <div style={muted}>Connected: {(a.connectedSystems || []).join(", ") || "-"}</div>
+            <div style={muted}>Last run: {a.lastRunAt ? new Date(a.lastRunAt).toLocaleString() : "never"}</div>
+            <div style={muted}>
+              Last auto-run: {a.lastRunAt ? new Date(a.lastRunAt).toLocaleString() : "never"}
+              {" • "}
+              Next ETA: {formatNextEta(a.lastRunAt, Number(opsAssistantsState?.policy?.autoRunIntervalMin || 60), Boolean(opsAssistantsState?.policy?.autoRunEnabled))}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+              <button style={chip} onClick={() => runOpsAssistant(a.id)}>Run</button>
+              <button style={chip} onClick={() => toggleOpsAssistant(a.id, !a.enabled)}>
+                {a.enabled ? "Disable" : "Enable"}
+              </button>
+              {a.lastResult ? (
+                <button style={chip} onClick={() => setBackendOutput(a.lastResult)}>Open Result</button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+        {(opsAssistantsState?.assistants || []).length === 0 ? (
+          <div style={muted}>No ops assistants loaded yet.</div>
+        ) : null}
+      </div>
+      <div style={{ ...log, marginTop: 8, maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap" }}>
+        {JSON.stringify((opsAssistantsState?.runLogs || []).slice(0, 8), null, 2)}
+      </div>
+    </Card>
+  ) : null;
+
+  const powerToolsHubCard = canAccessFounderAdminDevOps ? (
+    <Card title="Power Tools Hub (Founder/Admin/Developer)">
+      <div style={muted}>
+        Unified tooling for bug fixing, heavy task execution, large project shipping flows, and media generation.
+      </div>
+      <textarea
+        value={powerToolPrompt}
+        onChange={(e) => setPowerToolPrompt(e.target.value)}
+        placeholder="Describe the task goal..."
+        style={{ ...input, minHeight: 84, marginTop: 8 }}
+      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("bug_scan")}>Fix Bugs: Scan Placeholders</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("self_heal")}>Self-Heal Hardening Run</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("training_heavy")}>Heavy Task: Training Job</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("eval_batch")}>Run Full Eval Batch</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("red_team")}>Safety Red-Team</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("ship_pr")}>Ship: Auto PR Generate</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("gen_image")}>Create Image</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("gen_video")}>Create Video</button>
+        <button style={chip} disabled={powerToolBusy} onClick={() => runPowerTool("gen_music")}>Create Music Track</button>
+      </div>
+      <pre style={{ ...log, whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", marginTop: 8 }}>
+        {powerToolOutput ? JSON.stringify(powerToolOutput, null, 2) : "No power tool output yet."}
+      </pre>
+    </Card>
+  ) : null;
 
   const deviceProtectionCard = (
     <Card title="Device Protection & Workforce Security">
@@ -6926,6 +7763,7 @@ const Dashboard: React.FC = () => {
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/image/edit", { image_path: creatorImagePath, instructions: creatorPrompt || "enhance details" })}>Edit Image</button>
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/video", { prompt: creatorPrompt, duration: 8, resolution: "1080p", aspect_ratio: "16:9" })}>Generate Video</button>
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/script-video", { script: creatorScript || creatorPrompt, voice_style: "neutral", aspect_ratio: "16:9" })}>Script to Video</button>
+          <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/music", { prompt: creatorPrompt || creatorScript, style: "cinematic", duration: 20, bpm: 120, mood: "uplifting" })}>Generate Music</button>
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/thumbnail", { topic: creatorPrompt || "NeuroEdge", text: creatorPrompt })}>Create Thumbnail</button>
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/subtitles", { transcript: creatorScript || creatorPrompt })}>Generate Captions</button>
           <button style={chip} disabled={creatorBusy} onClick={() => submitCreatorJob("/creator/background-remove", { image_path: creatorImagePath })}>Remove Background</button>
@@ -7200,6 +8038,34 @@ const Dashboard: React.FC = () => {
           {JSON.stringify(reliabilityProgram.canary.lastRun, null, 2)}
         </pre>
       )}
+
+      <div style={{ marginTop: 10, fontWeight: 700 }}>Built-in Load Test + SLO Auto-Tune</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={loadTestTarget} onChange={(e) => setLoadTestTarget(e.target.value as any)} style={input}>
+          <option value="status">target: status</option>
+          <option value="concurrency">target: concurrency</option>
+          <option value="metrics">target: metrics</option>
+        </select>
+        <input value={loadTestDurationSec} onChange={(e) => setLoadTestDurationSec(e.target.value)} placeholder="Duration sec" style={{ ...input, width: 140 }} />
+        <input value={loadTestConcurrency} onChange={(e) => setLoadTestConcurrency(e.target.value)} placeholder="Concurrency" style={{ ...input, width: 140 }} />
+        <input value={loadTestTimeoutMs} onChange={(e) => setLoadTestTimeoutMs(e.target.value)} placeholder="Timeout ms" style={{ ...input, width: 140 }} />
+        <button style={primary} onClick={runReliabilityLoadTest}>Run Load Test</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <input value={autotuneLookbackHours} onChange={(e) => setAutotuneLookbackHours(e.target.value)} placeholder="Lookback hours" style={{ ...input, width: 160 }} />
+        <button style={chip} onClick={recommendAutoTune}>Recommend Auto-Tune</button>
+        <button style={primary} onClick={applyAutoTuneRecommendation}>Apply Recommended Limits</button>
+      </div>
+      {reliabilityProgram?.loadTesting?.lastRun ? (
+        <pre style={{ ...log, maxHeight: 180, overflow: "auto", marginTop: 8 }}>
+          {JSON.stringify(reliabilityProgram.loadTesting.lastRun, null, 2)}
+        </pre>
+      ) : null}
+      {autotuneRecommendation ? (
+        <pre style={{ ...log, maxHeight: 200, overflow: "auto", marginTop: 8 }}>
+          {JSON.stringify(autotuneRecommendation, null, 2)}
+        </pre>
+      ) : null}
 
       <div style={{ marginTop: 10, fontWeight: 700 }}>Status Page + Incident Queue</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -8392,6 +9258,10 @@ const Dashboard: React.FC = () => {
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
+      {dashboardResourceAssistantCard}
+      {capabilityStatusCard}
+      {opsAssistantsCard}
+      {powerToolsHubCard}
       {deviceProtectionCard}
       {aegisShieldCard}
       {creatorEngineCard}
@@ -9936,6 +10806,10 @@ const Dashboard: React.FC = () => {
       {trainingStudioCard}
       {domainRegistryCard}
       {accessControlCard}
+      {dashboardResourceAssistantCard}
+      {capabilityStatusCard}
+      {opsAssistantsCard}
+      {powerToolsHubCard}
       {deviceProtectionCard}
       {aegisShieldCard}
       {creatorEngineCard}
@@ -10129,6 +11003,10 @@ const Dashboard: React.FC = () => {
   const developerView = (
     <div style={grid}>
       {voiceOpsCopilotCard}
+      {capabilityStatusCard}
+      {opsAssistantsCard}
+      {powerToolsHubCard}
+      {reliabilityOpsCard}
       {creatorEngineCard}
       {cortexCoreCard}
       <Card title="API Keys">
@@ -10686,6 +11564,8 @@ const Dashboard: React.FC = () => {
   );
 
   return (
+    <DashboardBlockVisibilityContext.Provider value={isDashboardCardVisible}>
+    <DashboardBlockUsageContext.Provider value={reportDashboardBlockUsage}>
     <div style={page}>
       <div style={hero}>
         <h2 style={{ margin: 0 }}>NeuroEdge Sovereign Command Center</h2>
@@ -10794,13 +11674,37 @@ const Dashboard: React.FC = () => {
         )}
       </div>
     </div>
+    </DashboardBlockUsageContext.Provider>
+    </DashboardBlockVisibilityContext.Provider>
   );
 };
 
 const Card: React.FC<{ title: string; children: React.ReactNode; wide?: boolean }> = ({ title, children, wide = false }) => {
+  const canShow = React.useContext(DashboardBlockVisibilityContext);
+  const reportUsage = React.useContext(DashboardBlockUsageContext);
+  if (!canShow(title)) return null;
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [closed, setClosed] = useState(false);
+  const mountedAtRef = useRef<number>(Date.now());
+  const clickCountRef = useRef<number>(0);
+  const lastClickedAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+    clickCountRef.current = 0;
+    lastClickedAtRef.current = 0;
+    return () => {
+      const now = Date.now();
+      reportUsage(title, {
+        opens: 1,
+        clicks: clickCountRef.current,
+        openMs: Math.max(0, now - mountedAtRef.current),
+        lastSeenAt: now,
+        lastClickedAt: lastClickedAtRef.current,
+      });
+    };
+  }, [reportUsage, title]);
 
   if (closed) {
     return (
@@ -10811,7 +11715,13 @@ const Card: React.FC<{ title: string; children: React.ReactNode; wide?: boolean 
   }
 
   return (
-    <div style={maximized ? { ...card, ...cardMaximized } : { ...card, ...(wide ? cardWide : null) }}>
+    <div
+      style={maximized ? { ...card, ...cardMaximized } : { ...card, ...(wide ? cardWide : null) }}
+      onClickCapture={() => {
+        clickCountRef.current += 1;
+        lastClickedAtRef.current = Date.now();
+      }}
+    >
       <div style={cardHeader}>
         <h3 style={{ margin: 0 }}>{title}</h3>
         <div style={{ display: "flex", gap: 6 }}>
@@ -10854,6 +11764,18 @@ function maskKey(key: string) {
   if (!key) return "not set";
   if (key.length < 8) return "****";
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+function formatNextEta(lastRunAt?: number, intervalMin = 60, autoRunEnabled = false) {
+  if (!autoRunEnabled) return "auto-run disabled";
+  if (!lastRunAt) return "due now";
+  const nextAt = Number(lastRunAt) + Math.max(5, Number(intervalMin || 60)) * 60_000;
+  const delta = nextAt - Date.now();
+  if (delta <= 0) return "due now";
+  const mins = Math.ceil(delta / 60_000);
+  if (mins < 60) return `in ${mins} min`;
+  const hours = Math.ceil(mins / 60);
+  return `in ${hours} h`;
 }
 
 const page: React.CSSProperties = {

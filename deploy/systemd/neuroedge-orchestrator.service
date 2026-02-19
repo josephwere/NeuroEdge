@@ -1,0 +1,16 @@
+[Unit]
+Description=NeuroEdge Orchestrator
+After=network-online.target neuroedge-kernel.service neuroedge-ml.service
+Wants=network-online.target neuroedge-kernel.service neuroedge-ml.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Downloads/NeuroEdge-main/orchestrator
+ExecStart=/usr/bin/env bash -lc 'set -a; [[ -f .env ]] && source .env; set +a; exec pnpm run dev'
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

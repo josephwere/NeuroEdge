@@ -17,6 +17,7 @@ from .subtitle_generator import generate_subtitles
 from .background_remover import remove_background
 from .style_transfer import apply_style_transfer
 from .creator_analytics import analyze_script, score_thumbnail, predict_engagement
+from .music_generator import generate_music
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 worker = RenderWorker()
@@ -62,6 +63,13 @@ class SubtitleRequest(BaseModel):
 
 class BackgroundRemoveRequest(BaseModel):
     image_path: str
+
+class MusicRequest(BaseModel):
+    prompt: str
+    style: str = "cinematic"
+    duration: int = 20
+    bpm: int = 120
+    mood: str = "uplifting"
 
 
 def _guard_text(text: str) -> None:
@@ -150,6 +158,23 @@ def creator_background_remove(req: BackgroundRemoveRequest) -> Dict[str, Any]:
     return {"ok": True, "job_id": job["id"], "status": job["status"]}
 
 
+@router.post("/music")
+def creator_music(req: MusicRequest) -> Dict[str, Any]:
+    _guard_text(req.prompt)
+    job = worker.enqueue(
+        "music_generate",
+        req.model_dump(),
+        lambda p: generate_music(
+            prompt=str(p.get("prompt", "")),
+            style=str(p.get("style", "cinematic")),
+            duration=int(p.get("duration", 20)),
+            bpm=int(p.get("bpm", 120)),
+            mood=str(p.get("mood", "uplifting")),
+        ),
+    )
+    return {"ok": True, "job_id": job["id"], "status": job["status"]}
+
+
 @router.post("/video/edit")
 def creator_video_edit(payload: Dict[str, Any]) -> Dict[str, Any]:
     source = str((payload or {}).get("video_path", ""))
@@ -197,4 +222,3 @@ def creator_download(path: str) -> FileResponse:
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(target, filename=os.path.basename(target))
-

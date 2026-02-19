@@ -3,6 +3,7 @@ import { appendEvent } from "@storage/hybrid_db";
 
 const inflight = new Map<string, number>();
 const peakInflight = new Map<string, number>();
+const inflightLimitOverrides = new Map<string, number>();
 
 function inc(key: string) {
   const next = (inflight.get(key) || 0) + 1;
@@ -18,15 +19,16 @@ function dec(key: string) {
 
 export function createInflightGuard(key: string, maxInflight: number) {
   return (req: Request, res: Response, next: NextFunction) => {
+    const effectiveMax = Math.max(1, Number(inflightLimitOverrides.get(key) || maxInflight));
     const current = inflight.get(key) || 0;
-    if (current >= maxInflight) {
+    if (current >= effectiveMax) {
       appendEvent({
         type: "sre.load_shed",
         timestamp: Date.now(),
         payload: {
           key,
           currentInflight: current,
-          maxInflight,
+          maxInflight: effectiveMax,
           path: req.path,
           method: req.method,
         },
@@ -35,7 +37,7 @@ export function createInflightGuard(key: string, maxInflight: number) {
         error: "Service overloaded",
         detail: `Too many concurrent ${key} requests`,
         currentInflight: current,
-        maxInflight,
+        maxInflight: effectiveMax,
       });
     }
     inc(key);
@@ -52,5 +54,19 @@ export function getInflightSnapshot() {
     key,
     inflight: inflight.get(key) || 0,
     peakInflight: peakInflight.get(key) || 0,
+    limitOverride: inflightLimitOverrides.get(key) || null,
   }));
+}
+
+export function setInflightLimitOverride(key: string, limit?: number | null) {
+  if (!key) return;
+  if (limit === null || limit === undefined || !Number.isFinite(Number(limit)) || Number(limit) <= 0) {
+    inflightLimitOverrides.delete(key);
+    return;
+  }
+  inflightLimitOverrides.set(key, Math.max(1, Math.floor(Number(limit))));
+}
+
+export function getInflightLimitOverrides() {
+  return Array.from(inflightLimitOverrides.entries()).map(([key, limit]) => ({ key, limit }));
 }

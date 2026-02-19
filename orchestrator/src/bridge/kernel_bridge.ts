@@ -8,6 +8,8 @@ export class KernelBridge {
   private eventBus: EventBus;
   private logger: Logger;
   private connected = false;
+  private consecutiveFailures = 0;
+  private reconnecting = false;
   private authHeaders: Record<string, string>;
 
   constructor(baseUrl: string, eventBus: EventBus, logger: Logger) {
@@ -28,10 +30,12 @@ export class KernelBridge {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const res = await axios.get(`${this.baseUrl}/health`, { timeout: 2000 });
+        const timeoutMs = Math.max(1500, Number(process.env.KERNEL_HEALTH_TIMEOUT_MS || 5000));
+        const res = await axios.get(`${this.baseUrl}/health`, { timeout: timeoutMs });
 
         if (res.status === 200) {
           this.connected = true;
+          this.consecutiveFailures = 0;
           this.logger.info("KERNEL_BRIDGE", "✅ Connected to kernel");
 
           this.attachEventListeners();
@@ -84,13 +88,19 @@ export class KernelBridge {
     }
 
     try {
-      await axios.post(`${this.baseUrl}/events`, payload, { headers: this.authHeaders });
+      const timeoutMs = Math.max(1500, Number(process.env.KERNEL_EVENTS_TIMEOUT_MS || 8000));
+      await axios.post(`${this.baseUrl}/events`, payload, { headers: this.authHeaders, timeout: timeoutMs });
+      this.consecutiveFailures = 0;
     } catch (err: any) {
       this.logger.warn(
         "KERNEL_BRIDGE",
         `Failed to send event to kernel: ${err.message}`
       );
-      this.connected = false; // mark disconnected
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= Math.max(2, Number(process.env.KERNEL_FAILURE_THRESHOLD || 3))) {
+        this.connected = false; // mark disconnected only after threshold
+        this.startReconnectLoop(Math.max(1500, Number(process.env.KERNEL_RECONNECT_MS || 3000)));
+      }
     }
   }
 
@@ -98,13 +108,18 @@ export class KernelBridge {
    * Background reconnect loop — tries every delayMs until kernel responds
    */
   private startReconnectLoop(delayMs: number) {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
     const loop = async () => {
       if (this.connected) return;
 
       try {
-        const res = await axios.get(`${this.baseUrl}/health`, { timeout: 2000 });
+        const timeoutMs = Math.max(1500, Number(process.env.KERNEL_HEALTH_TIMEOUT_MS || 5000));
+        const res = await axios.get(`${this.baseUrl}/health`, { timeout: timeoutMs });
         if (res.status === 200) {
           this.connected = true;
+          this.consecutiveFailures = 0;
+          this.reconnecting = false;
           this.logger.info("KERNEL_BRIDGE", "✅ Kernel is back online");
         }
       } catch {

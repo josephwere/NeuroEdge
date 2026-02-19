@@ -55,6 +55,7 @@ interface FloatingChatProps {
   onPositionChange?: (pos: { x: number; y: number }) => void;
   onClose?: () => void;
   embedded?: boolean;
+  onPopout?: () => void;
 }
 
 interface ActiveAssistantProfile {
@@ -82,6 +83,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
   onPositionChange,
   onClose,
   embedded = false,
+  onPopout,
 }) => {
   const { addMessage: addHistoryMessage } = useChatHistory();
   const [messages, setMessages] = useState<LogLine[]>([]);
@@ -489,6 +491,17 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
     await sendText("/summarize-page");
   };
 
+  const dockToRightEdge = () => {
+    const next = {
+      x: Math.max(12, Math.round(window.innerWidth - 470)),
+      y: Math.max(70, Math.round(window.innerHeight / 2 - 260)),
+    };
+    setPosition(next);
+    onPositionChange?.(next);
+    setMaximized(false);
+    setMinimized(false);
+  };
+
   const startBrainstormChat = () => {
     if (messages.length > 0) {
       window.dispatchEvent(new CustomEvent("neuroedge:newChat"));
@@ -813,58 +826,49 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
         overflow: "hidden",
       }}
     >
-      <div className="header" style={{ padding: "10px", cursor: maximized || embedded ? "default" : "move", background: `rgba(15, 23, 42, ${Math.min(1, (branding.floatingOverlayOpacity || 0.92) + 0.05)})`, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(148, 163, 184, 0.2)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-          <img src={branding.floatingChatIconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }} />
-          <strong>{branding.productName || "NeuroEdge"} Floating Chat</strong>
-          {activeAssistant?.name && (
-            <span
-              style={{
-                marginLeft: 8,
-                padding: "0.12rem 0.45rem",
-                borderRadius: 999,
-                border: "1px solid rgba(125,211,252,0.35)",
-                color: "#bae6fd",
-                fontSize: "0.68rem",
-              }}
-            >
-              {(activeAssistant.avatarEmoji || "🤖") + " "}
-              {activeAssistant.name}
-            </span>
-          )}
-          {!embedded && (
-            <>
-              <button
-                title="New Chat"
-                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:newChat"))}
-                style={miniActionStyle}
+      <div
+        className="header"
+        style={{
+          padding: "10px",
+          cursor: maximized || embedded ? "default" : "move",
+          background: `rgba(15, 23, 42, ${Math.min(1, (branding.floatingOverlayOpacity || 0.92) + 0.05)})`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", minWidth: 0, overflow: "hidden" }}>
+            <img src={branding.floatingChatIconUrl || "/icon.png"} alt={branding.productName || "NeuroEdge"} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
+            <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {branding.productName || "NeuroEdge"} Floating Chat
+            </strong>
+            {activeAssistant?.name && (
+              <span
+                style={{
+                  marginLeft: 4,
+                  padding: "0.12rem 0.45rem",
+                  borderRadius: 999,
+                  border: "1px solid rgba(125,211,252,0.35)",
+                  color: "#bae6fd",
+                  fontSize: "0.68rem",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
               >
-                New Chat
-              </button>
-              <button
-                title="History"
-                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "history" }))}
-                style={miniActionStyle}
-              >
-                History
-              </button>
-              <button
-                title="Diagnostics"
-                onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "dashboard" }))}
-                style={miniActionStyle}
-              >
-                Diagnostics
-              </button>
-            </>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                {(activeAssistant.avatarEmoji || "🤖") + " "}
+                {activeAssistant.name}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "0.35rem", alignItems: "center", flexShrink: 0 }}>
           {!embedded && (
             <>
               <button
                 title="Minimize"
                 onClick={() => setMinimized((v) => !v)}
-                style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid rgba(148, 163, 184, 0.3)", cursor: "pointer", background: "rgba(15, 23, 42, 0.8)", color: "#e2e8f0" }}
+                style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid rgba(148, 163, 184, 0.35)", cursor: "pointer", background: "rgba(15, 23, 42, 0.9)", color: "#e2e8f0", fontSize: 14, fontWeight: 700 }}
               >
                 {minimized ? "▢" : "—"}
               </button>
@@ -874,7 +878,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
                   setMinimized(false);
                   setMaximized((v) => !v);
                 }}
-                style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid rgba(148, 163, 184, 0.3)", cursor: "pointer", background: "rgba(15, 23, 42, 0.8)", color: "#e2e8f0" }}
+                style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid rgba(148, 163, 184, 0.35)", cursor: "pointer", background: "rgba(15, 23, 42, 0.9)", color: "#e2e8f0", fontSize: 14, fontWeight: 700 }}
               >
                 {maximized ? "❐" : "□"}
               </button>
@@ -883,11 +887,52 @@ const FloatingChat: React.FC<FloatingChatProps> = ({
           <button
             title="Close"
             onClick={() => onClose?.()}
-            style={{ width: 24, height: 24, borderRadius: 6, border: "none", cursor: "pointer", background: "#ef4444", color: "#fff" }}
+            style={{ width: 28, height: 28, borderRadius: 7, border: "none", cursor: "pointer", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 700 }}
           >
             ✕
           </button>
+          </div>
         </div>
+
+        {!embedded && (
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", whiteSpace: "nowrap", paddingBottom: 2 }}>
+            <button
+              title="Dock to right edge"
+              onClick={dockToRightEdge}
+              style={{ ...miniActionStyle, fontWeight: 700, flexShrink: 0 }}
+            >
+              Dock
+            </button>
+            <button
+              title="Pop out to browser side window"
+              onClick={() => onPopout?.()}
+              style={{ ...miniActionStyle, fontWeight: 700, flexShrink: 0 }}
+            >
+              Popout
+            </button>
+            <button
+              title="New Chat"
+              onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:newChat"))}
+              style={{ ...miniActionStyle, flexShrink: 0 }}
+            >
+              New Chat
+            </button>
+            <button
+              title="History"
+              onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "history" }))}
+              style={{ ...miniActionStyle, flexShrink: 0 }}
+            >
+              History
+            </button>
+            <button
+              title="Diagnostics"
+              onClick={() => window.dispatchEvent(new CustomEvent("neuroedge:navigate", { detail: "dashboard" }))}
+              style={{ ...miniActionStyle, flexShrink: 0 }}
+            >
+              Diagnostics
+            </button>
+          </div>
+        )}
       </div>
 
       {(!minimized || embedded) && (

@@ -1,17 +1,31 @@
-//kernel/api/middleware.go
+// kernel/api/middleware.go
 package handlers
 
 import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 var reqCounter uint64
+var (
+	concurrencyOnce   sync.Once
+	concurrencyTokens chan struct{}
+	concurrencyLimit  int64
+	currentInflight   int64
+)
+
+type ConcurrencySnapshot struct {
+	Current int64 `json:"current"`
+	Limit   int64 `json:"limit"`
+}
 
 func withSecurityHeaders(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -57,5 +71,39 @@ func withPanicRecovery(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}()
 		next(w, r)
+	}
+}
+
+func withConcurrencyLimit(next http.HandlerFunc) http.HandlerFunc {
+	concurrencyOnce.Do(func() {
+		limit := 200
+		if raw := strings.TrimSpace(os.Getenv("NEUROEDGE_MAX_INFLIGHT")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		concurrencyTokens = make(chan struct{}, limit)
+		atomic.StoreInt64(&concurrencyLimit, int64(limit))
+	})
+	return func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case concurrencyTokens <- struct{}{}:
+			atomic.AddInt64(&currentInflight, 1)
+			defer func() {
+				<-concurrencyTokens
+				atomic.AddInt64(&currentInflight, -1)
+			}()
+			next(w, r)
+		default:
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "service overloaded", http.StatusServiceUnavailable)
+		}
+	}
+}
+
+func getConcurrencySnapshot() ConcurrencySnapshot {
+	return ConcurrencySnapshot{
+		Current: atomic.LoadInt64(&currentInflight),
+		Limit:   atomic.LoadInt64(&concurrencyLimit),
 	}
 }

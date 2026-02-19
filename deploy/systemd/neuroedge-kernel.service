@@ -1,0 +1,16 @@
+[Unit]
+Description=NeuroEdge Kernel API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Downloads/NeuroEdge-main/kernel
+ExecStart=/usr/bin/env bash -lc 'set -a; [[ -f .env ]] && source .env; set +a; exec go run ./cmd/api'
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

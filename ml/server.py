@@ -8,8 +8,9 @@ import base64
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sklearn.linear_model import SGDClassifier
 import numpy as np
@@ -100,6 +101,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+ML_MAX_INFLIGHT = max(8, int(os.getenv("ML_MAX_INFLIGHT", "200")))
+ML_CREATOR_MAX_INFLIGHT = max(2, int(os.getenv("ML_CREATOR_MAX_INFLIGHT", "48")))
+ML_INTELLIGENCE_MAX_INFLIGHT = max(2, int(os.getenv("ML_INTELLIGENCE_MAX_INFLIGHT", "96")))
+ML_RAG_MAX_INFLIGHT = max(2, int(os.getenv("ML_RAG_MAX_INFLIGHT", "48")))
+
+_ml_inflight_total = 0
+_ml_inflight_groups: Dict[str, int] = {"creator": 0, "intelligence": 0, "rag": 0, "other": 0}
+_ml_inflight_lock = threading.Lock()
+
+
+def _ml_group_for_path(path: str) -> str:
+    p = (path or "").lower()
+    if p.startswith("/creator"):
+        return "creator"
+    if p.startswith("/intelligence"):
+        return "intelligence"
+    if p.startswith("/rag"):
+        return "rag"
+    return "other"
+
+
+@app.middleware("http")
+async def overload_guard(request: Request, call_next):
+    global _ml_inflight_total
+    group = _ml_group_for_path(request.url.path)
+    group_cap = {
+        "creator": ML_CREATOR_MAX_INFLIGHT,
+        "intelligence": ML_INTELLIGENCE_MAX_INFLIGHT,
+        "rag": ML_RAG_MAX_INFLIGHT,
+    }.get(group, ML_MAX_INFLIGHT)
+
+    with _ml_inflight_lock:
+        group_now = int(_ml_inflight_groups.get(group, 0))
+        if _ml_inflight_total >= ML_MAX_INFLIGHT or group_now >= group_cap:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service overloaded",
+                    "detail": f"Too many concurrent {group} requests",
+                    "maxInflight": ML_MAX_INFLIGHT,
+                    "groupMaxInflight": group_cap,
+                    "currentInflight": _ml_inflight_total,
+                    "groupCurrentInflight": group_now,
+                },
+            )
+        _ml_inflight_total += 1
+        _ml_inflight_groups[group] = group_now + 1
+
+    try:
+        return await call_next(request)
+    finally:
+        with _ml_inflight_lock:
+            _ml_inflight_total = max(0, _ml_inflight_total - 1)
+            _ml_inflight_groups[group] = max(0, int(_ml_inflight_groups.get(group, 0)) - 1)
+
 app.include_router(creator_router)
 app.include_router(intelligence_router)
 app.include_router(rag_router)
@@ -428,22 +485,39 @@ def _fallback_action(text: str) -> str:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    with _ml_inflight_lock:
+        inflight_total = int(_ml_inflight_total)
+        inflight_groups = dict(_ml_inflight_groups)
     return {
         "status": "ok",
         "service": "ml",
         "mode": os.getenv("NEUROEDGE_MODE", "sovereign"),
+        "inflight": {
+            "total": inflight_total,
+            "max": ML_MAX_INFLIGHT,
+            "groups": inflight_groups,
+            "groupMax": {
+                "creator": ML_CREATOR_MAX_INFLIGHT,
+                "intelligence": ML_INTELLIGENCE_MAX_INFLIGHT,
+                "rag": ML_RAG_MAX_INFLIGHT,
+            },
+        },
     }
 
 
 @app.get("/ready")
 @app.get("/readyz")
 def ready() -> Dict[str, Any]:
+    with _ml_inflight_lock:
+        inflight_total = int(_ml_inflight_total)
     return {
         "status": "ready",
         "service": "ml",
         "model_loaded": ml_agent is not None,
         "mode": os.getenv("NEUROEDGE_MODE", "sovereign"),
         "fed_version": _global_version,
+        "inflightTotal": inflight_total,
+        "inflightMax": ML_MAX_INFLIGHT,
     }
 
 
@@ -1043,4 +1117,11 @@ if __name__ == "__main__":
 
     host = os.getenv("ML_HOST", "0.0.0.0")
     port = int(os.getenv("ML_PORT", "8090"))
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        timeout_keep_alive=int(os.getenv("ML_KEEPALIVE_TIMEOUT_SEC", "15")),
+        backlog=int(os.getenv("ML_BACKLOG", "2048")),
+        limit_concurrency=int(os.getenv("ML_LIMIT_CONCURRENCY", "800")),
+    )

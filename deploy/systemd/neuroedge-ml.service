@@ -1,0 +1,16 @@
+[Unit]
+Description=NeuroEdge ML Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Downloads/NeuroEdge-main/ml
+ExecStart=/usr/bin/env bash -lc '[[ -f .venv/bin/activate ]] && source .venv/bin/activate; set -a; [[ -f .env ]] && source .env; set +a; exec python server.py'
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

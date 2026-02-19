@@ -14,6 +14,7 @@ import MyChatsPanel from "@/components/MyChatsPanel";
 import ProjectsPanel from "@/components/ProjectsPanel";
 import FounderAssistant from "@/components/FounderAssistant"; // Founder voice & alerts
 import TutorialGuide from "@/components/TutorialGuide";
+import FloatingChat from "@/components/FloatingChat";
 import Login from "@/pages/Login";
 import ProfileSettings from "@/components/ProfileSettings";
 
@@ -173,6 +174,13 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showLoginPage, setShowLoginPage] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const floatingOnly = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get("floating") === "1";
+    } catch {
+      return false;
+    }
+  })();
 
   const fallbackViewsForUser = React.useCallback(() => {
     const role = String(user?.role || "").toLowerCase();
@@ -323,6 +331,14 @@ const HomePage: React.FC<Props> = ({ orchestrator }) => {
       return;
     }
   };
+
+  if (floatingOnly) {
+    return (
+      <div style={{ height: "100vh", width: "100%", background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)" }}>
+        <FloatingChat orchestrator={orchestrator} embedded onClose={() => window.close()} />
+      </div>
+    );
+  }
 
   return (
     <>

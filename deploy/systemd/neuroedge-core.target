@@ -1,0 +1,4 @@
+[Unit]
+Description=NeuroEdge Core Services Target
+Wants=neuroedge-kernel.service neuroedge-ml.service neuroedge-orchestrator.service
+After=neuroedge-kernel.service neuroedge-ml.service neuroedge-orchestrator.service
